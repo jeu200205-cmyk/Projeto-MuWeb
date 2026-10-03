@@ -1,0 +1,58 @@
+name: Import cleaned source
+
+on:
+  push:
+    paths:
+      - '.source-upload/READY'
+
+permissions:
+  contents: write
+
+jobs:
+  import-source:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Rebuild cleaned source package
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat .source-upload/chunk*.txt > /tmp/projeto-muweb.b64
+          base64 --decode /tmp/projeto-muweb.b64 > /tmp/projeto-muweb.zip
+          rm -rf /tmp/projeto-muweb
+          mkdir -p /tmp/projeto-muweb
+          unzip -q /tmp/projeto-muweb.zip -d /tmp/projeto-muweb
+          test -f /tmp/projeto-muweb/Projeto-MuWeb-public/package.json
+          test -f /tmp/projeto-muweb/Projeto-MuWeb-public/README.md
+
+      - name: Replace repository working tree with public source
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s dotglob nullglob
+          for p in * .*; do
+            case "$p" in
+              .|..|.git|.github|.source-upload) continue ;;
+            esac
+            rm -rf -- "$p"
+          done
+          cp -a /tmp/projeto-muweb/Projeto-MuWeb-public/. .
+          rm -rf .source-upload
+
+      - name: Commit source import
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          if git diff --cached --quiet; then
+            echo "No changes to commit"
+            exit 0
+          fi
+          git commit -m "source: publish cleaned Main 5.2 web base"
+          git push
