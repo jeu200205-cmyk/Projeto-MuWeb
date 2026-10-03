@@ -55,3 +55,11 @@ Abra `http://127.0.0.1:8080/`.
 `runtime-config.js` define URLs que o browser usa. `network/.env.example` e `network/config.json` mostram a estrutura de configuração de rede.
 
 Nunca coloque senhas reais, tokens ou chaves privadas no Git.
+
+## Inicializacao no Windows com BAT
+
+Depois de extrair o projeto, execute `INICIAR_MUWEB.bat` com duplo clique. E necessario ter Node.js 18+ instalado. O BAT instala as dependencias, solicita o caminho da sua pasta Data e abre tres janelas: assets (9100), gateway (9091) e servidor Web (8080). Se houver uma pasta `Data` na raiz do projeto, ela sera usada automaticamente. Aguarde os logs de inicializacao e abra http://127.0.0.1:8080/.
+
+Para iniciar individualmente, use `INICIAR_WEB.bat`, `INICIAR_GATEWAY.bat` ou `INICIAR_ASSETS.bat`. Instale as dependencias com `npm install` antes dos iniciadores individuais. Para encerrar, pressione Ctrl+C nas janelas.
+
+Esses BATs iniciam os servicos do MuWeb. ConnectServer/GameServer e a Data nao acompanham esta source e precisam ser fornecidos e iniciados separadamente.
