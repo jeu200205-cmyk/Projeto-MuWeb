@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MU Online</title>
+    <!-- Favicon vazio para evitar requisição 404 desnecessária durante desenvolvimento. -->
+    <link rel="icon" href="data:,">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { overflow: hidden; background: #000; font-family: 'Segoe UI', Tahoma, sans-serif; height: 100vh; }
+        #game-canvas { position: fixed; inset: 0; width: 100vw; height: 100vh; z-index: 1; }
+        .status-bar { position: fixed; bottom: 15px; right: 15px; color: #888; font-size: 11px; font-family: Consolas, monospace; z-index: 1000; background: rgba(0,0,0,0.7); padding: 6px 10px; border-radius: 4px; }
+        #loading { position: fixed; inset: 0; background: #000; display: flex; flex-direction: column; align-items: center; justify-content: center; z-index: 9999; color: #ccc; font-family: Consolas, monospace; }
+        #loading .boot-status { font-size:12px; color:#aaa; margin-bottom:10px; }
+        #loading .bar { width: 400px; height: 8px; background: #1a1a24; border-radius: 4px; overflow: hidden; margin: 12px 0; box-shadow: inset 0 0 8px #000; }
+        #loading .bar-fill { height: 100%; width: 0%; background: #b8b8b8; transition: width 0.15s; border-radius: 4px; }
+        #loading .progress-text { font-size: 12px; color: #888; min-height: 18px; margin: 8px 0; font-family: Consolas, monospace; }
+        #loading .debug-console { width: 500px; max-height: 200px; overflow-y: auto; background: #000; border: 1px solid #333; border-radius: 4px; padding: 8px; font-family: Consolas, monospace; font-size: 10px; color: #8f8; text-align: left; margin-top: 12px; box-shadow: 0 0 20px rgba(0,0,0,0.8); }
+        #loading .debug-line { padding: 2px 0; border-bottom: 1px solid #111; white-space: pre-wrap; word-break: break-all; }
+        #loading .debug-line.error { color: #f66; }
+        #loading .debug-line.warn { color: #fa0; }
+        #loading .debug-line.info { color: #8f8; }
+        #loading .debug-line.asset { color: #8cf; }
+    </style>
+</head>
+<body>
+    <div id="loading">
+        <div class="boot-status">Inicializando cliente…</div>
+        <div class="bar"><div class="bar-fill" id="loadBar"></div></div>
+        <div class="progress-text" id="loadingText">Iniciando...</div>
+        <div class="debug-console" id="debugConsole"></div>
+    </div>
+    <div id="game-canvas"></div>
+    <div class="status-bar" id="statusText">Iniciando...</div>
+    <script src="./runtime-config.js"></script>
+    <script type="importmap">
+    {"imports":{"three":"./node_modules/three/build/three.module.js","three/addons/":"./node_modules/three/examples/jsm/"}}
+    </script>
+    <script>
+        const debugConsole = document.getElementById('debugConsole');
+        function logDebug(type, msg) {
+            const line = document.createElement('div');
+            line.className = 'debug-line ' + type;
+            const time = new Date().toLocaleTimeString();
+            line.textContent = `[${time}] [${type.toUpperCase()}] ${msg}`;
+            debugConsole.appendChild(line);
+            debugConsole.scrollTop = debugConsole.scrollHeight;
+            console.log(`[${type}] ${msg}`);
+        }
+        window.logDebug = logDebug;
+        window.addEventListener('error', (e) => logDebug('error', e.message || e.type));
+        window.addEventListener('unhandledrejection', (e) => logDebug('error', 'Promise rejection: ' + (e.reason?.message || e.reason)));
+        if (location.protocol === 'file:') {
+            document.getElementById('loadingText').innerHTML = '❌ Abriu via file:// — ES modules não funcionam.<br><br>Execute: <b>npm run serve</b> e abra <b>http://127.0.0.1:8080</b>';
+        }
+        function setProgress(percent, msg) {
+            const bar = document.getElementById('loadBar');
+            if (bar) bar.style.width = percent + '%';
+            if (msg) logDebug('info', msg);
+        }
+        function setStatus(msg) {
+            const s = document.getElementById('statusText');
+            if (s) s.textContent = msg;
+        }
+        window.setProgress = setProgress;
+        window.setStatus = setStatus;
+    </script>
+    <script type="module">
+        import { GameApp } from './core/GameApp.js';
+        window.onLoadingProgress = (percent, msg) => {
+            const bar = document.getElementById('loadBar');
+            if (bar && percent != null) bar.style.width = percent + '%';
+            if (msg) console.log('[ASSET] ' + msg);
+        };
+        const app = new GameApp('game-canvas');
+        window.muApp = app;
+        app.init().then(() => {
+            logDebug('info', 'GameApp iniciado com sucesso!');
+            const loading = document.getElementById('loading');
+            if (loading) { loading.style.opacity = '0'; setTimeout(() => loading.remove(), 500); }
+        }).catch(err => {
+            logDebug('error', err.message || String(err));
+            console.error(err);
+        });
+        window.GameApp = window.app = app;
+    </script>
+</body>
+</html>
