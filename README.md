@@ -1,31 +1,63 @@
-# MUWEB R90 — PC Main 5.2 → Web Engine
+# Projeto MuWeb
 
-Checkpoint documentado: **R90 FIX9**.
+Base experimental de uma engine/client Web inspirada no **MU Online Main 5.2**.
 
-MUWEB é uma engine/cliente Web para MU Online baseada em portabilidade source-driven da Main PC 5.2. O runtime usa Three.js r160, Data real do cliente, protocolo MU real através de gateway WebSocket e política de **sem placeholders inventados**.
+> **Estado do projeto:** muito inicial. Esta publicação deve ser tratada como uma base de estudo e continuação, **não como um cliente completo**. Pelo escopo de paridade com o Main 5.2, o projeto ainda está abaixo de 10% de conclusão.
 
-## Estado rápido
+O objetivo é permitir que outras pessoas estudem e continuem a adaptação de sistemas do cliente para JavaScript/WebGL, mantendo o Main 5.2 como referência de comportamento. A presença de um módulo na árvore não significa que aquele sistema esteja completo ou fiel ao PC.
 
-A base atual possui pipeline real de assets/BMD/terrain, login/character/world, viewport, inventário/equipamento/storage, MoveCustom, UI principal, vários materiais/owners Lua, skills/FX parciais e otimizações de batching/culling. Ainda existem gaps visuais e funcionais importantes; consulte [Portability Status](docs/ENGINE/11_PORTABILITY_STATUS.md) e [Remaining Ports](docs/ENGINE/12_REMAINING_PORTS.md).
+## O que está neste repositório
+
+- código da engine Web e do cliente;
+- parser e renderização de modelos BMD;
+- carregamento de terrain e objetos de mapa;
+- personagem, monstros, NPCs, viewport e movimento;
+- base de inventário/equipamento e renderização de itens;
+- base de skills, buffs e efeitos;
+- UI/HUD em desenvolvimento;
+- protocolo MU, gateway WebSocket↔TCP e roteamento de pacotes;
+- suporte a leitura de dados/configurações usados pelo cliente;
+- utilitários mínimos para servir a aplicação e os assets localmente.
+
+## O que NÃO está incluído
+
+- Data completa do cliente MU;
+- executáveis/servidores MU;
+- banco de dados pronto;
+- garantia de compatibilidade com qualquer Season/Data;
+- paridade completa com Main 5.2.
+
+Você precisa fornecer sua própria pasta `Data` compatível e seu próprio ambiente de servidor, se quiser testar conexão real.
+
+## Requisitos
+
+- Node.js 18+;
+- navegador com WebGL;
+- pasta `Data` do cliente compatível com o projeto;
+- opcionalmente, ConnectServer/GameServer local para testes de rede.
+
+## Executando a base
+
+```bash
+npm install
+node tools/asset-server.cjs "C:\caminho\para\Data" 9100
+npm run gateway
+npm run serve
+```
+
+Abra `http://127.0.0.1:8080/`.
+
+Por padrão, `runtime-config.js` aponta os assets para `http://127.0.0.1:9100/` e o gateway para `ws://127.0.0.1:9091`.
 
 ## Documentação
 
-Comece em **[docs/ENGINE/00_INDEX.md](docs/ENGINE/00_INDEX.md)**.
+- [Engine e fluxo principal](docs/ENGINE.md)
+- [Mapa dos sistemas](docs/SYSTEMS.md)
+- [Como executar e configurar](docs/RUNNING.md)
+- [Portabilidade Main 5.2 → Web](docs/PORTING.md)
+- [O que falta](docs/ROADMAP.md)
+- [Estrutura da source](docs/SOURCE_LAYOUT.md)
 
-## Validação do checkpoint preparado
+## Aviso de segurança
 
-- FIX9 focused gate: **12/12 PASS**
-- production syntax: **184/184 PASS**
-- production tree digest: `7ba01b6d9a6a95b3adc49189d001dfeff7c3c2dcbd2799c3b216affffdec4b92`
-
-## Política de fidelidade
-
-Source PC limpa, Data/Lua atual e wire real têm prioridade. Gaps permanecem explícitos/fail-closed até que exista owner comprovado.
-
-## Runtime local
-
-Use os launchers FIX9 fornecidos no pacote. O Data root e GameServer são externos ao repositório e não devem ser substituídos por assets fake para “fazer funcionar”.
-
-## Segurança/publicação
-
-Este repositório está sendo preparado a partir da FIX9. Antes do import completo do runtime, configurações locais e defaults de desenvolvimento são auditados para evitar publicar credenciais, logs ou Data proprietária.
+Os serviços de desenvolvimento devem permanecer em `127.0.0.1` até que autenticação, autorização, rate-limit e configuração de produção sejam revisados. Não publique gateway, banco ou serviços internos diretamente na Internet.
