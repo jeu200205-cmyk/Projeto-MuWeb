@@ -14,16 +14,18 @@ Este diretório é a documentação de engenharia consolidada da linha MU Online
 3. [Pipeline de render](03_RENDERING_PIPELINE.md)
 4. [Mapas, terrain e objetos](04_MAP_TERRAIN_OBJECTS.md)
 5. [Itens, inventário e equipamento](05_ITEMS_INVENTORY_EQUIPMENT.md)
-6. Rede e protocolo
-7. Skills e efeitos
-8. UI, input e social
-9. Data/Lua owners
-10. Performance
+6. [Rede e protocolo](06_NETWORK_PROTOCOL.md)
+7. [Skills e efeitos](07_SKILLS_EFFECTS.md)
+8. [UI, input e social](08_UI_INPUT_SOCIAL.md)
+9. [Data/Lua owners](09_DATA_LUA_OWNERS.md)
+10. [Performance](10_PERFORMANCE.md)
 11. [Matriz do que já foi portado](11_PORTABILITY_STATUS.md)
 12. [O que falta portar](12_REMAINING_PORTS.md)
 13. [Validação/testes](13_VALIDATION_AND_TESTS.md)
-14. [Cross-reference PC → Web](SOURCE_CROSS_REFERENCE.md)
-15. [Pré-check de segurança para GitHub](GITHUB_SECURITY_PRECHECK.md)
+14. [Fluxo GitHub/manutenção](14_GITHUB_MAINTENANCE.md)
+15. [Release checklist](15_RELEASE_CHECKLIST.md)
+16. [Cross-reference PC → Web](SOURCE_CROSS_REFERENCE.md)
+17. [Pré-check de segurança para GitHub](GITHUB_SECURITY_PRECHECK.md)
 
 ## Números do checkpoint documentado
 
