@@ -1,0 +1,46 @@
+{
+  "name": "mu-network-infrastructure",
+  "version": "1.0.0",
+  "description": "Infraestrutura de Rede Completa para MU Online - Gateway WebSocket↔TCP, Gerenciador de Servidores, Launcher",
+  "main": "index.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "node --watch index.js",
+    "status": "node index.js status",
+    "gateway": "node index.js gateway",
+    "servers": "node index.js servers",
+    "metrics": "node index.js metrics",
+    "config": "node index.js config",
+    "restart": "node index.js restart",
+    "test": "jest --coverage",
+    "lint": "eslint . --ext .js"
+  },
+  "keywords": [
+    "mu-online",
+    "websocket",
+    "tcp",
+    "gateway",
+    "game-server",
+    "mmorpg",
+    "network"
+  ],
+  "author": "MU Network Team",
+  "license": "MIT",
+  "dependencies": {
+    "ws": "^8.16.0",
+    "winston": "^3.11.0",
+    "prom-client": "^15.1.0"
+  },
+  "devDependencies": {
+    "jest": "^29.7.0",
+    "eslint": "^8.56.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "optionalDependencies": {
+    "bufferutil": "^4.0.8",
+    "utf-8-validate": "^6.0.3"
+  }
+}

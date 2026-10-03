@@ -1,0 +1,56 @@
+/**
+ * Config.js — Configuração central dos endpoints (B8).
+ * Prioridade: window.MUWEB_CONFIG > localStorage('muweb.config') > defaults.
+ * Permite apontar o web-port para servidores remotos (ex.: VPS) sem editar código:
+ *   <script>window.MUWEB_CONFIG = { GATEWAY_URL: 'wss://meuvps:9091', ASSETS_URL: 'https://meuvps:9100/' };</script>
+ */
+
+const DEFAULTS = {
+    // Gateway WebSocket↔TCP (gateway-server.cjs)
+    GATEWAY_URL: 'ws://localhost:9091',
+    // Servidor de assets do cliente (asset-server.cjs, pasta Data/)
+    ASSETS_URL: 'http://localhost:9100/',
+    // WS admin do gateway (status dos servidores MU)
+    GATEWAY_ADMIN_URL: 'ws://localhost:9090',
+    // Lane do GameServer: 'android' (55902, frames olc::net [u16 id][u32 size] sem cifra
+    // — caminho comprovado p/ web, tools/e2e-android-flow.cjs) | 'game' (55901 PC:
+    // exige ENCRYPT_STATE/C3 DES indisponível no browser).
+    GAME_LANE: 'android'
+};
+
+function readOverrides() {
+    const out = {};
+    try {
+        // 1) Inline no HTML (antes do módulo)
+        if (typeof window !== 'undefined' && window.MUWEB_CONFIG) {
+            Object.assign(out, window.MUWEB_CONFIG);
+        }
+        // 2) Persistido (usuário final muda sem editar código)
+        if (typeof localStorage !== 'undefined') {
+            const raw = localStorage.getItem('muweb.config');
+            if (raw) Object.assign(out, JSON.parse(raw));
+        }
+    } catch (e) { /* ambiente sem window/localStorage (testes) */ }
+    return out;
+}
+
+const resolved = Object.freeze({ ...DEFAULTS, ...readOverrides() });
+
+/** Config resolvido (somente leitura) */
+export const Config = resolved;
+
+/** Salva override persistido (localStorage) */
+export function saveConfig(partial) {
+    const merged = { ...readOverrides(), ...partial };
+    if (typeof localStorage !== 'undefined') {
+        localStorage.setItem('muweb.config', JSON.stringify(merged));
+    }
+    return merged; // requires reload p/ aplicar (documentado)
+}
+
+/** Reset p/ defaults (remove overrides) */
+export function resetConfig() {
+    if (typeof localStorage !== 'undefined') localStorage.removeItem('muweb.config');
+}
+
+export default Config;

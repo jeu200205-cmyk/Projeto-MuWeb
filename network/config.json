@@ -1,0 +1,227 @@
+{
+  "gateway": {
+    "host": "127.0.0.1",
+    "port": 9091,
+    "maxConnections": 10000,
+    "heartbeatInterval": 30000,
+    "connectionTimeout": 60000,
+    "packetLogEnabled": true,
+    "compressionEnabled": false
+  },
+  "connectServer": {
+    "host": "127.0.0.1",
+    "port": 44405,
+    "udpPort": 55557,
+    "maxIpConnections": 0,
+    "reconnectInterval": 5000,
+    "maxReconnectAttempts": 10,
+    "timeout": 10000,
+    "encryption": {
+      "enabled": true,
+      "key": "",
+      "version": "S6"
+    }
+  },
+  "gameServers": [
+    {
+      "id": 1,
+      "name": "GameServer-01",
+      "host": "127.0.0.1",
+      "port": 55901,
+      "maxUsers": 1000,
+      "currentUsers": 0,
+      "enabled": true,
+      "weight": 100,
+      "tags": [
+        "main",
+        "pvp",
+        "pve"
+      ]
+    }
+  ],
+  "joinServer": {
+    "host": "127.0.0.1",
+    "port": 55970,
+    "reconnectInterval": 5000,
+    "maxReconnectAttempts": 10,
+    "timeout": 10000,
+    "database": {
+      "odbc": "MuOnline",
+      "user": "sa",
+      "password": "",
+      "caseSensitive": false,
+      "md5Encryption": false
+    },
+    "encryption": {
+      "enabled": true,
+      "key": ""
+    }
+  },
+  "dataServer": {
+    "host": "127.0.0.1",
+    "port": 55960,
+    "reconnectInterval": 5000,
+    "maxReconnectAttempts": 10,
+    "timeout": 10000,
+    "database": {
+      "odbc": "MuOnline",
+      "user": "sa",
+      "password": "",
+      "maxCharacters": 5
+    },
+    "encryption": {
+      "enabled": true,
+      "key": ""
+    }
+  },
+  "serverList": [
+    {
+      "serverCode": 1,
+      "serverName": "MU Online",
+      "serverAddress": "127.0.0.1",
+      "serverPort": 55901,
+      "serverShow": 1,
+      "serverState": 1,
+      "maxUserCount": 1000,
+      "type": 204
+    }
+  ],
+  "database": {
+    "host": "127.0.0.1",
+    "port": 1433,
+    "name": "MuOnline",
+    "user": "sa",
+    "password": "",
+    "connectionLimit": 50,
+    "acquireTimeout": 30000,
+    "timeout": 30000,
+    "options": {
+      "encrypt": false,
+      "trustServerCertificate": true,
+      "enableArithAbort": true
+    }
+  },
+  "logging": {
+    "level": "info",
+    "directory": "./logs",
+    "maxFiles": 30,
+    "maxSize": "10m",
+    "format": "json",
+    "console": true,
+    "packetLog": true,
+    "packetLogDirectory": "./logs/packets"
+  },
+  "metrics": {
+    "enabled": true,
+    "port": 9092,
+    "path": "/metrics",
+    "prefix": "mu_gateway_"
+  },
+  "healthCheck": {
+    "enabled": true,
+    "interval": 10000,
+    "timeout": 5000,
+    "endpoints": [
+      {
+        "name": "connect",
+        "host": "127.0.0.1",
+        "port": 44405
+      },
+      {
+        "name": "join",
+        "host": "127.0.0.1",
+        "port": 55970
+      },
+      {
+        "name": "data",
+        "host": "127.0.0.1",
+        "port": 55960
+      }
+    ]
+  },
+  "security": {
+    "ipWhitelist": [
+      "127.0.0.1",
+      "::1"
+    ],
+    "ipBlacklist": [],
+    "maxConnectionsPerIp": 50,
+    "rateLimit": {
+      "windowMs": 60000,
+      "maxRequests": 1000
+    },
+    "antiDDoS": {
+      "enabled": true,
+      "maxPacketsPerSecond": 1000,
+      "banDuration": 300000
+    }
+  },
+  "processManager": {
+    "autoStart": true,
+    "autoRestart": true,
+    "maxRestarts": 5,
+    "restartDelay": 10000,
+    "workingDirectory": "C:\\MU\\Server",
+    "servers": {
+      "connectServer": {
+        "executable": "ConnectServer.exe",
+        "args": [],
+        "env": {}
+      },
+      "gameServer": {
+        "executable": "GameServer.exe",
+        "args": [],
+        "env": {}
+      },
+      "joinServer": {
+        "executable": "JoinServer.exe",
+        "args": [],
+        "env": {}
+      },
+      "dataServer": {
+        "executable": "DataServer.exe",
+        "args": [],
+        "env": {}
+      }
+    }
+  },
+  "protocol": {
+    "packetHeaders": {
+      "C1": 193,
+      "C2": 194
+    },
+    "commands": {
+      "SERVER_INFO_REQUEST": 244,
+      "SERVER_INFO_SUB_REQUEST": 3,
+      "SERVER_LIST_REQUEST": 244,
+      "SERVER_LIST_SUB_REQUEST": 6,
+      "SERVER_INIT": 0,
+      "JS_SERVER_INFO": 0,
+      "JS_CONNECT_ACCOUNT": 1,
+      "JS_DISCONNECT_ACCOUNT": 2,
+      "JS_MAP_SERVER_MOVE": 3,
+      "JS_MAP_SERVER_MOVE_AUTH": 4,
+      "JS_ACCOUNT_LEVEL": 5,
+      "JS_MAP_SERVER_MOVE_CANCEL": 16,
+      "JS_ACCOUNT_LEVEL_SAVE": 17,
+      "JS_SERVER_USER_INFO": 32,
+      "JS_EXTERNAL_DISCONNECT": 48,
+      "JS_SERVER_MESSAGE": 47,
+      "JS_REGISTER_ACCOUNT": 64,
+      "DS_CHARACTER_LIST": 1,
+      "DS_CHARACTER_CREATE": 2,
+      "DS_CHARACTER_DELETE": 3,
+      "DS_CHARACTER_INFO": 4,
+      "DS_WAREHOUSE": 5,
+      "DS_CREATE_ITEM": 7,
+      "DS_OPTION_DATA": 8,
+      "DS_PET_ITEM_INFO": 9,
+      "DS_CONNECT_CHARACTER": 112,
+      "DS_DISCONNECT_CHARACTER": 113,
+      "DS_GLOBAL_WHISPER": 114
+    },
+    "maxPacketSize": 8192,
+    "maxMainPacketSize": 2048,
+    "maxSidePacketSize": 8192
+  }
+}

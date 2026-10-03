@@ -38,14 +38,35 @@ Você precisa fornecer sua própria pasta `Data` compatível e seu próprio ambi
 
 ## Executando a base
 
+Instale as dependências:
+
 ```bash
 npm install
+```
+
+Em um terminal, publique sua pasta Data local:
+
+```bash
 node tools/asset-server.cjs "C:\caminho\para\Data" 9100
+```
+
+Em outro terminal, inicie o gateway MU:
+
+```bash
 npm run gateway
+```
+
+Em outro terminal, inicie o servidor Web:
+
+```bash
 npm run serve
 ```
 
-Abra `http://127.0.0.1:8080/`.
+Abra:
+
+```text
+http://127.0.0.1:8080/
+```
 
 Por padrão, `runtime-config.js` aponta os assets para `http://127.0.0.1:9100/` e o gateway para `ws://127.0.0.1:9091`.
 

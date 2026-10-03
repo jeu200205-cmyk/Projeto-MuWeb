@@ -1,0 +1,39 @@
+{
+  "name": "@mu-online/protocol",
+  "version": "1.0.0",
+  "description": "MU Online Season 6 (main 1.03.34) Protocol Implementation - Browser compatible ES Modules",
+  "type": "module",
+  "main": "./index.js",
+  "exports": {
+    ".": "./index.js",
+    "./MUCrypto.js": "./MUCrypto.js",
+    "./MUPacketManager.js": "./MUPacketManager.js",
+    "./MUOpCodes.js": "./MUOpCodes.js",
+    "./MUProtocol.js": "./MUProtocol.js",
+    "./test-protocol.js": "./test-protocol.js"
+  },
+  "scripts": {
+    "test": "node --experimental-vm-modules test-protocol.js",
+    "test:browser": "echo 'Open test.html in browser to run tests'"
+  },
+  "keywords": [
+    "mu-online",
+    "season6",
+    "protocol",
+    "packet",
+    "encryption",
+    "crc32",
+    "xor",
+    "mmorpg"
+  ],
+  "author": "MU Protocol Implementation",
+  "license": "MIT",
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "browserslist": [
+    "last 2 versions",
+    "not dead",
+    "not ie 11"
+  ]
+}

@@ -1,5 +1,5 @@
 // audio/SoundBoard.js — adapters para owners de som REAIS do cliente PC.
-// Missing samples are fail-closed. Nenhum beep/oscillator/procedural é
+// R16: missing sample is fail-closed. Nenhum beep/oscillator/procedural é
 // utilizado como substituto de produção para um wav ainda não portado.
 
 import { Sound } from './SoundManager.js';
@@ -28,6 +28,12 @@ export function stopHpLowLoop() {
 
 // PC WSclient.cpp ReceiveLevelUp: SOUND_LEVEL_UP -> pLevelUp.wav.
 export function playLevelUp() { return playIfLoaded('sfx-levelup'); }
+
+// Nenhum owner PC exato de "quest complete" foi provado nesta lane.
 export function playQuestComplete() { return null; }
+
+// Owner de morte depende da classe/sexo/estado. Não fabricar um stinger genérico.
 export function playDead() { return null; }
+
+// Pet possui owners/action collectors específicos; não fabricar woosh genérico.
 export function playPetAttack() { return null; }
