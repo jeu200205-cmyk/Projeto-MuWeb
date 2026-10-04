@@ -1,0 +1,191 @@
+derFlags.CHROME3) return 'chrome3';
+@@ -250,49 +366,58 @@ export function pcImplicitMaterialTextureKind(flags) {
+ }
+ 
+ export async function pcMaterialTexture(kind) {
+-  if (_specialTexturePromises.has(kind)) return _specialTexturePromises.get(kind);
++  const authority = RemoteAssets.baseUrl;
++  const key = `${authority}:${kind}`;
++  if (_specialTexturePromises.has(key)) return _specialTexturePromises.get(key);
+   const desc = materialTextureDescriptor(kind);
+   if (!desc) return null;
+   const p = MUAssets.loadModelTexture(desc[0], desc[1]).then(async (loaded) => {
+     const tex = loaded?.isTexture ? loaded : loaded?.createThreeTexture?.(THREE, { pcBmd: true });
+     if (tex?.userData?.muImageReadyPromise) await tex.userData.muImageReadyPromise;
+     if (tex?.isTexture && !Number.isInteger(tex.channel)) tex.channel = 0;
+-    if (!tex?.isTexture || (!tex.image && tex.userData?.muImageReady !== true)) return null;
+-    // ZzzOpenData: Chrome01 LINEAR/REPEAT, Shiny01 LINEAR/CLAMP,
++    if (authority !== RemoteAssets.baseUrl || !tex?.isTexture || tex.userData?.muImageReady === false ||
++        (!tex.image && tex.userData?.muImageReady !== true)) return null;
++    // ZzzOpenData: Chrome01/bab2 LINEAR/REPEAT, Shiny01/Spark03 LINEAR/CLAMP,
+     // Chrome02/06 NEAREST/CLAMP. Keep each owner's sampler independent.
+     const view = tex.clone();
+-    view.wrapS = view.wrapT = kind === 'chrome' ? THREE.RepeatWrapping : THREE.ClampToEdgeWrapping;
+-    view.minFilter = view.magFilter = kind === 'chrome' || kind === 'metal' ? THREE.LinearFilter : THREE.NearestFilter;
++    view.wrapS = view.wrapT = kind === 'chrome' || kind === 'chromePlus1' ? THREE.RepeatWrapping : THREE.ClampToEdgeWrapping;
++    view.minFilter = view.magFilter = ['chrome','chromePlus1','metal','sparkPlus1'].includes(kind) ? THREE.LinearFilter : THREE.NearestFilter;
+     view.generateMipmaps = false;
+     view.userData = { ...tex.userData, muSharedAsset: true };
+     view.needsUpdate = true;
+     return view;
+   }).catch(() => null);
+-  _specialTexturePromises.set(kind, p);
++  _specialTexturePromises.set(key, p);
+   p.then(tex => {
+-    if (!tex && _specialTexturePromises.get(kind) === p) _specialTexturePromises.delete(kind);
++    if (!tex && _specialTexturePromises.get(key) === p) _specialTexturePromises.delete(key);
+   });
+   return p;
+ }
+ 
+-export function pcStockMaterialPassPlan(type, rawLevel = 0, option1 = 0, extOption = 0, customColor = null) {
++export function pcStockMaterialPassPlan(type, rawLevel = 0, option1 = 0, extOption = 0, customColor = null, modelFamily = 'item', modelIndex = null) {
+   const passes = [];
+   // Main 5.2 ItemManager::GetItemColor gives LoadItens.lua precedence for
+   // custom models. An explicitly authored black color is meaningful: it
+   // suppresses the generic +level chrome ladder instead of becoming white.
+-  const hasCustomColor = Array.isArray(customColor) && customColor.length >= 3;
++  const hasCustomColor = modelFamily === 'item' && Array.isArray(customColor) && customColor.length >= 3;
+   const customVisible = hasCustomColor && customColor.some((v) => Number(v) > 0.0001);
+-  if (pcIsStandardEquipment(type) && (!hasCustomColor || customVisible)) {
+-    const level = pcRenderedItemLevel(type, rawLevel);
++  if ((modelFamily === 'event' || pcIsStandardEquipment(type)) && (!hasCustomColor || customVisible)) {
++    const level = pcRenderPartObjectLevel(type, rawLevel, modelFamily, modelIndex);
+     if (level >= 13) passes.push({ kind: 'chrome4', flags: RenderFlags.CHROME4 | RenderFlags.BRIGHT });
+     else if (level >= 11) passes.push({ kind: 'chrome2', flags: RenderFlags.CHROME2 | RenderFlags.BRIGHT });
+-    if (level >= 9) passes.push({ kind: 'metal', flags: RenderFlags.METAL | RenderFlags.BRIGHT });
+-    if (level >= 7) passes.push({ kind: 'chrome', flags: RenderFlags.CHROME | RenderFlags.BRIGHT });
++    if (level>=9 && level<=10) {
++      passes.push({kind:'chrome',flags:RenderFlags.CHROME|RenderFlags.BRIGHT});
++      passes.push({kind:'metal',flags:RenderFlags.METAL|RenderFlags.BRIGHT});
++    } else {
++      if(level>=9) passes.push({kind:'metal',flags:RenderFlags.METAL|RenderFlags.BRIGHT});
++      if(level>=7) passes.push({kind:'chrome',flags:RenderFlags.CHROME|RenderFlags.BRIGHT});
++    }
+   }
+   // Current client DisableExcellent.cpp wraps BOTH Excellent and Ancient/Set
+   // tails in the same veto. Registry is populated only from the real Lua owner;
+   // absent/unreadable owner therefore leaves stock Main 5.2 behavior unchanged.
+-  const visualTailDisabled = isExcellentDisabledForItemType(type);
++  // ARMORINVEN is a pre-MODEL_ITEM enum, not the equipped armor's Lua row.
++  const visualTailDisabled = modelFamily === 'item' && isExcellentDisabledForItemType(type);
+   const excellent = (Number(option1) & 0x3f) !== 0;
+   if (!visualTailDisabled && excellent) passes.push({ kind: 'excellent', flags: RenderFlags.TEXTURE | RenderFlags.BRIGHT });
+   else if (!visualTailDisabled && pcIsSetExtOption(extOption)) passes.push({ kind: 'chrome3', flags: RenderFlags.CHROME3 | RenderFlags.BRIGHT });
+@@ -319,81 +444,119 @@ function _setMeshVisible(renderer, filter, visible) {
+ 
+ /**
+  * ZzzObject.cpp::RenderPartObjectEffect fixed-function branches that are fully
+- * representable by the current Web renderer (mesh visibility/tint and solid
+- * TEXTURE/BRIGHT/CHROME/METAL passes). Bone sprites/joints are intentionally
+- * not approximated here; those remain EffectManager owners.
++ * representable by the current Web renderer (mesh visibility/tint, solid
++ * TEXTURE/BRIGHT/CHROME/METAL passes and source-mapped bone sprites).
+  */
+ export async function applyPcRenderPartObjectSolidPresentation(renderer, {
+-  type, rawLevel = 0, dynamic = true, meshFilter = null, phase = 'exclusive',
++  type, rawLevel = 0, modelFamily = 'item', modelIndex = null, dynamic = true, meshFilter = null, phase = 'exclusive',
+ } = {}) {
+   if (!renderer || !Number.isInteger(type)) return {handled:false,exclusive:false,added:0};
+   const group=Math.floor(type/512), index=type%512;
+-  const level=pcRenderPartObjectLevel(type, rawLevel);
++  const level=pcRenderPartObjectLevel(type, rawLevel, modelFamily, modelIndex);
++  const isEvent=modelFamily === 'event', event=Number(modelIndex);
+   const all=(m)=>typeof meshFilter !== 'function' || meshFilter(m);
+   const mi=(n)=>_meshIndexFilter(meshFilter,n);
++  const hasMeshes=(filter)=> (renderer.meshes||[]).some(filter);
+   let added=0;
+   const overlay=(flags,opt={})=>{
++    if (!hasMeshes(opt.meshFilter||all)) return null;
++    if (pcImplicitMaterialTextureKind(flags) && !opt.map?.isTexture) return null;
+     const o=renderer.createOverlayPass?.(flags,opt);
+     if(o) added++;
+     return o;
+   };
+-  const chrome=await pcMaterialTexture('chrome');
+-  const chrome2=await pcMaterialTexture('chrome2');
+-  const metal=await pcMaterialTexture('metal');
++  // This function used to request Chrome01, Chrome02 and Shiny01 for every
++  // item, including branches which never render a special material. Resolve
++  // only the owners selected by the exact PC branch and report missing pixels
++  // to the caller instead of silently publishing a partial graph/icon.
++  const required = new Set();
++  const requireTexture=(kind,filter=all)=>{if(hasMeshes(filter))required.add(kind)};
++  if (phase === 'exclusive') {
++    if(group===14&&index===27){
++      if(level===2||level===3)requireTexture('chrome',mi(1));
++      if(level===3)requireTexture('chrome',mi(2));
++    }
++    if(group===14&&index===63)requireTexture('chrome',mi(1));
++    if(group===14&&index===52)requireTexture('chrome',mi(0));
++    if(isEvent&&((event===14&&level===9)||(event===6&&level===13)))requireTexture('chrome');
++    if (isEvent && event===11) requireTexture('chromePlus1');
++    if (isEvent && event===5 && [14,15].includes((Number(rawLevel)>>3)&15)) {
++      requireTexture('chrome'); requireTexture('metal');
++    }
++    // Both Helper+15 passes use the explicit BITMAP_CHROME+1 owner in PC.
++    if (group===13 && index===15) requireTexture('chromePlus1');
++  } else if (phase === 'continuation') {
++    if(group===3&&index===9)requireTexture('chrome');
++    if(group===13&&index===17)requireTexture('chrome',mi(0));
++    if(isEvent&&(event===12||event===13))requireTexture('sparkPlus1');
++    if(modelFamily==='item'&&group===14&&[18,19,21].includes(index))requireTexture('sparkPlus1');
++  }
++  const loaded = new Map();
++  for (const kind of required) loaded.set(kind, await pcMaterialTexture(kind));
++  const chrome=loaded.get('chrome')||null;
++  const chromePlus1=loaded.get('chromePlus1')||null;
++  const metal=loaded.get('metal')||null;
++  const sparkPlus1=loaded.get('sparkPlus1')||null;
++  const pendingBitmapPaths=[...required].filter(kind=>!loaded.get(kind)).map(materialTexturePath).filter(Boolean);
++  const result=(handled,exclusive)=>({handled,exclusive,added,pendingBitmapPaths});
+ 
+   if (phase === 'exclusive') {
+     // MODEL_POTION+27: authored mesh-count by level plus chrome on the added gems.
+     if (group===14 && index===27) {
+       _setMeshVisible(renderer, all, false); _setMeshVisible(renderer, mi(0), true);
+-      if(level>=2) _setMeshVisible(renderer,mi(1),true);
+-      if(level>=3) _setMeshVisible(renderer,mi(2),true);
+-      if(level>=2) overlay(RenderFlags.CHROME|RenderFlags.BRIGHT,{map:chrome,color:new THREE.Color(.75,.65,.5),meshFilter:mi(1)});
+-      if(level>=3) overlay(RenderFlags.CHROME|RenderFlags.BRIGHT,{map:chrome,color:new THREE.Color(.75,.65,.5),meshFilter:mi(2)});
+-      return {handled:true,exclusive:true,added};
++      if(level===2||level===3) _setMeshVisible(renderer,mi(1),true);
++      if(level===3) _setMeshVisible(renderer,mi(2),true);
++      if(level===2||level===3) overlay(RenderFlags.CHROME|RenderFlags.BRIGHT,{map:chrome,color:new THREE.Color(.75,.65,.5),meshFilter:mi(1)});
++      if(level===3) overlay(RenderFlags.CHROME|RenderFlags.BRIGHT,{map:chrome,color:new THREE.Color(.75,.65,.5),meshFilter:mi(2)});
++      return result(true,true);
+     }
+     // MODEL_POTION+63: mesh1 is red texture plus red chrome, mesh0 remains white.
+     if (group===14 && index===63) {
+       _setMeshBaseColor(renderer,mi(0),new THREE.Color(1,1,1));
+       _setMeshBaseColor(renderer,mi(1),new THREE.Color(1,0,0));
+       overlay(RenderFlags.CHROME|RenderFlags.BRIGHT,{map:chrome,color:new THREE.Color(1,0,0),meshFilter:mi(1)});
+-      return {handled:true,exclusive:true,added};
++      return result(true,true);
+     }
+     // MODEL_POTION+52: normal body + half-alpha teal chrome on mesh0.
+     if (group===14 && index===52) {
+       overlay(RenderFlags.CHROME|RenderFlags.BRIGHT,{map:chrome,color:new THREE.Color(.1,.6,.4),alpha:.5,meshFilter:mi(0)});
+-      return {handled:true,exclusive:true,added};
++      return result(true,true);
+     }
+     // MODEL_EVENT+14 with rendered Level 9: cyan diffuse body + warm chrome.
+     // ZzzObject.cpp::RenderPartObjectEffect exact solid branch.
+-    if (group===15 && index===14 && level===9) {
++    if (isEvent && event===14 && level===9) {
+       _setMeshBaseColor(renderer, all, new THREE.Color(.3,.8,1));
+       overlay(RenderFlags.CHROME|RenderFlags.BRIGHT,{map:chrome,color:new THREE.Color(1,.8,.3),meshFilter:all});
+-      return {handled:true,exclusive:true,added};
++      return result(true,true);
+     }
+-    // MODEL_EVENT+11: ordinary texture plus half-alpha Chrome02/bright.
+-    if (group===15 && index===11) {
++    // MODEL_EVENT+11: ordinary texture plus half-alpha BITMAP_CHROME+1.
++    if (isEvent && event===11) {
+       _setMeshBaseColor(renderer, all, new THREE.Color(.9,.9,.9));
+-      overlay(RenderFlags.CHROME|RenderFlags.BRIGHT,{map:chrome2||chrome,color:new THREE.Color(.9,.9,.9),alpha:.5,meshFilter:all});
+-      return {handled:true,exclusive:true,added};
++      overlay(RenderFlags.CHROME|RenderFlags.BRIGHT,{map:chromePlus1,color:new THREE.Color(.9,.9,.9),alpha:.5,meshFilter:all});
++      return result(true,true);
+     }
+     // MODEL_EVENT+5 reads the RAW item level bit
