@@ -1,0 +1,21 @@
+: 0, errors: [] };
++
++try {
++  const items = parseItems();
++  writeModule('RealItems.js', 'REAL_ITEMS', items, HEADER('Data/Local/Por/item_por.bmd (XOR3 FC CF AB)'));
++  report.items = items.length;
++} catch (e) { report.errors.push('items: ' + e.message); }
++
++try {
++  const monsters = parseMonsters();
++  writeModule('RealMonsters.js', 'REAL_MONSTERS', monsters, HEADER('Data/Local/Por/Npcname_por.txt (texto plano)'));
++  report.monsters = monsters.length;
++} catch (e) { report.errors.push('monsters: ' + e.message); }
++
++try {
++  const maps = parseMaps();
++  writeModule('RealMaps.js', 'REAL_MAPS', maps, HEADER('Data/Local/Por/movereq_por.bmd (count plano + XOR3)'));
++  report.maps = maps.length;
++} catch (e) { report.errors.push('maps: ' + e.message); }
++
++console.log(JSON.stringify(report, null, 1));
