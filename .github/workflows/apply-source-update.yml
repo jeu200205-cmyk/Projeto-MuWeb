@@ -17,11 +17,14 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Apply verified source update
+      - name: Rebuild and apply verified source update
         shell: bash
         run: |
           set -euo pipefail
-          gzip -dc .publish-source/source-update.patch.gz > /tmp/source-update.patch
+          cat .publish-source/payload*.txt | tr -d '\r\n' > /tmp/source-update.b64
+          base64 -d /tmp/source-update.b64 > /tmp/source-update.patch.xz
+          echo "8ce9ef2edf6a050dca7b1a670d75b2f77ca21bf24f5acb8188dc727b4cfd0eba  /tmp/source-update.patch.xz" | sha256sum -c -
+          xz -dc /tmp/source-update.patch.xz > /tmp/source-update.patch
           echo "32241ebe9b6ca629d517be1b18b7a8c6e731f4b504b36f060039d02d9a7b88fc  /tmp/source-update.patch" | sha256sum -c -
           git apply --check /tmp/source-update.patch
           git apply /tmp/source-update.patch
