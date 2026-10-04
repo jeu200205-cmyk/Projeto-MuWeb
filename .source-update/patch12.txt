@@ -1,0 +1,380 @@
+        ┌──────────────────────────────────┼──────────────────────────────────┐
++         │                                  │                                  │
++         ▼                                  ▼                                  ▼
++┌──────────────────┐              ┌──────────────────┐              ┌──────────────────┐
++│  ConnectServer   │              │   GameServers    │              │   JoinServer     │
++│   (TCP: 44405)   │              │   (TCP: 55901+)  │              │   (TCP: 55970)   │
++│  - Server List   │              │  - Game Logic    │              │  - Auth/Account  │
++│  - Client Proxy  │              │  - Load Balance  │              │  - Char Select   │
++└──────────────────┘              └──────────────────┘              └──────────────────┘
++                                                                                 │
++                                                                                 ▼
++                                                                        ┌──────────────────┐
++                                                                        │   DataServer     │
++                                                                        │   (TCP: 55960)   │
++                                                                        │  - Char Data     │
++                                                                        │  - Inventory     │
++                                                                        │  - Warehouse     │
++                                                                        └──────────────────┘
++```
++
++## 📦 Instalação
++
++```bash
++cd web-port/network
++npm install
++```
++
++## ⚙️ Configuração
++
++### 1. Configuração Principal (`config.json`)
++
++```json
++{
++  "gateway": { "host": "127.0.0.1", "port": 9091 },
++  "connectServer": { "host": "127.0.0.1", "port": 44405 },
++  "gameServers": [{ "id": 1, "host": "127.0.0.1", "port": 55901 }],
++  "joinServer": { "host": "127.0.0.1", "port": 55970 },
++  "dataServer": { "host": "127.0.0.1", "port": 55960 },
++  "processManager": {
++    "workingDirectory": "C:\\MU\\Server",
++    "servers": {
++      "connectServer": { "executable": "ConnectServer.exe" },
++      "gameServer": { "executable": "GameServer.exe" },
++      "joinServer": { "executable": "JoinServer.exe" },
++      "dataServer": { "executable": "DataServer.exe" }
++    }
++  }
++}
++```
++
++### 2. Variáveis de Ambiente (`.env`)
++
++```bash
++cp .env.example .env
++# Edite .env com seus valores
++```
++
++## 🚀 Uso
++
++### Modo Daemon (Produção)
++```bash
++npm start
++# ou
++node index.js
++```
++
++### CLI - Comandos de Controle
++```bash
++# Status geral
++npm run status
++node index.js status
++
++# Estatísticas do Gateway
++npm run gateway
++node index.js gateway
++
++# Status dos Servidores
++npm run servers
++node index.js servers
++
++# Métricas
++npm run metrics
++node index.js metrics
++
++# Reiniciar servidor
++node index.js restart connectServer
++node index.js restart gameServer
++
++# Parar/Iniciar servidor
++node index.js stop gameServer
++node index.js start gameServer
++
++# Gerenciar GameServers
++node index.js add-gs "GameServer-02" 127.0.0.1 55902
++node index.js remove-gs 2
++
++# Ver configuração
++npm run config
++node index.js config
++```
++
++## 🔌 Protocolo MU Online
++
++### Headers de Pacote
++- **C1** (0xC1) - Pacote pequeno: `[C1][size][head][data...]`
++- **C2** (0xC2) - Pacote grande: `[C2][sizeHi][sizeLo][head][data...]`
++
++### Comandos Principais
++
++| Comando | Hex | Descrição |
++|---------|-----|-----------|
++| SERVER_INFO_REQUEST | 0xF4/0x03 | Cliente solicita info do servidor |
++| SERVER_LIST_REQUEST | 0xF4/0x06 | Cliente solicita lista de servidores |
++| SERVER_INIT | 0x00 | Inicialização da conexão |
++| JS_CONNECT_ACCOUNT | 0x01 | Autenticação de conta (JoinServer) |
++| JS_MAP_SERVER_MOVE | 0x03 | Mudança de servidor (JoinServer) |
++| DS_CHARACTER_LIST | 0x01 | Lista de personagens (DataServer) |
++| DS_CHARACTER_INFO | 0x04 | Info detalhada do personagem |
++
++## 📊 Métricas Prometheus
++
++Disponível em `http://localhost:9092/metrics`
++
++```prometheus
++# HELP mu_gateway_ws_connections_total Total WebSocket connections
++# TYPE mu_gateway_ws_connections_total gauge
++mu_gateway_ws_connections_total 42
++
++# HELP mu_gateway_packets_received_total Total packets received
++# TYPE mu_gateway_packets_received_total counter
++mu_gateway_packets_received_total 12345
++
++# HELP mu_gateway_game_server_connected GameServer connection status
++# TYPE mu_gateway_game_server_connected gauge
++mu_gateway_game_server_connected{server_id="1"} 1
++```
++
++## 🏥 Health Checks
++
++Endpoints monitorados automaticamente:
++- ConnectServer: TCP 44405
++- JoinServer: TCP 55970
++- DataServer: TCP 55960
++
++Intervalo padrão: 10 segundos
++
++## 🔒 Segurança
++
++- IP Whitelist/Blacklist
++- Rate limiting por IP
++- Anti-DDoS (limite de pacotes/segundo)
++- Máximo de conexões por IP
++
++## 📁 Estrutura de Arquivos
++
++```
++web-port/network/
++├── index.js              # Entry point + CLI
++├── MUConfig.js           # Configuração centralizada
++├── MUGateway.js          # WebSocket ↔ TCP Gateway
++├── MUServerManager.js    # Gerenciador de servidores
++├── ServerLauncher.js     # Launcher de processos
++├── config.json           # Configuração padrão
++├── .env.example          # Exemplo de variáveis de ambiente
++├── package.json
++├── utils/
++│   └── logger.js         # Logger (winston/console)
++└── logs/                 # Diretório de logs (criado automaticamente)
++```
++
++## 🔧 Desenvolvimento
++
++```bash
++# Modo watch para desenvolvimento
++npm run dev
++
++# Testes
++npm test
++
++# Lint
++npm run lint
++```
++
++## 📝 Logs
++
++Logs estruturados em JSON no diretório `logs/`:
++- `mu-network.log` - Logs gerais
++- `mu-gateway.log` - Logs do gateway
++- `mu-server-manager.log` - Logs do server manager
++- `packets/` - Logs de pacotes para debug
++
++## 🎮 Fluxo de Conexão do Cliente
++
++1. Cliente Web conecta via WebSocket em `ws://localhost:9091`
++2. Gateway envia pacote INIT (0x00) com resultado=1
++3. Cliente envia SERVER_LIST_REQUEST (0xF4/0x06)
++4. Gateway encaminha para ConnectServer (TCP 44405)
++5. ConnectServer responde com lista de GameServers
++6. Gateway encaminha resposta para cliente Web
++7. Cliente escolhe servidor e envia credenciais
++8. Gateway roteia para JoinServer (autenticação)
++9. Após auth, roteia para GameServer selecionado
++10. GameServer comunica com DataServer para dados do personagem
++
++## 🐛 Debug
++
++### Log de Pacotes
++Ative em `config.json`:
++```json
++"gateway": { "packetLogEnabled": true }
++```
++
++### Conexão Direta para Teste
++```bash
++# Testa ConnectServer
++telnet 127.0.0.1 44405
++
++# Testa JoinServer
++telnet 127.0.0.1 55970
++
++# Testa DataServer
++telnet 127.0.0.1 55960
++```
++
++## 📌 Requisitos
++
++- Node.js 18+
++- Servidores MU compilados (ConnectServer.exe, GameServer.exe, JoinServer.exe, DataServer.exe)
++- SQL Server com database MuOnline
++- Windows (para executáveis .exe) ou Wine/Linux
++
++## 🤝 Integração com Cliente Web
++
++```javascript
++// Cliente JavaScript
++const ws = new WebSocket('ws://localhost:9091');
++
++ws.binaryType = 'arraybuffer';
++
++ws.onopen = () => {
++    console.log('Conectado ao Gateway MU');
++};
++
++ws.onmessage = (event) => {
++    const data = new Uint8Array(event.data);
++    const header = data[0];
++    const head = header === 0xC1 ? data[2] : data[3];
++    
++    // Processa resposta do servidor
++    handlePacket(head, data);
++};
++
++// Envia pacote MU
++function sendPacket(packet) {
++    ws.send(packet.buffer);
++}
++```
++
++## 📄 Licença
++
++MIT License - Veja LICENSE para detalhes.
++
++## 🙏 Créditos
++
++Baseado na arquitetura do **MuEMU** (ConnectServer, GameServer, JoinServer, DataServer).
+\ No newline at end of file
+diff --git a/network/config.json b/network/config.json
+index 8dc6547..6c4a14a 100644
+--- a/network/config.json
++++ b/network/config.json
+@@ -1,6 +1,6 @@
+ {
+   "gateway": {
+-    "host": "127.0.0.1",
++    "host": "127.0.0.1",
+     "port": 9091,
+     "maxConnections": 10000,
+     "heartbeatInterval": 30000,
+@@ -18,7 +18,7 @@
+     "timeout": 10000,
+     "encryption": {
+       "enabled": true,
+-      "key": "",
++      "key": "",
+       "version": "S6"
+     }
+   },
+@@ -54,7 +54,7 @@
+     },
+     "encryption": {
+       "enabled": true,
+-      "key": ""
++      "key": ""
+     }
+   },
+   "dataServer": {
+@@ -71,7 +71,7 @@
+     },
+     "encryption": {
+       "enabled": true,
+-      "key": ""
++      "key": ""
+     }
+   },
+   "serverList": [
+@@ -161,7 +161,7 @@
+     "autoRestart": true,
+     "maxRestarts": 5,
+     "restartDelay": 10000,
+-    "workingDirectory": "C:\\MU\\Server",
++    "workingDirectory": "C:\\MU\\Server",
+     "servers": {
+       "connectServer": {
+         "executable": "ConnectServer.exe",
+diff --git a/package.json b/package.json
+index b4cb813..c708b40 100644
+--- a/package.json
++++ b/package.json
+@@ -1,16 +1,9 @@
+ {
+-  "name": "muweb-main52-web-base",
+-  "private": false,
++  "name": "mu-web-port",
++  "private": true,
+   "type": "module",
+   "dependencies": {
+     "three": "^0.160.0",
+     "ws": "^8.21.3"
+-  },
+-  "description": "Experimental MU Online Main 5.2 to Web engine base. Early-stage and incomplete.",
+-  "scripts": {
+-    "serve": "node tools/dev-web-server.cjs 8080",
+-    "gateway": "node gateway-server.cjs",
+-    "assets": "node tools/asset-server.cjs",
+-    "check": "node --check gateway-server.cjs"
+   }
+ }
+diff --git a/scenes/CharSelectScene.js b/scenes/CharSelectScene.js
+index 9e777e6..a0108f2 100644
+--- a/scenes/CharSelectScene.js
++++ b/scenes/CharSelectScene.js
+@@ -33,6 +33,7 @@
+ // Hooks E2E: [data-mu=char-slot][data-mu-char], botões por dataset.mu
+ 
+ import { MUSprites } from '../ui/MUSprites.js';
++import { RemoteAssets } from '../data/RemoteAssets.js';
+ import { attachMuVirtualBoard } from '../ui/MUVirtualViewport.js';
+ 
+ // ---- Geometria dos contratos ----
+@@ -50,7 +51,12 @@ const COL_NAME = 'rgb(255,189,25)';
+ const COL_TEXT = 'rgb(255,255,255)';
+ 
+ // Cache de módulo
+-const cache = { loaded: false, loading: null, slotFrames: null };
++let cache;
++function sceneAssetCache() {
++  const authority = String(RemoteAssets.baseUrl || '');
++  if (!cache || cache.authority !== authority) cache = {authority, loaded:false, loading:null, slotFrames:null};
++  return cache;
++}
+ 
+ export default class CharSelectScene {
+   constructor() {
+@@ -182,9 +188,11 @@ export default class CharSelectScene {
+   }
+ 
+   async _loadAssets() {
++    const cache = sceneAssetCache();
+     await MUSprites.load().catch(() => {});
++    if (sceneAssetCache() !== cache) return false;
+     if (cache.loaded) { this._applyAssets(); return this._ownersReady(); }
+-    if (cache.loading) { await cache.loading; this._applyAssets(); return this._ownersReady(); }
++    if (cache.loading) { await cache.loading; if (sceneAssetCache() !== cache) return false; this._applyAssets(); return this._ownersReady(); }
+     cache.loading = (async () => {
+       try {
+         // CharacterSelect_Button01/02/03.ozt 225×52, UV (0,0,0.878,0.82)
+@@ -193,11 +201,13 @@ export default class CharSelectScene {
+           'Custom/Interface/CharacterSelect_Button02.ozt',
+           'Custom/Interface/CharacterSelect_Button03.ozt'];
+         const decodedOwners = await Promise.all(states.map((p) => MUSprites
