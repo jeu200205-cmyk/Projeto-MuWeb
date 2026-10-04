@@ -1,93 +1,62 @@
-# Projeto MuWeb — MU Online Main 5.2 → Web
+# Projeto MuWeb
 
-Port experimental do cliente/engine **MU Online Main 5.2** para JavaScript/WebGL.
+Cliente/engine Web experimental inspirado no **MU Online Main 5.2**, desenvolvido em JavaScript/WebGL.
 
-**Autoridade publicada:** `MUWEB R90 FIX40 HOTFIX1` — 04/10/2026.
+O repositório publica a **source de desenvolvimento atual** do projeto para estudo e continuação. Ele ainda não representa uma portabilidade completa do cliente de PC e vários sistemas continuam em evolução.
 
-> Este projeto ainda é uma portabilidade parcial. A presença de um sistema ou módulo na árvore não significa paridade 100% com o cliente PC. A referência de comportamento continua sendo a source PC Main 5.2 + Data/Lua reais + protocolo real do servidor.
+## Principais áreas da source
 
-## Estado da FIX40
+- renderer BMD, materiais e texturas;
+- terrain, mapas, objetos e câmera;
+- personagens, monstros, NPCs, pets e viewport;
+- inventário, equipamentos, itens e apresentação 3D;
+- skills, buffs e efeitos;
+- UI/HUD e entrada;
+- protocolo MU, WebSocket/TCP e gateway;
+- loaders de dados e integrações Lua utilizadas pelo cliente;
+- ferramentas locais para servir assets e executar o cliente Web.
 
-A FIX40 preserva os incrementos anteriores e adiciona um fechamento source-backed específico de Icarus (`WD_10HEAVEN`): `Object11` tipos 0–5 deixam de ser renderizados como BMD de cenário e passam a atuar como controladores do burst inicial de `BITMAP_CLOUD`, seguindo o comportamento do PC. A HOTFIX1 corrige somente o bootstrap do pacote, removendo launchers FIX39 herdados; a lógica de jogo/render da FIX40 não foi alterada.
+## Requisitos
 
-Validação automatizada registrada para esta autoridade:
+- Node.js 18 ou superior;
+- navegador com WebGL;
+- uma pasta `Data` compatível do cliente, fornecida pelo próprio usuário;
+- servidor MU compatível para testes de conexão real.
 
-- manifesto/launcher: **258 arquivos verificados**;
-- syntax set da entrega: **307 arquivos**;
-- contrato Icarus FIX40: **39 checks PASS**;
-- validação visual física em browser/GPU/Data real: **ainda necessária**.
+## Executar no Windows
 
-Icarus não deve ser considerado 100% fechado: `MoveObjectOnEffect`, `MoveHeavenThunder`, o owner de `BITMAP_LIGHT` do tipo 10 e outros owners do mapa continuam no backlog.
+1. Extraia/clone o projeto.
+2. Execute `INSTALAR_DEPENDENCIAS.bat` na primeira vez.
+3. Execute `INICIAR_MUWEB.bat`.
+4. Acesse o endereço local informado pelo launcher.
+5. Para encerrar os processos Node iniciados a partir desta source, execute `PARAR_MUWEB.bat`.
 
-## Principais áreas já presentes
+A pasta `Data`, GameServer, ConnectServer e demais servidores **não fazem parte deste repositório**.
 
-- carregamento BMD/OZJ/OZT/OZB/ATT e Data real;
-- renderer BMD, skinning, materiais, chrome/metal/alpha e owners de bitmap;
-- terrain, objetos de mapa, grass, culling e vários contratos map-specific;
-- personagens, viewport, NPCs, monstros, inventário, equipamentos e storage;
-- itens, materiais, Excellent/Ancient/Socket/Harmony e owners Lua/custom;
-- skills/cast/VFX em evolução;
-- login, ConnectServer/GameServer, gateway WebSocket↔TCP e roteamento MU;
-- HUD/UI/chat/social e click-to-move;
-- testes Node/WebGL e ferramentas de validação.
-
-Consulte a matriz atual em [`docs/ENGINE/11_PORTABILITY_STATUS.md`](docs/ENGINE/11_PORTABILITY_STATUS.md) e as pendências em [`docs/ENGINE/12_REMAINING_PORTS.md`](docs/ENGINE/12_REMAINING_PORTS.md).
-
-## Como executar no Windows
-
-### Requisitos
-
-- Windows;
-- Node.js com npm;
-- uma pasta `Data` compatível do cliente MU;
-- GameServer/ConnectServer externos para conexão real.
-
-### Inicialização
-
-1. Extraia/clone a source completa.
-2. Execute `INSTALAR_DEPENDENCIAS_R90.bat`.
-3. Execute **somente** `LIGAR_WEB_R90_FIX40.bat`.
-4. Informe a Data quando solicitado, ou configure `MUWEB_OFFICIAL_CLIENT_ROOT` / `MUWEB_OFFICIAL_DATA`.
-5. Para encerrar os processos Node desta source, execute `DESLIGAR_WEB_R90_FIX40.bat`.
-
-A Data completa e os executáveis de servidor MU **não são distribuídos neste repositório**.
-
-## Verificação
+## Executar manualmente
 
 ```bash
 npm ci
-node tools/start-r90-fix40-safe.cjs --verify-only
-node tools/test-fix40-runtime.mjs
+node tools/asset-server.cjs "C:\\caminho\\para\\Data" 9100
+node gateway-server.cjs
+node tools/dev-web-server.cjs 8080
 ```
 
-Para fixtures WebGL, use o servidor de desenvolvimento e abra as páginas em `tests/` conforme a documentação de validação.
+Depois abra `http://127.0.0.1:8080/`.
 
-## Estrutura
+## Documentação
 
-- `assets/`, `graphics/`, `world/`: assets, modelos, materiais, terrain e render do mundo;
-- `core/`, `game/`, `scenes/`: runtime, gameplay e cenas;
-- `data/`, `database/`: owners/configurações e dados gerados;
-- `network/`, `protocol/`, `net/`: gateway, wire e protocolo;
-- `skills/`, `effects2/`: skills e efeitos;
-- `ui/`, `ui2/`, `social/`: HUD, janelas e sistemas sociais;
-- `tests/` e `test-r90-fix*.mjs`: regressões e fixtures;
-- `tools/`: launch/verify/generators e utilitários;
-- `docs/ENGINE/`: documentação técnica da engine e da portabilidade.
+- [Visão da engine](docs/ENGINE.md)
+- [Mapa dos sistemas](docs/SYSTEMS.md)
+- [Execução e configuração](docs/RUNNING.md)
+- [Portabilidade PC → Web](docs/PORTING.md)
+- [Estrutura da source](docs/SOURCE_LAYOUT.md)
+- [Roadmap](docs/ROADMAP.md)
 
-## Documentação técnica
+## Organização pública
 
-Comece por [`docs/ENGINE/00_INDEX.md`](docs/ENGINE/00_INDEX.md). A documentação cobre arquitetura, boot, render, mapas, itens, protocolo, skills, UI, Data/Lua, performance, status, backlog, testes e manutenção do GitHub.
-
-Notas desta publicação: [`docs/ENGINE/16_FIX40_RELEASE_NOTES.md`](docs/ENGINE/16_FIX40_RELEASE_NOTES.md).
-
-## Política de fidelidade
-
-Não preencher lacunas com placeholders que pareçam “funcionar”. Quando um owner PC não estiver provado, a implementação deve permanecer explícita/fail-closed até existir evidência da source PC, Data/Lua, wire real ou validação física correspondente.
+O GitHub mantém apenas arquivos úteis para executar, estudar e desenvolver o projeto. Relatórios internos, checkpoints de desenvolvimento, pacotes de auditoria e históricos privados não fazem parte da publicação pública.
 
 ## Segurança
 
-Não versione `.env`, credenciais, senhas, dumps, Data proprietária completa ou segredos de servidor. Serviços de desenvolvimento devem permanecer locais até receberem hardening apropriado.
-
-## Licença e conteúdo do jogo
-
-Este repositório contém o código desta adaptação. Assets/Data e executáveis proprietários do jogo não são fornecidos aqui; use apenas conteúdo que você tenha direito de utilizar.
+Mantenha os serviços de desenvolvimento em `127.0.0.1` até revisar autenticação, autorização, rate-limit e configuração de produção. Não publique diretamente gateway, banco ou serviços internos sem proteção adequada.
