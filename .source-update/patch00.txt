@@ -1,0 +1,268 @@
+diff --git a/assets/BmdGeometryPool.js b/assets/BmdGeometryPool.js
+new file mode 100644
+index 0000000..f5da551
+--- /dev/null
++++ b/assets/BmdGeometryPool.js
+@@ -0,0 +1,39 @@
++import * as THREE from 'three';
++
++// Identity is the actual immutable parsed mesh, never a path/type/filename.
++// Different Data authorities or composed player binds produce different keys.
++const records=new WeakMap();
++const pooled=new WeakSet();
++
++export function isSharedBmdGeometry(geometry){return pooled.has(geometry)}
++
++export function acquireBmdGeometry(meshData) {
++  let record=records.get(meshData);
++  const reused=Boolean(record);
++  if(!record) {
++    const geometry=new THREE.BufferGeometry();
++    try {
++      geometry.setAttribute('position',new THREE.BufferAttribute(meshData.positions,3));
++      geometry.setAttribute('normal',new THREE.BufferAttribute(meshData.normals,3));
++      geometry.setAttribute('uv',new THREE.BufferAttribute(meshData.uvs,2));
++      geometry.setAttribute('skinIndex',new THREE.BufferAttribute(meshData.skinIndices,4));
++      const normalNodes=meshData.normalSkinIndices || Float32Array.from({length:meshData.positions.length/3},(_,i)=>meshData.skinIndices[i*4]);
++      geometry.setAttribute('normalSkinIndex',new THREE.BufferAttribute(normalNodes,1));
++      geometry.setAttribute('skinWeight',new THREE.BufferAttribute(meshData.skinWeights,4));
++      geometry.setIndex(new THREE.BufferAttribute(meshData.indices,1));
++      geometry.computeBoundingBox();geometry.computeBoundingSphere();
++    }catch(e){geometry.dispose();throw e}
++    record={geometry,refs:0};records.set(meshData,record);pooled.add(geometry);
++  }
++  record.refs++;
++  let released=false;
++  return {geometry:record.geometry,reused,release(){
++    if(released)return;
++    released=true;
++    if(--record.refs===0){
++      records.delete(meshData);pooled.delete(record.geometry);
++      if(meshData._geometry===record.geometry)delete meshData._geometry;
++      record.geometry.dispose();
++    }
++  }};
++}
+diff --git a/assets/MUAssetLoader.js b/assets/MUAssetLoader.js
+index 5783ff6..fae2744 100644
+--- a/assets/MUAssetLoader.js
++++ b/assets/MUAssetLoader.js
+@@ -76,7 +76,7 @@ function getIDB() {
+         const req = indexedDB.open(INDEXEDB_NAME, INDEXEDB_VERSION);
+         req.onupgradeneeded = (e) => {
+             const db = e.target.result;
+-            // R12.5 hotfix: o store v1 continha bytes brutos pré-strip do OZJ
++            // ajuste anterior: o store v1 continha bytes brutos pré-strip do OZJ
+             // (capa 24B) e TGA wrong-offset (w=0/h=0). onupgradeneeded só cria
+             // o store; entradas antigas persistem. deleteObjectStore para
+             // limpeza definitiva no upgrade — o cache rebuilding acontece
+@@ -588,8 +588,13 @@ export class MUAssetLoader {
+         
+         // In-memory caches
+         this._bmdCache = new Map();
++        this._bmdInflight = new Map();
++        this._bmdAuthority = this.remoteAssets.baseUrl;
++        this._bmdEpoch = 0;
+         this._textureCache = new Map();
+         this._textureInflight = new Map();
++        this._textureAuthority = this.remoteAssets.baseUrl;
++        this._textureEpoch = 0;
+         this._audioCache = new Map();
+         this._attCache = new Map();
+         this._dataCache = new Map();
+@@ -632,12 +637,41 @@ export class MUAssetLoader {
+      * @returns {Promise<Object>} { meshes, bones, actions, version, source }
+      */
+     async loadBMD(relPath) {
++        const authority = this.remoteAssets.baseUrl;
++        if (authority !== this._bmdAuthority) {
++            this._bmdAuthority = authority;
++            this._bmdEpoch++;
++            this._bmdCache.clear();
++            this._bmdInflight.clear();
++        }
+         // Check memory cache
+         if (this._bmdCache.has(relPath)) return this._bmdCache.get(relPath);
++        if (this._bmdInflight.has(relPath)) return this._bmdInflight.get(relPath);
++        const epoch = this._bmdEpoch;
++        const job = this._loadBMDUncached(relPath, authority, epoch);
++        this._bmdInflight.set(relPath, job);
++        try { return await job; }
++        finally {
++            if (this._bmdInflight.get(relPath) === job) this._bmdInflight.delete(relPath);
++        }
++    }
++
++    async _loadBMDUncached(relPath, authority, epoch) {
++        const assertCurrent = () => {
++            if (epoch !== this._bmdEpoch || authority !== this.remoteAssets.baseUrl) {
++                const error = new Error(`BMD load superseded: ${relPath}`);
++                error.code = 'MUWEB_STALE_ASSET_LOAD';
++                throw error;
++            }
++        };
++        // Parsed records from another Data root (including legacy unscoped
++        // records) must never become the new authority's skeleton/geometry.
++        const storageKey = `bmd:${authority}:${relPath}`;
+ 
+         // Check IndexedDB
+         if (this.useIDB) {
+-            const cached = await idbGet(relPath);
++            const cached = await idbGet(storageKey);
++            assertCurrent();
+             if (cached) {
+                 this._bmdCache.set(relPath, cached);
+                 return cached;
+@@ -646,6 +680,7 @@ export class MUAssetLoader {
+ 
+         // Fetch binary
+         const buf = await this.remoteAssets.fetchBinary(relPath);
++        assertCurrent();
+         if (!buf) throw new Error(`Failed to fetch BMD: ${relPath}`);
+ 
+         // Detect format
+@@ -668,9 +703,12 @@ export class MUAssetLoader {
+             throw new Error(`BMD formato inválido (${fmt}): ${relPath}`);
+         }
+ 
++        // A worker may finish after Data/cache authority changed during parse.
++        assertCurrent();
+         // Cache
+         this._bmdCache.set(relPath, parsed);
+-        if (this.useIDB) await idbSet(relPath, parsed, AssetType.BMD);
++        if (this.useIDB) await idbSet(storageKey, parsed, AssetType.BMD);
++        assertCurrent();
+ 
+         return parsed;
+     }
+@@ -680,19 +718,52 @@ export class MUAssetLoader {
+      * @param {string} relPath - e.g. 'Interface/back1.OZJ' or 'Player/Armor01.ozt'
+      * @returns {Promise<THREE.Texture>}
+      */
++    _invalidateTextureGeneration() {
++        this._textureEpoch++;
++        this._textureCache.clear();
++        this._textureInflight.clear();
++        for (const v of this._imageSourceCache.values()) {
++            Promise.resolve(v).then((img) => { try { img?.close?.(); } catch (_) {} }).catch(() => {});
++        }
++        this._imageSourceCache.clear();
++        this._texErrLogged.clear();
++        // Published scene textures remain owned by their existing consumers.
++        // Invalidation prevents reuse/publication, not a premature GPU disposal.
++    }
++
++    _syncTextureAuthority() {
++        if (this._textureAuthority !== this.remoteAssets.baseUrl) {
++            this._textureAuthority = this.remoteAssets.baseUrl;
++            this._invalidateTextureGeneration();
++        }
++        return { authority: this._textureAuthority, epoch: this._textureEpoch };
++    }
++
++    _assertTextureGeneration({ authority, epoch }, relPath) {
++        if (authority !== this.remoteAssets.baseUrl || epoch !== this._textureEpoch) {
++            const error = new Error(`Texture load superseded: ${relPath}`);
++            error.code = 'MUWEB_STALE_ASSET_LOAD';
++            throw error;
++        }
++    }
++
+     async loadTexture(relPath) {
++        const generation = this._syncTextureAuthority();
+         if (this._textureCache.has(relPath)) return this._textureCache.get(relPath);
+         if (this._textureInflight.has(relPath)) return this._textureInflight.get(relPath);
+-        const job = this._loadTextureUncached(relPath);
++        const job = this._loadTextureUncached(relPath, generation);
+         this._textureInflight.set(relPath, job);
+         try { return await job; }
+         finally { if (this._textureInflight.get(relPath) === job) this._textureInflight.delete(relPath); }
+     }
+ 
+-    async _loadTextureUncached(relPath) {
++    async _loadTextureUncached(relPath, generation) {
++        const assertCurrent = () => this._assertTextureGeneration(generation, relPath);
++        const storageKey = `texture:${generation.authority}:${relPath}`;
+ 
+         if (this.useIDB) {
+-            const cached = await idbGet(relPath);
++            const cached = await idbGet(storageKey);
++            assertCurrent();
+             // R12.5 anti-poison (t-mugt0lc4-j): registros pré-fix não são
+             // servidos — self-healing: registro inválido → re-fetch + re-decode
+             // (e o novo payload válido sobrescreve o veneno no idbSet abaixo).
+@@ -708,6 +779,7 @@ export class MUAssetLoader {
+         }
+ 
+         const buf = await this.remoteAssets.fetchBinary(relPath);
++        assertCurrent();
+         if (!buf) throw new Error(`Failed to fetch texture: ${relPath}`);
+ 
+         const ext = relPath.split('.').pop().toLowerCase();
+@@ -722,18 +794,20 @@ export class MUAssetLoader {
+             parsed = ext === 'ozj' ? this._decodeOZJ(buf) : this._decodeOZT(buf);
+         }
+ 
++        assertCurrent();
+         // Cache parsed pixel data
+         parsed._path = relPath; // diagnóstico: o TextureLoader async-fail deve saber qual arquivo
+         // Write-path anti-poison: nunca persistir payload que o validador
+         // rejeitaria no read — fail-closed na origem, não só no consumo.
+         if (this.useIDB) {
+             if (isValidParsedTexture(parsed)) {
+-                await idbSet(relPath, parsed, ext === 'ozj' ? AssetType.OZJ : AssetType.OZT);
++                await idbSet(storageKey, parsed, ext === 'ozj' ? AssetType.OZJ : AssetType.OZT);
+             } else {
+                 console.warn(`[MUAssetLoader] payload pós-decode inválido NÃO cacheado: ${relPath}`);
+             }
+         }
+ 
++        assertCurrent();
+         const tex = this._createThreeTexture(parsed);
+         this._textureCache.set(relPath, tex);
+         return tex;
+@@ -750,10 +824,13 @@ export class MUAssetLoader {
+      * depois do decode concluído. Nenhum placeholder é criado.
+      */
+     async loadImageSource(relPath) {
++        const generation = this._syncTextureAuthority();
++        const assertCurrent = () => this._assertTextureGeneration(generation, relPath);
+         if (this._imageSourceCache.has(relPath)) return this._imageSourceCache.get(relPath);
+ 
+         const pending = (async () => {
+             const desc = await this.loadTexture(relPath);
++            assertCurrent();
+             if (!desc) throw new Error(`Texture descriptor ausente: ${relPath}`);
+ 
+             if (desc.format === 'rgba' && desc.data && desc.width > 0 && desc.height > 0) {
+@@ -779,6 +856,7 @@ export class MUAssetLoader {
+                         try { bitmap?.close?.(); } catch (_) {}
+                         throw new Error('ImageBitmap JPEG sem pixels');
+                     }
++                    try { assertCurrent(); } catch (e) { bitmap.close?.(); throw e; }
+                     return bitmap;
+                 }
+                 if (typeof Image === 'undefined') throw new Error('Decoder de imagem do browser indisponível');
+@@ -793,6 +871,7 @@ export class MUAssetLoader {
+                     if (!img || img.naturalWidth <= 0 || img.naturalHeight <= 0) {
+                         throw new Error('HTMLImageElement JPEG sem pixels');
+                     }
++                    assertCurrent();
+                     return img;
+                 } finally {
+                     URL.revokeObjectURL(url);
+@@ -806,7 +885,7 @@ export class MUAssetLoader {
+         try {
+             return await pending;
+         } catch (e) {
+-            this._imageSourceCache.delete(relPath);
++            if (this._imageSourceCache.get(relPath) === pending) this._imageSourceCache.delete(relPath);
+             throw e;
+         }
+     }
+@@ -820,6 +899,8 @@ export class MUAssetLoader {
+      */
+     async loadModelTexture(fileName, modelDir = 'Player') {
+         if (!fileName) return null;
++        const generation = this._syncTextureAuthority();
++        const assertCurrent = () => this._assertTextureGeneration(generation, relPath);
