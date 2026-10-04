@@ -1,0 +1,224 @@
+st state = applyPcRenderMeshPassState(material, flags, alpha, hasSourceAlpha, true);
+             if (state.skip) { material.dispose(); continue; }
+@@ -1439,6 +1510,67 @@ export class MUModelRenderer {
+         };
+     }
+ 
++    /** Create one camera-facing Main sprite in the local frame of a BMD bone.
++     * PC RenderSprite multiplies the bitmap's physical width/height by Scale;
++     * THREE.Sprite is already camera-facing, while parenting it to the bone
++     * reproduces TransformPosition(BoneTransform[n], offset, Position).
++     * The texture remains MUAssets-owned; only this private SpriteMaterial is
++     * disposed with the model. */
++    createBoneSprite({ boneIndex = 0, map = null, offset = null, scale = 1, color = null } = {}) {
++        if (this._disposed || !map?.isTexture) return null;
++        const rootOwned = boneIndex === null;
++        const anchor = rootOwned ? this.group : this.bones?.[Number(boneIndex)];
++        const image = map.image || map.source?.data;
++        const width = Number(image?.width || image?.naturalWidth);
++        const height = Number(image?.height || image?.naturalHeight);
++        if ((!rootOwned && !anchor?.isBone) || (rootOwned && !anchor?.isGroup) || !(width > 0) || !(height > 0)) return null;
++
++        const material = new THREE.SpriteMaterial({
++            map,
++            color: color?.isColor ? color : new THREE.Color(color ?? 0xffffff),
++            transparent: true,
++            depthTest: true,
++            depthWrite: false,
++            blending: THREE.CustomBlending,
++            blendEquation: THREE.AddEquation,
++            blendEquationAlpha: THREE.AddEquation,
++            blendSrc: THREE.OneFactor,
++            blendDst: THREE.OneFactor,
++            blendSrcAlpha: THREE.OneFactor,
++            blendDstAlpha: THREE.OneFactor,
++            toneMapped: false,
++            fog: false,
++        });
++        const sprite = new THREE.Sprite(material);
++        sprite.name = rootOwned ? 'mu_model_root_sprite' : `mu_bone_${Number(boneIndex)}_sprite`;
++        sprite.frustumCulled = false;
++        sprite.position.copy(offset?.isVector3 ? offset : new THREE.Vector3(...(offset || [0, 0, 0])));
++        const setScale = (value) => {
++            const next = Number(value);
++            if (Number.isFinite(next) && next >= 0) sprite.scale.set(width * next, height * next, 1);
++        };
++        setScale(scale);
++        anchor.add(sprite);
++
++        const owner = {
++            sprite,
++            material,
++            boneIndex: rootOwned ? null : Number(boneIndex),
++            bitmapSize: [width, height],
++            setColor: (next) => material.color.copy(next?.isColor ? next : new THREE.Color(next ?? 0xffffff)),
++            setScale,
++            dispose: () => {
++                if (owner.disposed) return;
++                owner.disposed = true;
++                sprite.parent?.remove(sprite);
++                material.dispose();
++            },
++            disposed: false,
++        };
++        this._boneSprites.push(owner);
++        return owner;
++    }
++
+     _applyChromeEffect(mesh, flags) {
+         const mat = mesh.material;
+         // Convert to shader material if needed
+@@ -1675,6 +1807,10 @@ export class MUModelRenderer {
+             }
+         }
+         this._overlayMeshes = [];
++        for (const owner of this._boneSprites) {
++            try { owner.dispose?.(); } catch {}
++        }
++        this._boneSprites = [];
+         this._presentationUpdates = [];
+         // RenderModel UV-scroll passes clone only their own texture state so
+         // shared BMD textures are never mutated. Dispose those private clones
+@@ -1686,7 +1822,7 @@ export class MUModelRenderer {
+ 
+         // Dispose geometries
+         for (const mesh of this.meshes) {
+-            mesh.geometry.dispose();
++            if(!isSharedBmdGeometry(mesh.geometry))mesh.geometry.dispose();
+             if (mesh.material) {
+                 if (Array.isArray(mesh.material)) {
+                     mesh.material.forEach(m => m.dispose());
+@@ -1695,6 +1831,8 @@ export class MUModelRenderer {
+                 }
+             }
+         }
++        for(const lease of this._geometryLeases)lease.release();
++        this._geometryLeases=[];
+         
+         // Dispose textures
+         for (const mat of this._materialCache.values()) {
+@@ -1715,6 +1853,7 @@ export class MUModelRenderer {
+         // They are registered once per item appearance and updated without
+         // allocating a second WebGL context or a second animation owner.
+         this._overlayMeshes = [];
++        this._boneSprites = [];
+         this._presentationUpdates = [];
+         this.skeleton?.dispose?.();
+         this.bones = [];
+diff --git a/core/GameApp.js b/core/GameApp.js
+index 95878de..cec1a21 100644
+--- a/core/GameApp.js
++++ b/core/GameApp.js
+@@ -4,18 +4,12 @@
+  * e liga todos os subsistemas portados (personagem, monstros, efeitos,
+  * UI avançada, rede, mundo, assets remotos).
+  */
+-// MUWEB_R90_FIX2_VISUAL_RUNTIME_CORRECTIONS_2026-10-02
+-// MUWEB_R90_FIX3_NORMAL_CHROME_MATERIAL_CORRECTIONS_2026-10-02
+-// MUWEB_R90_FIX4_EQUIPMENT_VIEWPORT_LIFETIME_2026-10-02
+-// MUWEB_R90_FIX5_FIXED_FUNCTION_NATIVE_MATERIAL_2026-10-02
+-// MUWEB_R90_FIX6_LUA_BITMAP_OWNERS_2026-10-02
+-// MUWEB_R90_FIX7_DYNAMIC_LUA_BITMAPS_2026-10-02
+-// MUWEB_R90_FIX8_PC_INVENTORY_MOVE_MAPLOAD_2026-10-02
+ import * as THREE from 'three';
+ import { GameTimer } from './Timer.js';
+ import { Input } from './Input.js';
+ import { Sound } from '../audio/SoundManager.js';
+ import { RemoteAssets } from '../data/RemoteAssets.js';
++import { MUAssets } from '../assets/MUAssetLoader.js';
+ import { RealMUProtocol } from '../protocol/RealMUProtocol.js';
+ import { DIR_TABLE } from '../protocol/MUOpCodes.js';
+ import { muDirectionToThreeYaw, pcDegreesToThreeYaw } from '../game/MUDirection.js';
+@@ -37,7 +31,7 @@ import { MonsterManager } from '../game/MonsterManager.js';
+ import { BuffContainer } from '../game/BuffSystem.js';
+ import { PetSystem } from '../game/PetSystem.js';
+ import { PlayerViewportManager } from '../game/PlayerViewportManager.js';
+-import { StatusBars } from '../ui2/StatusBars.js';
++import { StatusBars, PC_MAINFRAME_FPS_RECT } from '../ui2/StatusBars.js';
+ import { SkillBar } from '../ui2/SkillBar.js';
+ import { attachMuVirtualBoard } from '../ui/MUVirtualViewport.js';
+ import { ChatSystem } from './ChatSystem.js';
+@@ -104,7 +98,7 @@ export const MUWEB_R25_REVISION = 'MUWEB_R25_DEATH_STAB_FORCE4_2026-09-27_A';
+ export const MUWEB_R26_REVISION = 'MUWEB_R26_VITALITY_SPIRIT2_2026-09-27_A';
+ export const MUWEB_PARENT_REVISION = 'MUWEB_R27_BLOW232_IMPACT_BMD_2026-09-27_A';
+ export const MUWEB_SOURCE_PARENT_REVISION = 'MUWEB_R28_FURY_CORE_BMD_2026-09-27_A';
+-export const MUWEB_SOURCE_REVISION = 'MUWEB_R90_FIX9_PC_HIDDEN_OBJECT_ITEM_PRESENTATION_PERF_2026-10-02_A';
++export const MUWEB_SOURCE_REVISION = 'current-public-source';
+ export const MUWEB_PREVIOUS_SOURCE_REVISION = 'MUWEB_R78_ITEMVIEW_WORLDENTRY_ANIMATION_CHARSELECT_RECOVERY_2026-09-30_A';
+ export const MUWEB_R77_BASE_REVISION = 'MUWEB_R77_CANONICAL_WORLD_ROUTING_CUSTOMMOVE_PREFETCH_UTF8_2026-09-30_A';
+ 
+@@ -280,9 +274,9 @@ export class GameApp {
+         if (this.assetsOnline) {
+             try {
+                 const bitmapMeta = await loadPcBitmapLuaOwners();
+-                console.info('[GameApp FIX7] Lua bitmap owners:', bitmapMeta);
++                console.info('[GameApp] Lua bitmap owners:', bitmapMeta);
+             } catch (e) {
+-                console.warn('[GameApp FIX7] Lua bitmap owners unavailable:', e?.message || e);
++                console.warn('[GameApp] Lua bitmap owners unavailable:', e?.message || e);
+             }
+         }
+         // Current-client transparente.lua owner. RenderPartObject queries this
+@@ -433,7 +427,7 @@ export class GameApp {
+         // Opções com persistance
+         try { GameOptions.init({ canvas: null }); } catch (e) { console.warn('GameOptions:', e); }
+ 
+-        // Fluxo inicial R12.3 usa o FUNDO real da Title Scene MuPromax sem
++        // Fluxo inicial versão anterior usa o FUNDO real da Title Scene MuPromax sem
+         // overlays MU/Webzen (requisito visual confirmado pelo usuário). A R12
+         // usava LSBg01..04 aqui — esses assets pertencem a outro estágio e a
+         // captura física confirmou o pergaminho como loading incorreto.
+@@ -442,7 +436,7 @@ export class GameApp {
+         await this._gotoScene('loading', {
+             duration: 0,
+             onDone: async () => {
+-                // R12.3: aguarda o terreno/câmera World95, mas NUNCA prende
++                // versão anterior: aguarda o terreno/câmera World95, mas NUNCA prende
+                 // a UI indefinidamente por asset/BMD lento. Object95 continua
+                 // carregando em background dentro de loadLoginWorld().
+                 this._reportProgress(90, 'Mundo de login: aguardando World95 real...');
+@@ -2136,7 +2130,9 @@ export class GameApp {
+     _startWorldPrefetch(serverMap, { allowLoading = false, priority = 'idle' } = {}) {
+         const d=getPcWorldDescriptor(serverMap);
+         if(!d)return;
+-        const target=`${d.serverMap}:${d.assetWorld}`;
++        const target=JSON.stringify([RemoteAssets.baseUrl,MUAssets._bmdEpoch,d.assetWorld]);
++        const completed=this._worldPrefetchCompleted ??= new Set();
++        if(completed.has(target))return;
+         const movePriority=priority==='move';
+         const priorityRank=movePriority?2:1;
+         if(this._worldPrefetchTarget===target && (this._worldPrefetchPriorityRank||0)>=priorityRank)return;
+@@ -2151,15 +2147,27 @@ export class GameApp {
+         setTimeout(()=>{
+             if(ctrl.signal.aborted)return;
+             const sceneName=this.scenes?.currentName;
+-            if(sceneName!=='char-select' && sceneName!=='world' && !(allowLoading && sceneName==='loading'))return;
+-            Promise.all([
++            if(sceneName!=='char-select' && sceneName!=='world' && !(allowLoading && sceneName==='loading')){
++                if(this._worldPrefetchAbort===ctrl)this._worldPrefetchTarget=null;
++                return;
++            }
++            this._worldPrefetchJob=Promise.all([
+                 prefetchWorldTerrainCore(d.assetWorld,{signal:ctrl.signal}),
+                 prefetchWorldTerrainObjects(d.assetWorld,{
+                     concurrency:movePriority?3:1, signal:ctrl.signal, yieldBetween:true,
+                     idleTimeout:movePriority?4:80, warmTextures:false,
+                 }),
+-            ]).then(([terrain,objects])=>console.info(`[PERF] prefetch[${movePriority?'move':'idle'}] map=${d.serverMap} ${d.name} -> World${d.assetWorld}: terrain=${terrain.warmed}/${terrain.total}, BMD=${objects.warmed}/${objects.total}${objects.aborted?' [ABORTED]':''}`))
+-              .catch(()=>{});
++            ]).then(([terrain,objects])=>{
++                const current=JSON.stringify([RemoteAssets.baseUrl,MUAssets._bmdEpoch,d.assetWorld]);
++                if(!ctrl.signal.aborted && current===target && !terrain.aborted && !objects.aborted && terrain.warmed===terrain.total && terrain.total>0 && objects.warmed===objects.total && objects.total>0){
++                    completed.add(target);
++                    if(completed.size>16)completed.delete(completed.values().next().value);
++                }
++                console.info(`[PERF] prefetch[${movePriority?'move':'idle'}] map=${d.serverMap} ${d.name} -> World${d.assetWorld}: terrain=${terrain.warmed}/${terrain.total}, BMD=${objects.warmed}/${objects.total}${objects.aborted?' [ABORTED]':''}`);
++            }).catch(()=>{}).finally(()=>{
++                // Partial/aborted attempts are retryable; only complete owners memoize.
++                if(this._worldPrefetchAbort===ctrl)this._worldPrefetchTarget=null;
++            });
+         },movePriority?0:80);
+     }
+ 
+@@ -2570,15 +2578,7 @@ export class GameApp {
+                 this.scene.heights ? this.scene.terrainHe
