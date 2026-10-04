@@ -1,0 +1,233 @@
+enderer.addPresentationUpdate(updateBase);
+ 
+-  const plan = pcStockMaterialPassPlan(type, rawLevel, option1, extOption, customColor);
++  // EVENT branches without a PC return continue through the same level ladder.
++  // Color helpers must see the EVENT enum's default palette, not the source
++  // inventory item's model ID (which can have an unrelated Lua color owner).
++  const paletteType = modelFamily === 'event' ? -1 : type;
++  const plan = ['item','armorinven','event'].includes(modelFamily)
++    ? pcStockMaterialPassPlan(type, rawLevel, option1, extOption, customColor, modelFamily, modelIndex) : [];
+   let added = 0;
++  const pendingBitmapPaths=[];
+   for (const pass of plan) {
+     let tex = null;
+     let tint = new THREE.Color(1, 1, 1);
+@@ -558,9 +794,16 @@ export async function applyPcStockItemPresentation(renderer, {
+       tint = pcExcellentTint(performance.now());
+     } else {
+       tex = await pcMaterialTexture(pass.kind);
+-      if (!tex) continue; // fail closed: no fake material texture
+-      if (pass.kind === 'chrome3') tint = pcSetTint(type);
+-      else if (Array.isArray(customColor) && customColor.length >= 3) {
++      if (!tex) {
++        const path=materialTexturePath(pass.kind); if(path) pendingBitmapPaths.push(path);
++        continue; // fail closed: no fake material texture
++      }
++      if (pass.kind === 'chrome3') tint = pcSetTint(paletteType);
++      else if (pass.kind==='chrome2'||pass.kind==='chrome4') {
++        const base=pcEquipmentBaseTint(type,rawLevel,performance.now(),modelFamily,modelIndex).toArray();
++        tint=new THREE.Color(...pcPartObjectColor2(paletteType,base));
++      }
++      else if (modelFamily === 'item' && Array.isArray(customColor) && customColor.length >= 3) {
+         // LoadItens.lua color owns generic equipment material tint. Do not
+         // apply it to Ancient/Set or Excellent, which have their own PC colors.
+         tint = new THREE.Color(
+@@ -568,6 +811,8 @@ export async function applyPcStockItemPresentation(renderer, {
+           Math.max(0, Math.min(1, Number(customColor[1]) || 0)),
+           Math.max(0, Math.min(1, Number(customColor[2]) || 0)),
+         );
++      } else {
++        tint=new THREE.Color(...pcPartObjectColor(paletteType));
+       }
+     }
+     const overlay = renderer.createOverlayPass?.(pass.flags, { map: tex, color: tint, alpha: 1, meshFilter });
+@@ -580,7 +825,7 @@ export async function applyPcStockItemPresentation(renderer, {
+       } else if (pass.kind === 'chrome3') {
+         renderer.addPresentationUpdate((timeMs) => {
+           const pulse = Math.sin(Number(timeMs) * 0.001) * 0.5 + 0.4;
+-          const c = pcSetTint(type).multiplyScalar(Math.max(0, pulse));
++          const c = pcSetTint(paletteType).multiplyScalar(Math.max(0, pulse));
+           overlay.setColor?.(c);
+         });
+       }
+@@ -589,10 +834,12 @@ export async function applyPcStockItemPresentation(renderer, {
+   // Keep the authored effect selector attached to the renderer for the next
+   // source-backed EffectType owner. It is metadata only here: inventing a
+   // browser glow for an unknown EffectType would violate the PC data contract.
+-  const continuation = await applyPcRenderPartObjectSolidPresentation(renderer, {type,rawLevel,dynamic,meshFilter,phase:'continuation'});
++  const continuation = await applyPcRenderPartObjectSolidPresentation(renderer, {type,rawLevel,modelFamily,modelIndex,dynamic,meshFilter,phase:'continuation'});
+   renderer.userData ??= {};
+   renderer.userData.muItemEffectType = Number(effectType) || 0;
+   renderer.userData.muRenderPartObjectEffect = { type, solid:continuation.handled, exclusive:false, added:continuation.added };
+-  applyPcItemTransparency(renderer,type,meshFilter);
++  pendingBitmapPaths.push(...(continuation.pendingBitmapPaths||[]));
++  publishItemMaterialResidency(renderer,type,pendingBitmapPaths);
++  if (modelFamily === 'item') applyPcItemTransparency(renderer,type,meshFilter);
+   return added + continuation.added + native.added;
+ }
+diff --git a/graphics/MuTerrain.js b/graphics/MuTerrain.js
+index edf91f3..9b9cf77 100644
+--- a/graphics/MuTerrain.js
++++ b/graphics/MuTerrain.js
+@@ -121,12 +121,12 @@ export function terrainGrassFileCandidates(slot, worldIndex) {
+     if (s < 0 || s > 2 || world <= 0) return [];
+     const active = world - 1;
+     if (s === 0 && (active === 63 || active === 66)) {
+-        return ['TileGrass01_R.OZJ', 'TileGrass01_R.OZT'];
++        return ['TileGrass01_R.OZJ', 'TileGrass01_R.jpg'];
+     }
+     const n = String(s + 1).padStart(2, '0');
+-    // PC names these .tga; MU current Data commonly stores the encrypted TGA
+-    // as .OZT, while some worlds carry a JPEG/OZJ counterpart under same stem.
+-    return [`TileGrass${n}.OZT`, `TileGrass${n}.OZJ`];
++    // PC normal grass is TGA/OZT, independently from the same-stem JPEG/OZJ
++    // ground tile. Never substitute ground or grass from a different WorldN.
++    return [`TileGrass${n}.OZT`, `TileGrass${n}.tga`];
+ }
+ 
+ /** InitTerrainLight exact default wind law. `eventEnabled` preserves the
+@@ -167,6 +167,30 @@ function grassCornerIndex(x, y) {
+     return ((y & (G - 1)) * G) + (x & (G - 1));
+ }
+ 
++// Preserve every authored quad and attribute; cull 32x32-cell regions independently.
++// PC RenderTerrain iterates only the frustum region, not the entire 256x256 map.
++export function splitPcGrassGeometry(geo, THREE) {
++    const p=geo.getAttribute('position'),bins=new Map();
++    for(let cell=0;cell<p.count/4;cell++) {
++        const v=cell*4;
++        const key=Math.floor((p.getX(v)+12850)/3200)+8*Math.floor((12800-p.getZ(v))/3200);
++        if(!bins.has(key))bins.set(key,[]);bins.get(key).push(cell);
++    }
++    return [...bins.values()].map(cells=>{
++        const g=new THREE.BufferGeometry();
++        for(const [name,a] of Object.entries(geo.attributes)) {
++            const values=new a.array.constructor(cells.length*4*a.itemSize);
++            cells.forEach((c,i)=>values.set(a.array.subarray(c*4*a.itemSize,(c+1)*4*a.itemSize),i*4*a.itemSize));
++            g.setAttribute(name,new THREE.BufferAttribute(values,a.itemSize,a.normalized));
++        }
++        const index=new Uint32Array(cells.length*6);
++        cells.forEach((c,i)=>{for(let j=0;j<6;j++)index[i*6+j]=geo.index.array[c*6+j]-c*4+i*4;});
++        g.setIndex(new THREE.BufferAttribute(index,1));g.computeBoundingSphere();
++        g.boundingSphere.radius+=60; // greatest authored wind amplitude (world57/58).
++        return g;
++    });
++}
++
+ export function pcTerrainGrassQuad(xi, yi, heights, grassHeight) {
+     const i1 = grassCornerIndex(xi, yi);
+     const i3 = grassCornerIndex(xi + 1, yi + 1);
+@@ -182,17 +206,22 @@ export function pcTerrainGrassQuad(xi, yi, heights, grassHeight) {
+     ];
+ }
+ 
+-async function buildPcTerrainGrassGroup(fetchImageURL, THREE, worldIndex, mapData, heights, lightTex, onStatus = () => {}) {
++// ZzzLodTerrain.cpp only enables blending for PKField/Doppelganger2.
++// Other maps use EnableAlphaTest (GREATER .25), not SRC_ALPHA blending.
++export function pcTerrainGrassUsesAlphaBlend(worldIndex) {
++    return worldIndex === 64 || worldIndex === 67;
++}
++
++async function buildPcTerrainGrassGroup(fetchImageURL, THREE, worldIndex, mapData, heights, lightTex, onStatus = () => {}, walls = null) {
+     if (!pcTerrainGrassEnabled(worldIndex)) {
+         return { group: null, meshes: [], textures: [], sources: [], cells: 0, enabled: false };
+     }
+     const base = `World${worldIndex}`;
+-    const loaded = [];
+-    for (let slot = 0; slot < 3; slot++) {
++    const loaded = await Promise.all(Array.from({ length: 3 }, async (_, slot) => {
+         const candidates = terrainGrassFileCandidates(slot, worldIndex);
+-        const hit = await fetchFirstImage(fetchImageURL, base, candidates, `World${worldIndex} BITMAP_MAPGRASS+${slot}`, { optional: true });
+-        loaded.push(hit);
+-    }
++        const hit = await fetchFirstImage(fetchImageURL, base, candidates, `World${worldIndex} BITMAP_MAPGRASS+${slot}`, { optional: true, exactOnly: true });
++        return hit;
++    }));
+     if (!loaded.some((x) => x.image)) {
+         return { group: null, meshes: [], textures: [], sources: [], cells: 0, enabled: true };
+     }
+@@ -227,6 +256,7 @@ async function buildPcTerrainGrassGroup(fetchImageURL, THREE, worldIndex, mapDat
+         for (let yi = 0; yi < G; yi++) {
+             for (let xi = 0; xi < G; xi++) {
+                 const i1 = grassCornerIndex(xi, yi);
++                if (walls && (walls[i1] & 0x0008)) continue;
+                 if ((layer1[i1] | 0) !== slot) continue;
+                 const i2 = grassCornerIndex(xi + 1, yi);
+                 const i3 = grassCornerIndex(xi + 1, yi + 1);
+@@ -289,7 +319,7 @@ async function buildPcTerrainGrassGroup(fetchImageURL, THREE, worldIndex, mapDat
+         const mat = new THREE.ShaderMaterial({
+             uniforms,
+             fog: true,
+-            transparent: true,
++            transparent: pcTerrainGrassUsesAlphaBlend(worldIndex),
+             depthTest: true,
+             depthWrite: true,
+             side: THREE.DoubleSide, // PC EnableAlphaTest -> DisableCullFace.
+@@ -341,14 +371,17 @@ async function buildPcTerrainGrassGroup(fetchImageURL, THREE, worldIndex, mapDat
+                 }
+             `,
+         });
+-        const grass = new THREE.Mesh(geo, mat);
+-        grass.name = `MU_TERRAIN_GRASS_SLOT_${slot}`;
++        const chunks=splitPcGrassGeometry(geo,THREE);geo.dispose();
++        for(const [chunkIndex,chunkGeo] of chunks.entries()) {
++        const grass = new THREE.Mesh(chunkGeo, mat);
++        grass.name = `MU_TERRAIN_GRASS_SLOT_${slot}_CHUNK_${chunkIndex}`;
+         grass.frustumCulled = true;
+         grass.onBeforeRender = () => {
+             mat.uniforms.uWorldTime.value = (typeof performance !== 'undefined' ? performance.now() : Date.now());
+         };
+         group.add(grass);
+         meshes.push(grass);
++        }
+         textures.push(tex);
+         sources.push(hit.path);
+         totalCells += cellCount;
+@@ -613,12 +646,12 @@ function terrainCandidatePath(base, rel) {
+     return s.startsWith('@/') ? s.slice(2) : `${base}/${s}`;
+ }
+ 
+-async function fetchFirstImage(fetchImageURL, base, candidates, label, { optional = false } = {}) {
++async function fetchFirstImage(fetchImageURL, base, candidates, label, { optional = false, exactOnly = false } = {}) {
+     const errors = [];
+     for (const rel of candidates) {
+         const path=terrainCandidatePath(base,rel);
+         try {
+-            const url = await fetchImageURL(path);
++            const url = await fetchImageURL(path, { exactOnly });
+             if (!url) continue;
+             return { rel, path, image: await loadImage(url, path), errors };
+         } catch (e) {
+@@ -682,6 +715,35 @@ async function buildAtlansWaterAtlas(fetchImageURL, THREE, onStatus = () => {})
+  * @param {Float32Array} heights 256×256 alturas reais
+  * @param {object} opts { loginScenes?: boolean, onStatus?: fn }
+  */
++// RenderTerrainTile: skip TW_NOGROUND at Index1, override each TW_HEIGHT
++// vertex, and preserve the PC triangle fan diagonal Index1 -> Index3.
++// PlaneGeometry's default diagonal differs on non-planar cells.
++export function applyPcTerrainGeometry(geometry, heights, walls = null, specialHeight = 1200) {
++    const pos = geometry.attributes.position;
++    const size = G * CELL;
++    for (let i = 0; i < pos.count; i++) {
++        const x = Math.round((pos.getX(i) + size / 2) / CELL) & (G - 1);
++        const y = Math.round((size / 2 - pos.getZ(i)) / CELL) & (G - 1);
++        const index = y * G + x;
++        pos.setY(i, walls && (walls[index] & 0x0040) ? specialHeight : heights[index]);
++    }
++    const indices = [];
++    let hiddenCells = 0;
++    for (let y = 0; y < G; y++) {
++        for (let x = 0; x < G; x++) {
++            if (walls && (walls[y * G + x] & 0x0008)) { hiddenCells++; continue; }
++            const a = (G - y) * (G + 1) + x;
++            const east = a + 1, north = a - (G + 1);
++            indices.push(a, north, east, east, north, north + 1);
++        }
++    }
++    geometry.setIndex(indices);
++    pos.needsUpdate = true;
++    geometry.computeVertexNormals();
++    geometry.computeBoundingSphere();
++    return { hiddenCells };
++}
++
