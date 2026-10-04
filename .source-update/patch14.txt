@@ -1,0 +1,231 @@
+.server.every(Boolean) && f.gauge &&
++      f.deco0 && f.deco1 && f.arrow0 && f.arrow1 && f.regBtn?.length === 3 && f.regBtn.every(Boolean) &&
+       f.ex03 && f.ex01top && f.ex01bot && f.ex02);
+   }
+ 
+   _applyFrames() {
++    const cache = sceneAssetCache();
+     if (!cache.frames || !this.winEl) return;
+     const f = cache.frames;
+     const set = (sel, url, rep) => {
+@@ -301,6 +312,7 @@ export default class ServerSelectScene {
+   // UpdateDisplay — grupos/servidores/gauges/setas/deco
+   // ------------------------------------------------------------------
+   _render(assetsOnly = false) {
++    const cache = sceneAssetCache();
+     if (!this.winEl) return;
+     for (const { el } of this._groupEls) el.remove();
+     for (const { el } of this._serverEls) el.remove();
+diff --git a/tools/asset-server.cjs b/tools/asset-server.cjs
+index e3480a1..032cb75 100644
+--- a/tools/asset-server.cjs
++++ b/tools/asset-server.cjs
+@@ -1,4 +1,4 @@
+-// Local MU Data asset server with root identity lock.
++// MUWEB R56.2 local Data asset server with root identity lock.
+ // Resolves the current client's original source extensions (.tga/.jpg/.bmp)
+ // and compiled MU extensions (.ozt/.ozj/.ozb) without inventing assets.
+ // Usage: node tools/asset-server.cjs "E:\\...\\Data" 9100
+@@ -65,12 +65,12 @@ function resolveAsset(rel){
+ 
+ const server=http.createServer((req,res)=>{
+   const rel=clean(req.url).replace(/^\/+/, '');
+-  if(!rel){res.writeHead(200,{'Access-Control-Allow-Origin':'*','Cache-Control':'no-store','Content-Type':'text/plain; charset=utf-8','X-MU-Asset-Root':ROOT,'X-MU-Asset-Index':String(indexedFiles)});return res.end('MUWEB ASSET SERVER\n');}
+-  if(rel==='__muweb_asset_root'){res.writeHead(200,{'Access-Control-Allow-Origin':'*','Cache-Control':'no-store','Content-Type':'application/json; charset=utf-8'});return res.end(JSON.stringify({revision:'live-data-root',root:ROOT,indexedFiles})+'\n');}
++  if(!rel){res.writeHead(200,{'Access-Control-Allow-Origin':'*','Cache-Control':'no-store','Content-Type':'text/plain; charset=utf-8','X-MU-Asset-Root':ROOT,'X-MU-Asset-Index':String(indexedFiles)});return res.end('MUWEB ASSET SERVER R56.2\n');}
++  if(rel==='__muweb_asset_root'){res.writeHead(200,{'Access-Control-Allow-Origin':'*','Cache-Control':'no-store','Content-Type':'application/json; charset=utf-8'});return res.end(JSON.stringify({revision:'R89-live-root',root:ROOT,indexedFiles})+'\n');}
+   if(rel==='__muweb_asset_manifest.json'){
+-    // Exact case-preserving inventory of the selected Data root.
++    // Exact case-preserving inventory of the Data root selected by start-r89.
+     // No synthesized aliases are published here; resolution remains fail-closed.
+-    const body=JSON.stringify({revision:'live-data-root',total:indexedRelativeFiles.length,files:indexedRelativeFiles});
++    const body=JSON.stringify({revision:'R89-live-root',total:indexedRelativeFiles.length,files:indexedRelativeFiles});
+     res.writeHead(200,{'Access-Control-Allow-Origin':'*','Cache-Control':'no-store','Content-Type':'application/json; charset=utf-8','Content-Length':Buffer.byteLength(body)});
+     return req.method==='HEAD'?res.end():res.end(body);
+   }
+@@ -84,6 +84,6 @@ const server=http.createServer((req,res)=>{
+   res.writeHead(200,h);fs.createReadStream(full).pipe(res);
+ });
+ server.on('error',e=>{console.error(`[ASSETS] erro porta ${PORT}:`,e.message);process.exitCode=1;});
+-server.listen(PORT,'127.0.0.1',()=>{console.log(`[ASSETS] root: ${ROOT}`);console.log(`[ASSETS] index: ${indexedFiles} files`);console.log(`[ASSETS] http://127.0.0.1:${PORT}/`);});
++server.listen(PORT,'127.0.0.1',()=>{console.log(`[ASSETS R56.2] root: ${ROOT}`);console.log(`[ASSETS R56.2] index: ${indexedFiles} files`);console.log(`[ASSETS R56.2] http://127.0.0.1:${PORT}/`);});
+ 
+ module.exports={ROOT,PORT,resolveAsset,extVariants};
+diff --git a/tools/build-fengari-bitmap.mjs b/tools/build-fengari-bitmap.mjs
+new file mode 100644
+index 0000000..7c75edc
+--- /dev/null
++++ b/tools/build-fengari-bitmap.mjs
+@@ -0,0 +1,14 @@
++// Rebuild only: npm ci --prefix tools/fengari-bitmap-build --ignore-scripts
++// Then: node tools/build-fengari-bitmap.mjs
++// The checked-in bundle needs neither npm Lua dependencies nor a CDN at runtime.
++import path from 'node:path';
++import {fileURLToPath} from 'node:url';
++import {createRequire} from 'node:module';
++const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
++const dependencies=path.join(root,'tools/fengari-bitmap-build/node_modules');
++const require=createRequire(path.join(dependencies,'package.json'));
++const {build}=require('esbuild');
++await build({entryPoints:[path.join(root,'tools/fengari-bitmap-entry.mjs')],
++ nodePaths:[dependencies],bundle:true,format:'esm',platform:'browser',minify:true,
++ define:{'process.env.FENGARICONF':'undefined',process:'undefined'},
++ outfile:path.join(root,'vendor/fengari-bitmap-0.1.4.mjs')});
+diff --git a/tools/fengari-bitmap-entry.mjs b/tools/fengari-bitmap-entry.mjs
+new file mode 100644
+index 0000000..3c629b8
+--- /dev/null
++++ b/tools/fengari-bitmap-entry.mjs
+@@ -0,0 +1,9 @@
++// Browser-only Lua core and the libraries used by bitmap startup scripts.
++import lua from 'fengari/src/lua.js';
++import lauxlib from 'fengari/src/lauxlib.js';
++import core from 'fengari/src/fengaricore.js';
++import base from 'fengari/src/lbaselib.js';
++import table from 'fengari/src/ltablib.js';
++import string from 'fengari/src/lstrlib.js';
++import math from 'fengari/src/lmathlib.js';
++export {lua,lauxlib,core,base,table,string,math};
+diff --git a/tools/gen-item-model-map.mjs b/tools/gen-item-model-map.mjs
+new file mode 100644
+index 0000000..c3a0935
+--- /dev/null
++++ b/tools/gen-item-model-map.mjs
+@@ -0,0 +1,189 @@
++// tools/gen-item-model-map.mjs — R12.4 P3: gera data/ItemModelMap.js a partir
++// da AUTORIDADE PC (D:\Source\Source\Main\source): os gLoadData.AccessModel(...)
++// (LoadData.cpp:21-29: i omitido → Name.bmd; i<10 → Name0i.bmd; senão Namei.bmd).
++// Type = MODEL_<FAMILIA> + offset → chave web '<FAMILIA>:<offset>'.
++// Loops são resolvidos por varredura para trás (a source sempre cola o for no
++// AccessModel); diretivas #if/#else viram variantes — 1ª escrita primária, o
++// resolver runtime decide por existência no manifest (fail-closed).
++import fs from 'fs';
++import path from 'path';
++import url from 'url';
++
++const ROOT = path.resolve(path.dirname(url.fileURLToPath(import.meta.url)), '..');
++const PC_SRC_CANDIDATES = [
++  'D:/Source/Source/Main/source',
++  'C:/MU/Source/Main/source',
++];
++const PC_SRC = process.env.MU_PC_SOURCE || PC_SRC_CANDIDATES.find((p) => fs.existsSync(p)) || PC_SRC_CANDIDATES[0];
++if (!fs.existsSync(PC_SRC)) {
++  console.error(`[gen] FAIL-CLOSED: source PC não encontrada (MU_PC_SOURCE=${process.env.MU_PC_SOURCE ?? '-'}; candidatos: ${PC_SRC_CANDIDATES.join(', ')}). Abortando SEM sobrescrever data/ItemModelMap.js.`);
++  process.exit(1);
++}
++const FILES = ['ZzzOpenData.cpp', 'Event.cpp', 'MonkSystem.cpp', 'ChangeRingManager.cpp', 'GMEmpireGuardian4.cpp'];
++// R12.6 (t-muhjlq66-8): POTION adicionada — autoridade ZzzOpenData.cpp:944+
++// (for i<7 → Potion01-07; +8 Antidote; +9 Beer; +10 Scroll; +11 MagicBox;
++// +12 Event; +13/14 Jewel01/02; +15 Gold; +16 Jewel(3); +21 ConChip; +31 suho;
++// +41 rs; +42 jos; partCharge*/cherryblossom) — necessária p/ os ícones 3D
++// do inventário (RenderItem3D usa Type+MODEL_ITEM = mesmo índice família).
++const FAMILIES = ['SWORD', 'AXE', 'MACE', 'SPEAR', 'BOW', 'STAFF', 'SHIELD', 'WING', 'HELPER', 'POTION', 'ETC'];
++
++function evalExpr(expr, env = {}) {
++  // Tiny arithmetic parser for the forms used by AccessModel rows in Main 5.2:
++  // constants, loop vars, unary +/- and + - *.  Never use JS eval on source.
++  const src = String(expr ?? '').replace(/\s+/g, '');
++  if (!src) return null;
++  const toks = src.match(/[A-Za-z_]\w*|\d+|[()+*\-]/g) || [];
++  if (toks.join('') !== src) return null;
++  let pos = 0;
++  const primary = () => {
++    const t = toks[pos++];
++    if (t == null) return null;
++    if (t === '(') {
++      const v = sum();
++      if (toks[pos++] !== ')') return null;
++      return v;
++    }
++    if (/^\d+$/.test(t)) return Number(t);
++    if (/^[A-Za-z_]\w*$/.test(t) && Number.isInteger(env[t])) return env[t];
++    return null;
++  };
++  const unary = () => {
++    if (toks[pos] === '+') { pos++; return unary(); }
++    if (toks[pos] === '-') { pos++; const v = unary(); return v == null ? null : -v; }
++    return primary();
++  };
++  const product = () => {
++    let v = unary(); if (v == null) return null;
++    while (toks[pos] === '*') { pos++; const r = unary(); if (r == null) return null; v *= r; }
++    return v;
++  };
++  const sum = () => {
++    let v = product(); if (v == null) return null;
++    while (toks[pos] === '+' || toks[pos] === '-') {
++      const op = toks[pos++], r = product(); if (r == null) return null;
++      v = op === '+' ? v + r : v - r;
++    }
++    return v;
++  };
++  const out = sum();
++  return out != null && pos === toks.length && Number.isInteger(out) ? out : null;
++}
++
++function exprIdentifiers(expr) {
++  return new Set((String(expr ?? '').match(/[A-Za-z_]\w*/g) || []));
++}
++
++
++// Main 5.2 mostly calls gLoadData.AccessModel(...), but MonkSystem.cpp uses the
++// same loader contract through its inherited/bare AccessModel(...). The source file
++// allow-list above and MODEL_<family> first argument keep this parser narrow.
++const reAccess = /(?:(?:::)?gLoadData\s*\.\s*)?AccessModel\s*\(\s*MODEL_([A-Z_0-9]+)\s*([+][^,]*)?,\s*"([^"]*)"\s*,\s*"([^"]*)"\s*(?:,\s*([^)]*))?\)/;
++const reFor = (line) => {
++  const m = line.match(/for\s*\(\s*(?:int\s+|short\s+|BYTE\s+|auto\s+)?([a-z])\s*=\s*(\d+)\s*;\s*\1\s*(<|<=)\s*(\d+)\s*;/);
++  if (!m) return null;
++  return { var: m[1], from: +m[2], to: m[3] === '<' ? +m[4] - 1 : +m[4] };
++};
++
++function normDir(dir) {
++  return dir.replace(/\\\\/g, '/').replace(/\\/g, '/').replace(/^Data\//i, '').replace(/\/+$/, '');
++}
++
++const entries = new Map();
++let collisions = 0, skipped = 0, parsed = 0;
++const skippedLog = [];
++
++function addEntry(fam, off, dir, fileName, iEff, lineNo, file) {
++  let name;
++  if (iEff < 0) name = `${fileName}.bmd`;
++  else if (iEff < 10) name = `${fileName}0${iEff}.bmd`;
++  else name = `${fileName}${iEff}.bmd`;
++  const d = normDir(dir);
++  const rel = (d ? d + '/' : '') + name;
++  const key = `${fam}:${off}`;
++  const ev = { path: rel, src: `${file}:L${lineNo}` };
++  const cur = entries.get(key);
++  if (!cur) { entries.set(key, { path: rel, variants: [ev] }); parsed++; }
++  else { collisions++; cur.variants.push(ev); }
++}
++
++for (const f of FILES) {
++  const fp = path.join(PC_SRC, f);
++  if (!fs.existsSync(fp)) continue;
++  const lines = fs.readFileSync(fp, 'utf8').split(/\r?\n/);
++  for (let li = 0; li < lines.length; li++) {
++    const line = lines[li];
++    const ma = line.match(reAccess);
++    if (!ma) continue;
++    const [, fam, offExprRaw, dir, fileName, iArgRaw] = ma;
++    if (!FAMILIES.includes(fam)) continue;
++    const exprText = `${offExprRaw || ''} ${iArgRaw ?? ''}`;
++    const ids = exprIdentifiers(exprText);
++    if (!ids.size) {
++      const off = evalExpr(offExprRaw || '0');
++      const iEff = iArgRaw === undefined ? -1 : evalExpr(iArgRaw);
++      if (off == null || iEff == null) { skipped++; skippedLog.push(`${f}:L${li + 1} expr não avaliável`); continue; }
++      addEntry(fam, off, dir, fileName, iEff, li + 1, f);
++      continue;
++    }
++
++    // Recover the source loop context. Main 5.2 has both one-level loops and
++    // the socket-sphere nested i/j loop (MODEL_WING+100+i*6+j).  versão anterior's
++    // generator only understood i/c and the nearest loop, silently omitting
++    // 30 stock sphere models plus k-loop package items from ItemModelMap.
++    const loops = [];
++    const sameLine = reFor(line);
++    if (sameLine) loops.push(sameLine);
++    for (let b = li - 1; b >= 0 && b >= li - 12; b--) {
++      const bl = lines[b].tri
