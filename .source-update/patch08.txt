@@ -1,0 +1,223 @@
+s in the source, not the
+     // remapped render level. +14 and +15 own both chrome and metal bright passes.
+-    if (group===15 && index===5) {
++    if (isEvent && event===5) {
+       const itemLevel=(Number(rawLevel)>>3)&15;
+       if (itemLevel===14 || itemLevel===15) {
+         const base=itemLevel===14?new THREE.Color(.2,.3,.5):new THREE.Color(.5,.3,.2);
+         const glow=itemLevel===14?new THREE.Color(.1,.3,1):new THREE.Color(1,.3,.1);
+         _setMeshBaseColor(renderer,all,base);
+         overlay(RenderFlags.CHROME|RenderFlags.BRIGHT,{map:chrome,color:glow,meshFilter:all});
+-        overlay(RenderFlags.METAL|RenderFlags.BRIGHT,{map:metal||chrome2||chrome,color:glow,meshFilter:all});
+-        return {handled:true,exclusive:true,added};
++        overlay(RenderFlags.METAL|RenderFlags.BRIGHT,{map:metal,color:glow,meshFilter:all});
++        return result(true,true);
+       }
+     }
+-    // MODEL_EVENT+6 rendered Level 13: blue COLOR body + chrome bright.
+-    if (group===15 && index===6 && level===13) {
+-      _setMeshBaseColor(renderer,all,new THREE.Color(.4,.6,1));
++    // MODEL_EVENT+6 Level 13 replaces the diffuse body with a solid COLOR
++    // draw, then adds Chrome. Recoloring the textured base is not equivalent:
++    // RENDER_COLOR calls DisableTexture in BMD::RenderMesh and therefore must
++    // publish an untextured pass with the original diffuse draw suppressed.
++    if (isEvent && event===6 && level===13) {
++      _setMeshVisible(renderer,all,false);
++      overlay(RenderFlags.COLOR,{color:new THREE.Color(.4,.6,1),meshFilter:all});
+       overlay(RenderFlags.CHROME|RenderFlags.BRIGHT,{map:chrome,color:new THREE.Color(.4,.6,1),meshFilter:all});
+-      return {handled:true,exclusive:true,added};
++      return result(true,true);
+     }
+ 
+     // Wings 21..24 / 35 / 48: two additive authored texture meshes cross-fade.
+@@ -406,24 +569,24 @@ export async function applyPcRenderPartObjectSolidPresentation(renderer, {
+         const q=Math.sin(Number(t)*.001)*.5+.5;
+         a?.setColor?.(new THREE.Color(q,q,q)); b?.setColor?.(new THREE.Color(1-q,1-q,1-q));
+       });
+-      return {handled:true,exclusive:true,added};
++      return result(true,true);
+     }
+     // MODEL_HELPER+31: body plus one bright texture pass; level1 is cyan.
+     if (group===13 && index===31) {
+       const c=level===1?new THREE.Color(.3,.8,1):new THREE.Color(1,1,1);
+       overlay(RenderFlags.TEXTURE|RenderFlags.BRIGHT,{color:c,meshFilter:mi(0)});
+-      return {handled:true,exclusive:true,added};
++      return result(true,true);
+     }
+     // MODEL_HELPER+15: source replaces normal body by METAL then additive CHROME.
+     if (group===13 && index===15) {
+       const colors=[new THREE.Color(0,.5,1),new THREE.Color(1,.2,0),new THREE.Color(1,.8,0),new THREE.Color(.6,.8,.4)];
+       const c=colors[level]||new THREE.Color(1,1,1);
+       _setMeshVisible(renderer,all,false);
+-      const m=overlay(RenderFlags.METAL,{map:metal||chrome2,color:c,meshFilter:all});
+-      const ch=overlay(RenderFlags.CHROME|RenderFlags.BRIGHT,{map:chrome2||chrome,color:c,meshFilter:all});
++      const m=overlay(RenderFlags.METAL,{map:chromePlus1,color:c,meshFilter:all});
++      const ch=overlay(RenderFlags.CHROME|RenderFlags.BRIGHT,{map:chromePlus1,color:c,meshFilter:all});
+       // Overlay meshes are independent draws; hiding source exactly avoids the
+       // extra diffuse pass that produced white helpers in previous builds.
+-      return {handled:true,exclusive:true,added};
++      return result(true,true);
+     }
+     // MODEL_HELPER+18: TEXTURE|BRIGHT body with source sine light.
+     if (group===13 && index===18) {
+@@ -433,30 +596,80 @@ export async function applyPcRenderPartObjectSolidPresentation(renderer, {
+       if(dynamic&&o&&renderer.addPresentationUpdate) renderer.addPresentationUpdate((t)=>{
+         const q=Math.sin(Number(t)*.002)*.3+.7;o.setColor?.(new THREE.Color(q,q,q));
+       });
+-      return {handled:true,exclusive:true,added};
++      return result(true,true);
++    }
++  }
++
++  if (phase === 'continuation' && isEvent && (event===12 || event===13)) {
++    const sprite=applyPcEventBoneSpritePresentation(renderer,{event,map:sparkPlus1,dynamic});
++    // A decoded bitmap without bone 0 is still an incomplete render graph.
++    // Do not freeze that partial icon in the inventory cache.
++    if (sparkPlus1 && !sprite) pendingBitmapPaths.push('BMD/Bone0');
++    // EVENT13 continues to its authored StreamMesh=0 body state below.
++    if (event===12) return result(true,false);
++  }
++
++  if (phase === 'continuation' && modelFamily==='item' && group===14 && [18,19,21].includes(index)) {
++    const sprites=applyPcPotionSpritePresentation(renderer,{index,map:sparkPlus1,dynamic});
++    if (sparkPlus1 && !sprites) {
++      for (const plan of pcPotionSpritePlans(index,0)) {
++        if (plan.boneIndex!==null && !renderer.bones?.[plan.boneIndex]?.isBone) pendingBitmapPaths.push(`BMD/Bone${plan.boneIndex}`);
++      }
++      if (!pendingBitmapPaths.length) pendingBitmapPaths.push('BMD/SpriteAnchor');
+     }
++    return result(true,false);
+   }
+ 
+   if (phase === 'continuation') {
++    // POTION+17 mutates OBJECT state and falls through to the generic body.
++    // Blend selection is by BMD texture slot, while scroll ownership is mesh 1.
++    if(modelFamily==='item'&&group===14&&index===17) {
++      const update=(t)=>{
++        const state=pcPotion17BlendState(t); if(!state)return;
++        renderer.setBaseBlendTexture?.(state.textureIndex,state.blendMeshLight,{
++          alpha:state.alpha,bodyLight:new THREE.Color(...state.bodyLight),
++          scrollMeshIndex:state.scrollMeshIndex,u:state.u,v:state.v,
++        });
++      };
++      update(performance.now());
++      if(dynamic&&renderer.addPresentationUpdate)renderer.addPresentationUpdate(update);
++      return result(true,false);
++    }
++    // MODEL_EVENT+13 leaves BMD::StreamMesh=0 active for the generic body draw.
++    // Besides the sawtooth V scroll, StreamMesh disables normal lighting only
++    // for mesh 0. Its bone-attached BITMAP_SPARK+1 is a separate pending owner.
++    if(isEvent&&event===13) {
++      const update=(t)=>renderer.setBaseStreamMesh?.(0,0,pcEvent13StreamV(t));
++      update(performance.now());
++      if(dynamic&&renderer.addPresentationUpdate)renderer.addPresentationUpdate(update);
++      return result(true,false);
++    }
++    // MODEL_EVENT+18 sets OBJECT::BlendMesh=1 and then falls through to the
++    // generic body draw. BMD compares m->Texture (not mesh index): every draw
++    // using texture slot 1 becomes textured ONE/ONE with BlendMeshLight=1.
++    if(isEvent&&event===18) {
++      renderer.setBaseBlendTexture?.(1,1);
++      return result(true,false);
++    }
+     // Spear+9 streams Chrome over the normal RenderPartObject tail.
+     if(group===3&&index===9) {
+       overlay(RenderFlags.CHROME,{map:chrome,color:new THREE.Color(.5,.5,1.5),meshFilter:all});
+-      return {handled:true,exclusive:false,added};
++      return result(true,false);
+     }
+     // Helper+17: moving chrome stream mesh0; body texture remains underneath.
+     if(group===13&&index===17) {
+       const o=overlay(RenderFlags.CHROME,{map:chrome,color:new THREE.Color(.9,.1,.1),meshFilter:mi(0)});
+       if(dynamic&&o&&renderer.addPresentationUpdate) renderer.addPresentationUpdate((t)=>o.setUvOffset?.(0,-(Number(t)%2000)*.0005));
+-      return {handled:true,exclusive:false,added};
++      return result(true,false);
+     }
+     // Source HiddenMesh switches.
+     if((group===14&&index===7)||(group===13&&index===7)) {
+       _setMeshVisible(renderer,mi(level===0?1:0),false);
+-      return {handled:true,exclusive:false,added};
++      return result(true,false);
+     }
+     if(group===13&&index===11) {
+       _setMeshVisible(renderer,mi(1),false);
+-      return {handled:true,exclusive:false,added};
++      return result(true,false);
+     }
+     // BlendMeshLight-only branches are represented as a matching additive
+     // texture light pass so the original diffuse item is not recolored.
+@@ -472,10 +685,18 @@ export async function applyPcRenderPartObjectSolidPresentation(renderer, {
+       if(dynamic&&o&&renderer.addPresentationUpdate) renderer.addPresentationUpdate((t)=>{
+         const v=Math.max(0,law(Number(t)));o.setColor?.(new THREE.Color(v,v,v));
+       });
+-      return {handled:true,exclusive:false,added};
++      return result(true,false);
+     }
+   }
+-  return {handled:false,exclusive:false,added};
++  return result(false,false);
++}
++
++function publishItemMaterialResidency(renderer, type, pendingPaths) {
++  renderer.userData ??= {};
++  const pendingBitmapPaths=[...new Set((pendingPaths||[]).filter(Boolean))];
++  const program={itemType:type,complete:pendingBitmapPaths.length===0,pendingBitmapPaths};
++  (renderer.userData.muItemMaterialResidencyPrograms ??= {})[type]=program;
++  return program;
+ }
+ 
+ function applyPcItemTransparency(renderer, type, meshFilter = null) {
+@@ -503,7 +724,7 @@ function applyPcItemTransparency(renderer, type, meshFilter = null) {
+ }
+ 
+ export async function applyPcStockItemPresentation(renderer, {
+-  type, rawLevel = 0, option1 = 0, extOption = 0, customColor = null, effectType = 0, dynamic = true, meshFilter = null,
++  type, rawLevel = 0, modelFamily = 'item', modelIndex = null, option1 = 0, extOption = 0, customColor = null, effectType = 0, dynamic = true, meshFilter = null,
+ } = {}) {
+   if (!renderer || !Number.isInteger(type)) return 0;
+ 
+@@ -513,28 +734,37 @@ export async function applyPcStockItemPresentation(renderer, {
+   // blinking items. Any authored RenderModel program suppresses the generic tail
+   // for that item, even when colorOwned=0; its ordered passes already describe
+   // the intended mesh/mode/light presentation.
+-  const native = await applyPcNativeRenderModelPresentation(renderer, { type, dynamic, meshFilter });
++  const native = modelFamily === 'item'
++    ? await applyPcNativeRenderModelPresentation(renderer, { type, dynamic, meshFilter })
++    : {owned:false,colorOwned:false,added:0};
+   if (native.owned) {
+     renderer.userData ??= {};
+     renderer.userData.muItemEffectType = Number(effectType) || 0;
+     renderer.userData.muStockTailSuppressedByRenderModel = true;
++    publishItemMaterialResidency(renderer,type,[]);
+     applyPcItemTransparency(renderer,type,meshFilter);
+     return native.added;
+   }
+ 
++  if (!(renderer.meshes||[]).some(mesh=>typeof meshFilter!=='function'||meshFilter(mesh))) {
++    publishItemMaterialResidency(renderer,type,[]);
++    return 0;
++  }
++
+   // RenderPartObjectEffect special branches precede the generic stock ladder.
+-  const special = await applyPcRenderPartObjectSolidPresentation(renderer, {type,rawLevel,dynamic,meshFilter,phase:'exclusive'});
++  const special = await applyPcRenderPartObjectSolidPresentation(renderer, {type,rawLevel,modelFamily,modelIndex,dynamic,meshFilter,phase:'exclusive'});
+   if (special.exclusive) {
+     renderer.userData ??= {};
+     renderer.userData.muRenderPartObjectEffect = { type, solid:true, exclusive:true, added:special.added };
+     renderer.userData.muItemEffectType = Number(effectType) || 0;
+-    applyPcItemTransparency(renderer,type,meshFilter);
++    publishItemMaterialResidency(renderer,type,special.pendingBitmapPaths);
++    if (modelFamily === 'item') applyPcItemTransparency(renderer,type,meshFilter);
+     return special.added;
+   }
+ 
+   // Base equipment tint is source-authored even before the additive passes.
+   const updateBase = (timeMs) => {
+-    const c = pcEquipmentBaseTint(type, rawLevel, timeMs);
++    const c = pcEquipmentBaseTint(type, rawLevel, timeMs, modelFamily, modelIndex);
+     for (const mesh of renderer.meshes || []) {
+       if (typeof meshFilter === 'function' && !meshFilter(mesh)) continue;
+       const mat = mesh.material;
+@@ -548,8 +778,14 @@ export async function applyPcStockItemPresentation(renderer, {
+   updateBase(performance.now());
+   if (dynamic && typeof renderer.addPresentationUpdate === 'function') r
