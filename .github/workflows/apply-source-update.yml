@@ -17,19 +17,28 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Apply source patch
+      - name: Rebuild and apply source patch
         shell: bash
         run: |
           set -euo pipefail
-          cat .source-update/patch*.txt > /tmp/source-update.patch
+          : > /tmp/source-update.patch
+          for f in $(printf '%s\n' .source-update/patch*.txt | sort -V); do
+            python3 - "$f" <<'PY' >> /tmp/source-update.patch
+          from pathlib import Path
+          import sys
+          data = Path(sys.argv[1]).read_bytes()
+          if data.endswith(b'\n'):
+              data = data[:-1]
+          sys.stdout.buffer.write(data)
+          PY
+          done
           git apply --check /tmp/source-update.patch
           git apply /tmp/source-update.patch
 
-          # Public-safe defaults. Runtime secrets and local machine paths belong in env/config outside Git.
-          sed -i "s/process.env.DB_PASSWORD || 'muonline123'/process.env.DB_PASSWORD || ''/" database/config/database.js || true
-
           rm -rf .source-update .source-upload docs/ENGINE
           rm -f INICIAR_ASSETS.bat INICIAR_GATEWAY.bat INICIAR_WEB.bat
+          rm -f .github/workflows/apply-current-source.yml
+          rm -f .github/workflows/import-current-source.yml
           rm -f .github/workflows/apply-source-update.yml
 
       - name: Validate public tree
