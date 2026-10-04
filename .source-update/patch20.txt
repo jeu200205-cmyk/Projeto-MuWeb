@@ -1,0 +1,198 @@
+gerenciam estados) */
+-  frames(key) { return cache.btnFrames[key] || null; },
++  frames(key) { return spriteCache().btnFrames[key] || null; },
+ 
+   /**
+    * Frames de um strip por definição key com geometria explícita (fw×fh).
+    * Usado quando a cena precisa dos frames crus (ex.: cha_bt 108×26×4).
+    */
+   async stripFrames(key, fw, fh) {
++    const cache = spriteCache();
+     const def = DEFS[key];
+     if (!def) return null;
+-    if (cache.btnFrames[key]) return cache.btnFrames[key];
++    if (completeFrames(cache.btnFrames[key], def.frames)) return cache.btnFrames[key];
+     if (cache.loading) await cache.loading;
+-    if (cache.btnFrames[key]) return cache.btnFrames[key];
++    if (!spriteOwnerCurrent(cache)) return null;
++    if (completeFrames(cache.btnFrames[key], def.frames)) return cache.btnFrames[key];
+     const decoded = await RemoteAssets.fetchDecodedImage(def.path).catch(() => null);
+-    if (!decoded) return null;
++    if (!decoded || !spriteOwnerCurrent(cache)) return null;
+     cache.images[key] = decoded.url;
+-    const count = Math.max(1, def.frames || Math.floor(fh > 0 ? fh / fh : 1));
+     const frames = await sliceFrames(decoded, fw, fh, def.frames || 3);
+-    if (frames) cache.btnFrames[key] = frames;
++    if (!spriteOwnerCurrent(cache)) return null;
++    if (completeFrames(frames, def.frames || 3)) cache.btnFrames[key] = frames;
+     return frames;
+   },
+ 
+diff --git a/ui2/InventoryWindow.js b/ui2/InventoryWindow.js
+index 0c1c805..84431c9 100644
+--- a/ui2/InventoryWindow.js
++++ b/ui2/InventoryWindow.js
+@@ -87,9 +87,12 @@ export const PC_EQUIPMENT_SLOTS = Object.freeze([
+     { key:'boots',   serverIndex:6,  x:135, y:150, w:46, h:46, asset:'Interface/newui_item_boots.OZT', types:[ITEM_TYPES.BOOTS] },
+     { key:'wings',   serverIndex:7,  x:120, y:44,  w:61, h:46, asset:'Interface/newui_item_wing.OZT', types:[ITEM_TYPES.WINGS] },
+     { key:'helper',  serverIndex:8,  x:15,  y:44,  w:46, h:46, asset:'Interface/newui_item_fairy.OZT', types:[] },
+-    { key:'amulet',  serverIndex:9,  x:54,  y:87,  w:28, h:28, asset:'Interface/newui_item_necklace.OZT', types:[] },
+-    { key:'ring1',   serverIndex:10, x:54,  y:150, w:28, h:28, asset:'Interface/newui_item_ring.OZT', types:[ITEM_TYPES.RING] },
+-    { key:'ring2',   serverIndex:11, x:114, y:150, w:28, h:28, asset:'Interface/newui_item_ring.OZT', types:[ITEM_TYPES.RING] },
++    // CNewUIMyInventory::SetEquipmentSlotInfo uses the authored 20x20
++    // accessory rectangles.  The former 28x28 values came from the older
++    // ZzzInventory layout and made the NewUI previews oversized/offset.
++    { key:'amulet',  serverIndex:9,  x:59,  y:88,  w:20, h:20, asset:'Interface/newui_item_necklace.OZT', types:[] },
++    { key:'ring1',   serverIndex:10, x:59,  y:151, w:20, h:20, asset:'Interface/newui_item_ring.OZT', types:[ITEM_TYPES.RING] },
++    { key:'ring2',   serverIndex:11, x:119, y:151, w:20, h:20, asset:'Interface/newui_item_ring.OZT', types:[ITEM_TYPES.RING] },
+ ]);
+ 
+ // Exact current-client ElementSlots.cpp extension. The Lua owner may activate
+@@ -103,11 +106,23 @@ export const PC_ELEMENT_EQUIPMENT_SLOTS = Object.freeze([
+ 
+ export function pcEquipmentIconRect(def) {
+     return {
+-        x: 1, y: def.key === 'armor' && !def.extended ? -10 : 0,
++        // The slot host is already created at SetEquipmentSlotInfo.x + 1.
++        // Adding another local +1 shifted every rendered item two pixels from
++        // the source viewport.  Only armor owns the PC's authored y-10.
++        x: 0, y: def.key === 'armor' && !def.extended ? -10 : 0,
+         w: Math.max(8, Number(def.w) - 4), h: Math.max(8, Number(def.h) - 4),
+     };
+ }
+ 
++export function pcEquipmentSlotHostRect(def) {
++    return {
++        x: Number(def.x) + 1,
++        y: Number(def.y),
++        w: Math.max(8, Number(def.w) - 4),
++        h: Math.max(8, Number(def.h) - 4),
++    };
++}
++
+ const EQUIP_SLOTS = PC_EQUIPMENT_SLOTS;
+ 
+ export class InventoryWindow extends MUWindow {
+@@ -192,9 +207,10 @@ export class InventoryWindow extends MUWindow {
+         this.equipSlots = {};
+         for (const def of this._equipDefs) {
+             // PC mouse hitbox is x+1/y/(w-4)/(h-4); artwork remains the full rect.
++            const host = pcEquipmentSlotHostRect(def);
+             const cell = this._createSlot(
+                 { kind:'equip', key:def.key },
+-                { x:def.x + 1, y:def.y, w:def.w - 4, h:def.h - 4, iconSize:Math.max(18, Math.min(def.w, def.h)) }
++                { ...host, iconSize:Math.max(18, Math.min(def.w, def.h)) }
+             );
+             cell.dataset.pcFullRect = `${def.x},${def.y},${def.w},${def.h}`;
+             if (def.extended) {
+@@ -1107,7 +1123,7 @@ export class InventoryWindow extends MUWindow {
+                     if (this._destroyed || this.visible || generation !== this._prewarmGeneration) return;
+                     const { item, size } = job;
+                     try {
+-                        await renderIcon3D(io, Number(item.itemType ?? item.type), Number.isInteger(item.rawLevel) ? item.rawLevel : ((item.level || 0) << 3), size, item);
++                        await renderIcon3D(io, Number(item.itemType ?? item.type), Number.isInteger(item.rawLevel) ? item.rawLevel : ((item.level || 0) << 3), size, {...item, iconPadding:32});
+                     } catch (_) { /* fail-closed: visible render will report the same missing owner */ }
+                 }
+             };
+@@ -1199,12 +1215,25 @@ export class InventoryWindow extends MUWindow {
+             const cvHost = document.createElement('span');
+             cvHost.style.cssText = 'position:absolute;inset:0;display:flex;align-items:center;justify-content:center;';
+             span.appendChild(cvHost);
+-            this._itemIO().then((io) => io && renderIcon3D(io, Number(item.itemType ?? item.type), Number.isInteger(item.rawLevel) ? item.rawLevel : ((item.level || 0) << 3), {w:iconW,h:iconH}, item)).then((cv) => {
++            const load=async()=>{
++                const io=await this._itemIO();if(!io)return null;
++                for(let attempt=0;attempt<3;attempt++){
++                    if(this._destroyed||!cvHost.isConnected)return null;
++                    const cv=await renderIcon3D(io, Number(item.itemType ?? item.type), Number.isInteger(item.rawLevel) ? item.rawLevel : ((item.level || 0) << 3), {w:iconW,h:iconH}, {...item,iconPadding:32});
++                    if(cv)return cv;
++                    if(attempt<2)await new Promise(r=>setTimeout(r,150*(attempt+1)));
++                }
++                return null;
++            };
++            load().then((cv) => {
+                 if (cv && cvHost.isConnected) {
+-                    cv.style.cssText = `width:${iconW}px;height:${iconH}px;max-width:100%;max-height:100%;image-rendering:auto;`;
++                    // PC renders items in the whole item-view viewport. Keep
++                    // pixels extending past the slot without scaling the icon.
++                    const pad=Number(cv.dataset.muIconPadding)||0;
++                    cv.style.cssText = `position:absolute;left:${-pad}px;top:${-pad}px;width:${cv.width}px;height:${cv.height}px;max-width:none;max-height:none;pointer-events:none;image-rendering:auto;`;
+                     cvHost.appendChild(cv);
+                 }
+-            });
++            }).catch(e=>console.warn('[Inventory] ícone indisponível:',e.message));
+         }
+         // Main 5.2 does not draw a generic +level label or generic Excellent
+         // text glow over every inventory icon. RenderNumberOfItem is selective.
+diff --git a/ui2/ItemIconRenderer.js b/ui2/ItemIconRenderer.js
+index 6a44a93..c4ba1d9 100644
+--- a/ui2/ItemIconRenderer.js
++++ b/ui2/ItemIconRenderer.js
+@@ -17,6 +17,7 @@ import { loadCustomItemPresentation, customItemPosition, customItemSize } from '
+ import { itemAttributeFor } from '../data/ItemAttributeData.js';
+ import { parseBMD } from '../graphics/BmdParser.js';
+ import { extractPartMeshes } from '../graphics/BmdAdapter.js';
++import { RemoteAssets } from '../data/RemoteAssets.js';
+ 
+ // ---- categoria por Type 12-bit (_define.h:379-394: cat=floor(Type/512)) ----
+ const CAT = (t) => Math.floor(t / 512);
+@@ -26,6 +27,57 @@ const ITEM_SWORD = 0, ITEM_AXE = 1, ITEM_MACE = 2, ITEM_SPEAR = 3, ITEM_BOW = 4,
+     ITEM_GLOVES = 10, ITEM_BOOTS = 11, ITEM_WING = 12, ITEM_HELPER = 13, ITEM_POTION = 14, ITEM_ETC = 15;
+ const MAX_ITEM_INDEX = 512; // por família (12-bit domain)
+ 
++// RenderItem3D chooses a MODEL_* before RenderObjectScreen/RenderPartObject.
++// Regular alternates query Lua by their resolved MODEL_ITEM type. EVENT and
++// ARMORINVEN have independent enum ranges and must never inherit original
++// item Lua ownership or be aliased to ITEM_ETC.
++export function pcInventoryMaterialIdentity(type, rawLevel = 0) {
++    const g = CAT(type), i = OFF(type), lv = (Number(rawLevel) >> 3) & 0x0F;
++    if (g === ITEM_ARMOR && i >= 59 && i <= 61) {
++        return {type, rawLevel, remapped:true, modelFamily:'armorinven', modelIndex:i + 1};
++    }
++    let eventIndex = null, eventRawLevel = rawLevel;
++    if (g === ITEM_POTION && i === 12 && lv === 0) eventIndex = 0;
++    else if (g === ITEM_POTION && i === 12 && lv === 2) eventIndex = 1;
++    else if (g === ITEM_POTION && i === 11) eventIndex = ({1:4,2:5,3:6,5:8,6:9,8:10,9:10,10:10,11:10,12:10,13:6,14:5,15:5})[lv] ?? null;
++    else if (g === ITEM_HELPER && i === 14 && lv === 1) eventIndex = 16;
++    else if (g === ITEM_POTION && i === 9 && lv === 1) eventIndex = 7;
++    else if (g === ITEM_POTION && i === 21 && (lv === 1 || lv === 2)) eventIndex = 11;
++    else if (g === ITEM_POTION && i >= 32 && i <= 34 && lv === 1) eventIndex = 21 + i - 32;
++    else if (g === ITEM_POTION && i === 23 && lv === 1) { eventIndex = 12; eventRawLevel = -1; }
++    else if (g === ITEM_POTION && i === 24 && lv === 1) { eventIndex = 13; eventRawLevel = -1; }
++    else if (g === ITEM_HELPER && i === 20 && lv === 0) eventIndex = 15;
++    else if (g === ITEM_HELPER && i === 20 && lv >= 1 && lv <= 3) eventIndex = 14;
++    else if (g === ITEM_HELPER && i === 11 && lv === 1) eventIndex = 18;
++    if (eventIndex !== null) {
++        return { type, rawLevel: eventRawLevel, remapped: true, modelFamily: 'event', modelIndex: eventIndex };
++    }
++    if (g === ITEM_POTION && (i === 47 || i === 48)) {
++        return { type: ITEM_POTION * MAX_ITEM_INDEX + 46, rawLevel, remapped: true };
++    }
++    if (g === ITEM_HELPER && i === 19 && lv >= 0 && lv <= 2) {
++        const target = [ITEM_STAFF * MAX_ITEM_INDEX + 10, 19, ITEM_BOW * MAX_ITEM_INDEX + 18][lv];
++        // PC passes -1 to select miniature scale, then RenderObjectScreen
++        // resets ItemLevel=0 for STAFF+10 / SWORD+19 / BOW+18 before materials.
++        return { type: target, rawLevel: 0, remapped: true };
++    }
++    return { type, rawLevel, remapped: false };
++}
++
++export function pcInventoryMaterialOptions(type, rawLevel = 0, presentation = {}) {
++    const identity = pcInventoryMaterialIdentity(type, rawLevel);
++    const owner = identity.modelFamily ? null : customItemModelForType(identity.type);
++    const color = identity.remapped ? owner?.color : (presentation.customColor ?? owner?.color);
++    const effectType = identity.remapped ? owner?.effectType : (presentation.effectType || owner?.effectType);
++    return {
++        type: identity.type, rawLevel: identity.rawLevel,
++        modelFamily: identity.modelFamily ?? 'item', modelIndex: identity.modelIndex ?? null,
++        option1: Number(presentation.option1) || 0, extOption: Number(presentation.extOption) || 0,
++        customColor: Array.isArray(color) ? color : null,
++        effectType: Number(effectType) || 0,
++    };
++}
++
+ 
+ // ---- Main 5.2 item-view camera / absolute presentation --------------------
+ // Authority: ZzzOpenglUtil.cpp::gluPerspective2/CreateScreenVector and
+@@ -55,6 +107,8 @@ export function pcItemViewRect(width, height) {
+ 
+ export function renderItem3dUsesAlternateModel(type, rawLevel = 
