@@ -1,0 +1,212 @@
+ightAt(x, z) : 0);
+             Movement.setWalkableFn((x, z) => this.scene?.isWalkable?.(x, z) !== false);
+             Movement.setCollisionWorld(this.collisionWorld);
+-            this._ctm?.detach?.();
+-            this._ctm = ClickToMove.attach(this.scene.scene, this.scene.mainObject, this.scene.camera.threeCamera, {
+-                terrain: this.scene.terrain,
+-                domElement: this.scene.renderer?.domElement || window,
+-                autoBind: false,
+-                // O antigo RingGeometry verde era um placeholder Web sem owner
+-                // PC comprovado. R79 deixa o click-position VFX fail-closed.
+-                phantomDuration: 0,
+-            });
++            this._attachClickMovement();
+         } catch (e) { console.warn('[move]', e); }
+ 
+         // QuickHotkeys (teclas de UI)
+@@ -3056,25 +3056,40 @@ export class GameApp {
+ 
+     _installFpsControl() {
+         if (this._fpsControl?.isConnected) { this._refreshFpsControl(); return; }
+-        const root = this._gameUIViewport?.board || document.body;
++        const root = this.hud?.pcLayer;
++        if (!root) return;
+         const box = document.createElement('div');
+         box.dataset.muRole = 'fps-control';
+-        box.style.cssText = 'position:absolute;right:8px;top:8px;z-index:80;display:flex;gap:4px;align-items:center;padding:3px 5px;background:rgba(0,0,0,.58);border:1px solid rgba(218,189,160,.55);font:10px Tahoma;color:#eee;user-select:none;';
+-        const value = document.createElement('span');
++        const r = PC_MAINFRAME_FPS_RECT;
++        box.style.cssText = `position:absolute;left:${r.x}px;top:${r.y}px;width:${r.w}px;height:${r.h}px;z-index:605;font:10px Tahoma;color:white;user-select:none;pointer-events:auto;`;
++        const value = document.createElement('button');
++        value.type = 'button';
++        value.title = 'FPS — limite 30 / 60 / 120';
++        value.setAttribute('aria-expanded', 'false');
+         value.dataset.muRole = 'fps-value';
+-        value.style.cssText = 'min-width:48px;text-align:right;color:#8cff8c;';
++        value.style.cssText = 'display:block;width:100%;height:100%;padding:0;border:0;background:transparent;font:inherit;color:inherit;text-align:center;white-space:nowrap;cursor:pointer;';
+         box.appendChild(value);
++        const menu = document.createElement('div');
++        menu.style.cssText = 'position:absolute;right:0;bottom:14px;display:none;gap:4px;padding:4px;background:rgba(0,0,0,.85);border:1px solid #6f604d;';
++        const setOpen = open => { menu.style.display = open ? 'flex' : 'none'; value.setAttribute('aria-expanded', String(open)); };
++        value.addEventListener('click', e => { e.stopPropagation(); setOpen(menu.style.display === 'none'); });
++        box.addEventListener('keydown', e => { if(e.key==='Escape'){setOpen(false);value.focus();e.stopPropagation();} });
++        box.addEventListener('focusout', e => { if(!box.contains(e.relatedTarget))setOpen(false); });
+         for (const cap of [30,60,120]) {
+             const b=document.createElement('button'); b.type='button'; b.textContent=String(cap);
+             b.style.cssText='padding:1px 4px;border:1px solid #6f604d;background:#17130f;color:#e8d7b5;font:10px Tahoma;cursor:pointer;';
+-            b.addEventListener('click',(e)=>{e.stopPropagation();this._setFrameLimit(cap);});
+-            b.dataset.fpsCap=String(cap); box.appendChild(b);
++            b.addEventListener('click',(e)=>{e.stopPropagation();this._setFrameLimit(cap);setOpen(false);value.focus();});
++            b.dataset.fpsCap=String(cap); menu.appendChild(b);
+         }
++        box.appendChild(menu);
+         this._fpsControl = box; root.appendChild(box);
+         this._refreshFpsControl = () => {
+             if (!this._fpsControl?.isConnected) return;
+             const v=this._fpsControl.querySelector('[data-mu-role="fps-value"]');
+-            if (v) v.textContent=`FPS ${GameTimer.fps || 0}`;
++            const text = `FPS: ${Number(GameTimer.fps || 0).toFixed(1)}`;
++            if (v && v.textContent !== text) v.textContent=text;
++            const p=this.playerChar?.position;
++            if(p)this.hud?.setPosition(Math.floor((p.x+12800)/100),Math.floor((12800-p.z)/100));
+             for (const b of this._fpsControl.querySelectorAll('button[data-fps-cap]')) {
+                 const on=Number(b.dataset.fpsCap)===this._frameLimit;
+                 b.style.opacity=on?'1':'.55'; b.style.outline=on?'1px solid #daba72':'none';
+@@ -3128,6 +3143,17 @@ export class GameApp {
+         };
+     }
+ 
++    _attachClickMovement() {
++        this._ctm?.detach?.();
++        // _updateAuthoritativeMovement consumes playerChar.targetPos.
++        // mainObject is only a render group and cannot own this intent.
++        this._ctm=ClickToMove.attach(this.scene.scene,this.playerChar,this.scene.camera.threeCamera,{
++            terrain:this.scene.terrain,domElement:this.scene.renderer?.domElement||window,
++            autoBind:false,phantomDuration:0,
++        });
++        return this._ctm;
++    }
++
+     _bindWorldInput() {
+         // R79: um único owner para o mouse do mundo. A versão anterior tinha
+         // dois listeners independentes: ClickToMove consumia mousedown e depois
+@@ -3703,7 +3729,7 @@ export class GameApp {
+             || inMasterFamily(wireType, AT_SKILL.TORNADO_SWORDA_UP)
+             || inMasterFamily(wireType, AT_SKILL.TORNADO_SWORDB_UP))
+             && this.skillFx.createTwistingSlashEffect) {
+-            this.skillFx.createTwistingSlashEffect(from, facing, { target: to, ownerWeaponSpec: source.weaponRightSpec || null, serverAuthoritative: true, success });
++            this.skillFx.createTwistingSlashEffect(from, facing, { target: to, ownerPosition: source.position, ownerWeaponSpec: source.weaponRightSpec || null, serverAuthoritative: true, success });
+             return;
+         }
+         if ((wireType === AT_SKILL.FURY_STRIKE || inMasterFamily(wireType, AT_SKILL.ANGER_SWORD_UP)) && this.skillFx.createFuryStrikeEffect) {
+@@ -4268,11 +4294,12 @@ export class GameApp {
+         // autoritativo decide qual spec existe; nenhuma preferência local.
+         const rider = this.scene._playerRider;
+         const fenrir = this.scene._playerFenrir;
++        const safeZone = this.scene.mainObject?.userData?.muMovementContext?.safeZone;
+         if (rider?.petModelPath && this.pets?.summonMount) {
+-            const mount = await this.pets.summonMount(this.playerChar, rider);
++            const mount = await this.pets.summonMount(this.playerChar, { ...rider, safeZone });
+             if (announce && mount) this.chatInfo?.(`${rider.species} invocado (modelo real ${rider.petModelPath}).`);
+         } else if (fenrir?.petModelPath && this.pets?.summonMount) {
+-            const mount = await this.pets.summonMount(this.playerChar, fenrir);
++            const mount = await this.pets.summonMount(this.playerChar, { ...fenrir, safeZone });
+             if (announce && mount) {
+                 const opt = fenrir.option ?? 0;
+                 this.chatInfo?.('Fenrir ' + (opt === 1 ? 'Black' : opt === 2 ? 'Blue' : opt === 4 ? 'Gold' : 'Red') + ' invocado (modelo real).');
+diff --git a/data/ItemModelResolver.js b/data/ItemModelResolver.js
+index ff285fd..1fbc756 100644
+--- a/data/ItemModelResolver.js
++++ b/data/ItemModelResolver.js
+@@ -88,7 +88,11 @@ export function resolveAccessoryModel(entry) {
+     return {
+       path: null,
+       key: `FENRIR:${opt}`,
+-      missing: `fenrir: lane PetSystem (marker; path em PlayerComposer.out.fenrir)`,
++      // A marker owned by PetSystem is a resolved visual owner, not a missing
++      // accessory. Reporting it in missing[] made the staged equipment
++      // transaction reject the complete graph before GameApp could summon the
++      // real Fenrir BMD.
++      missing: null,
+       kind: 'fenrir',                       // contrato original (PlayerComposer L206)
+       colorKind: FENRIR_KIND_BY_OPTION[opt], // cor discriminada (fenrir-red/black/blue/gold)
+       option: opt,
+diff --git a/data/RemoteAssets.js b/data/RemoteAssets.js
+index d3a4daf..96beeb5 100644
+--- a/data/RemoteAssets.js
++++ b/data/RemoteAssets.js
+@@ -291,8 +291,8 @@ export class RemoteAssetSystem {
+      * OZT: formato custom do MU (GlobalBitmap.cpp::OpenTga) → decodeOZT
+      * TGA padrão → decodeTGA (fallback)
+      */
+-    async fetchImageURL(relPath) {
+-        const canonical = await this.resolveExistingPath(relPath);
++    async fetchImageURL(relPath, options = {}) {
++        const canonical = await this.resolveExistingPath(relPath, options);
+         if (canonical == null) return null;
+         let pending = this.imageUrlCache.get(canonical);
+         if (!pending) {
+diff --git a/database/config/database.js b/database/config/database.js
+index e52e3b2..f21ace9 100644
+--- a/database/config/database.js
++++ b/database/config/database.js
+@@ -12,7 +12,7 @@ module.exports = {
+     host: process.env.DB_HOST || 'localhost',
+     port: parseInt(process.env.DB_PORT) || 3306,
+     user: process.env.DB_USER || 'muonline',
+-    password: process.env.DB_PASSWORD || '',
++    password: process.env.DB_PASSWORD || 'muonline123',
+     database: process.env.DB_NAME || 'muonline',
+     
+     // For SQL Server
+diff --git a/game/ClickToMove.js b/game/ClickToMove.js
+index 5c3001f..6fa9227 100644
+--- a/game/ClickToMove.js
++++ b/game/ClickToMove.js
+@@ -37,7 +37,12 @@ class ClickToMoveController {
+     }
+ 
+     _getTerrainTargets() {
+-        if (this.terrain) return [this.terrain];
++        if (this.terrain) {
++            if(this.terrain.isMesh)return [this.terrain];
++            const surfaces=[];
++            this.terrain.traverse(o=>{if(o.isMesh&&!o.name.startsWith('MU_TERRAIN_GRASS'))surfaces.push(o)});
++            return surfaces;
++        }
+         const candidates = [];
+         this.scene.traverse(o => {
+             if (o.isMesh && o.geometry &&
+@@ -67,6 +72,8 @@ class ClickToMoveController {
+             const hits = this.raycaster.intersectObjects(targets, false);
+             if (hits.length > 0) return hits[0].point.clone();
+         }
++        // A loaded real terrain owns height and bounds. A miss is not a y=0 destination.
++        if(this.terrain)return null;
+         // Apenas fallback geométrico do plano do mundo, sem VFX/marker fake.
+         const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+         const p = new THREE.Vector3();
+diff --git a/game/PCSkillEffectsPackA.js b/game/PCSkillEffectsPackA.js
+index 17bfbb6..1f17a3c 100644
+--- a/game/PCSkillEffectsPackA.js
++++ b/game/PCSkillEffectsPackA.js
+@@ -1,6 +1,10 @@
+ // PCSkillEffectsPackA.js — source-evidenced MU Main 5.2 skill presentation lane.
+ // No generic fallback: missing authored asset/owner => fail-closed.
+ import * as THREE from 'three';
++import { angleQuaternion } from '../graphics/BmdParser.js';
++import { pcWheelWeaponPose, applyPcWheelWeaponAlpha } from './PcWheelWeaponPose.js';
++import { applyPcStockItemPresentation } from '../graphics/ItemMaterialPresentation.js';
++import { playerVisualLoadIssues } from '../graphics/PlayerComposer.js';
+ import { loadSkillTexture } from '../graphics/Effects.js';
+ import { Sound } from '../audio/SoundManager.js';
+ import {
+@@ -92,29 +96,40 @@ export class PCSkillEffectsPackA {
+     }
+     const root = new THREE.Group();
+     root.position.copy(position);
+-    root.rotation.y = facing;
+     this.scene.add(root);
+     const alphas = [1.0, 0.6, 0.5, 0.4, 0.3];
+     const owners = [];
+     let alive = true;
+     (async () => {
++      let pendingRenderer = null;
+       try {
+         const { MUModelRenderer } = await import('../assets/MUModelRenderer.js');
+         const { bmdToRenderData, applyMuUpAxis } = await import('../graphics/BmdAdapter.js');
+         for (let i = 0; i < 5 && alive; i++) {
+           const wr = new MUModelRenderer({ scene: this.scene });
++          pendingRenderer = wr;
+           await wr.initFromBMD(bmdToRenderData(spec.model, spec.path));
++    
