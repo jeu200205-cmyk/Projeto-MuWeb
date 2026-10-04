@@ -1,15 +1,15 @@
-name: Apply source update
+name: Publish current source
 
 on:
   push:
     paths:
-      - '.source-update/READY'
+      - '.publish-source/READY'
 
 permissions:
   contents: write
 
 jobs:
-  apply-update:
+  publish:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -17,25 +17,16 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Rebuild and apply source patch
+      - name: Apply verified source update
         shell: bash
         run: |
           set -euo pipefail
-          : > /tmp/source-update.patch
-          for f in $(printf '%s\n' .source-update/patch*.txt | sort -V); do
-            python3 - "$f" <<'PY' >> /tmp/source-update.patch
-          from pathlib import Path
-          import sys
-          data = Path(sys.argv[1]).read_bytes()
-          if data.endswith(b'\n'):
-              data = data[:-1]
-          sys.stdout.buffer.write(data)
-          PY
-          done
+          gzip -dc .publish-source/source-update.patch.gz > /tmp/source-update.patch
+          echo "32241ebe9b6ca629d517be1b18b7a8c6e731f4b504b36f060039d02d9a7b88fc  /tmp/source-update.patch" | sha256sum -c -
           git apply --check /tmp/source-update.patch
           git apply /tmp/source-update.patch
 
-          rm -rf .source-update .source-upload docs/ENGINE
+          rm -rf .publish-source .source-update .source-upload docs/ENGINE
           rm -f INICIAR_ASSETS.bat INICIAR_GATEWAY.bat INICIAR_WEB.bat
           rm -f .github/workflows/apply-current-source.yml
           rm -f .github/workflows/import-current-source.yml
