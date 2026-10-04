@@ -25,6 +25,9 @@ jobs:
           git apply --check /tmp/source-update.patch
           git apply /tmp/source-update.patch
 
+          # Public-safe defaults. Runtime secrets and local machine paths belong in env/config outside Git.
+          sed -i "s/process.env.DB_PASSWORD || 'muonline123'/process.env.DB_PASSWORD || ''/" database/config/database.js || true
+
           rm -rf .source-update .source-upload docs/ENGINE
           rm -f INICIAR_ASSETS.bat INICIAR_GATEWAY.bat INICIAR_WEB.bat
           rm -f .github/workflows/apply-source-update.yml
@@ -41,6 +44,7 @@ jobs:
           test -f assets/BmdGeometryPool.js
           test -f world/PcIcarusVisualContract.js
           ! grep -RniE 'MUWEB_R90_FIX|HOTFIX|FIX[0-9]+' README.md docs core world graphics scenes ui ui2 assets tools 2>/dev/null
+          ! grep -RniE 'C:[/\\]Users[/\\]|E:[/\\]Users[/\\]|/jeu/|\\jeu\\|muonline123|MuEMU_.*_Key_2024' README.md docs core world graphics scenes ui ui2 assets tools network database 2>/dev/null
 
       - name: Commit public source update
         shell: bash
