@@ -17,17 +17,14 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Rebuild and apply source patch
+      - name: Apply source patch
         shell: bash
         run: |
           set -euo pipefail
-          cat .source-update/part*.txt > /tmp/source-update.b64
-          base64 --decode /tmp/source-update.b64 > /tmp/source-update.patch.xz
-          xz -dc /tmp/source-update.patch.xz > /tmp/source-update.patch
+          cat .source-update/patch*.txt > /tmp/source-update.patch
           git apply --check /tmp/source-update.patch
           git apply /tmp/source-update.patch
 
-          # Public tree cleanup: remove temporary/import artifacts and obsolete launchers.
           rm -rf .source-update .source-upload docs/ENGINE
           rm -f INICIAR_ASSETS.bat INICIAR_GATEWAY.bat INICIAR_WEB.bat
           rm -f .github/workflows/apply-source-update.yml
