@@ -1,0 +1,176 @@
+ 1), northeast = north + 1;
++            indices.push(a, east, northeast, a, northeast, north);
++        }
++    }
++    geometry.setIndex(indices);
++    geometry.computeVertexNormals();
++    geometry.computeBoundingBox();
++    geometry.computeBoundingSphere();
++    return { hiddenCells, renderedCells: G * G - hiddenCells };
++}
++
+ export async function createMuTerrainMesh(io, worldIndex, mapData, heights, opts = {}) {
+     const { fetchImageURL, THREE } = io;
+     const onStatus = opts.onStatus || (() => {});
+@@ -819,7 +881,8 @@ export async function createMuTerrainMesh(io, worldIndex, mapData, heights, opts
+     // Main 5.2 renders BITMAP_MAPGRASS as a second, alpha-tested billboard pass.
+     // It is not TileGrass01 used by the ground atlas. Build it from the exact
+     // WorldN grass textures and keep it attached to the terrain owner.
+-    const terrainGrass = await buildPcTerrainGrassGroup(fetchImageURL, THREE, worldIndex, mapData, heights, lightTex, onStatus);
++    const visualHeights = opts.walls ? Float32Array.from(heights, (h, i) => (opts.walls[i] & 0x0040) ? (opts.specialHeight ?? 1200) : h) : heights;
++    const terrainGrass = await buildPcTerrainGrassGroup(fetchImageURL, THREE, worldIndex, mapData, visualHeights, lightTex, onStatus, opts.walls);
+ 
+     // Dynamic PrimaryTerrainLight frame owner. PC InitTerrainLight restores
+     // BackTerrainLight then RenderObjectVisual/MoveObject calls AddTerrainLight.
+@@ -892,17 +955,8 @@ export async function createMuTerrainMesh(io, worldIndex, mapData, heights, opts
+     // RequestTerrainHeight and making characters sink/float on slopes.
+     const geometry = new THREE.PlaneGeometry(size, size, G, G);
+     geometry.rotateX(-Math.PI / 2);
+-    const pos = geometry.attributes.position;
+-    for (let i = 0; i < pos.count; i++) {
+-        const px = pos.getX(i);
+-        const pz = pos.getZ(i);
+-        const gx = Math.round((px + size / 2) / CELL);
+-        const gy = Math.round((size / 2 - pz) / CELL);
+-        const cx = gx & (G - 1);
+-        const cy = gy & (G - 1);
+-        pos.setY(i, heights[cy * G + cx]);
+-    }
+-    geometry.computeVertexNormals();
++    const terrainTopology = applyPcTerrainGeometry(geometry, heights, opts.walls, opts.specialHeight ?? 1200);
++    console.info(`[Terrain versão anterior7] World${worldIndex}: hidden TW_NOGROUND=${terrainTopology.hiddenCells}, rendered=${terrainTopology.renderedCells}`);
+ 
+     // PC: RenderTerrainFace aplica fog linear (glFog GL_LINEAR). Para
+     // ShaderMaterial com fog:true, THREE.WebGLRenderer.refreshFogUniforms
+diff --git a/graphics/PcItemChromeColors.js b/graphics/PcItemChromeColors.js
+new file mode 100644
+index 0000000..e5b8f11
+--- /dev/null
++++ b/graphics/PcItemChromeColors.js
+@@ -0,0 +1,22 @@
++// Exact item-domain PartObjectColor / PartObjectColor2 data.
++// PC Main 5.2 ZzzObject.cpp:6636-7006; MODEL_ITEM is stripped from Type.
++// Native RenderModel.lua and custom GetItemColor retain precedence at the caller.
++const palette = [[1.0, 0.5, 0.0], [1.0, 0.2, 0.0], [0.0, 0.5, 1.0], [0.0, 0.5, 1.0], [0.0, 0.8, 0.4], [1.0, 1.0, 1.0], [0.6, 0.8, 0.4], [0.9, 0.8, 1.0], [0.8, 0.8, 1.0], [0.5, 0.5, 0.8], [0.75, 0.65, 0.5], [0.35, 0.35, 0.6], [0.47, 0.67, 0.6], [0.0, 0.3, 0.6], [0.65, 0.65, 0.55], [0.2, 0.3, 0.6], [0.8, 0.46, 0.25], [0.65, 0.45, 0.3], [0.5, 0.4, 0.3], [0.37, 0.37, 1.0], [0.3, 0.7, 0.3], [0.5, 0.4, 1.0], [0.45, 0.45, 0.23], [0.3, 0.3, 0.45], [0.6, 0.5, 0.2], [0.6, 0.6, 0.6], [0.3, 0.7, 0.3], [0.5, 0.6, 0.7], [0.45, 0.45, 0.23], [0.2, 0.7, 0.3], [0.7, 0.3, 0.3], [0.7, 0.5, 0.3], [0.5, 0.2, 0.7], [0.8, 0.4, 0.6], [0.6, 0.4, 0.8], [0.7, 0.4, 0.4], [0.5, 0.5, 0.7], [0.7, 0.5, 0.7], [0.2, 0.4, 0.7], [0.3, 0.6, 0.4], [0.7, 0.2, 0.2], [0.7, 0.2, 0.7], [0.8, 0.4, 0.0], [0.8, 0.6, 0.2]];
++const exact = {"1032": 9, "1033": 10, "1034": 12, "1036": 16, "1038": 22, "1039": 28, "1041": 40, "1042": 5, "14": 2, "1545": 1, "1546": 9, "1547": 20, "20": 10, "2053": 5, "2061": 5, "2065": 9, "2066": 10, "2067": 9, "2068": 16, "2069": 20, "2070": 26, "2071": 35, "2072": 36, "21": 5, "22": 18, "23": 23, "24": 24, "25": 27, "2565": 2, "2569": 5, "2571": 17, "2572": 19, "2573": 25, "2574": 24, "2575": 15, "2576": 1, "2577": 3, "2578": 30, "2579": 21, "2580": 5, "2582": 1, "2590": 1, "2591": 19, "2593": 43, "2594": 5, "28": 8, "3088": 6, "3091": 29, "3092": 36, "3093": 30, "31": 10, "32": 16, "33": 42, "34": 18, "6158": 2, "7193": 2, "7194": 2};
++const armor = {"1": 1, "3": 3, "4": 5, "6": 6, "9": 2, "12": 2, "13": 4, "14": 5, "15": 7, "16": 10, "17": 9, "18": 5, "19": 9, "20": 9, "21": 16, "22": 17, "23": 11, "24": 16, "25": 11, "26": 12, "27": 10, "28": 15, "29": 18, "30": 19, "31": 20, "32": 21, "33": 22, "34": 24, "35": 25, "36": 26, "37": 27, "38": 28, "39": 29, "40": 30, "41": 31, "42": 32, "43": 33, "44": 34, "45": 36, "46": 42, "47": 37, "48": 1, "49": 35, "50": 39, "51": 40, "52": 36, "53": 41, "59": 16, "60": 42, "61": 18};
++const armor2 = {"4": 1, "14": 1, "15": 1, "17": 1, "18": 2, "21": 3, "39": 1, "40": 1, "41": 1, "42": 1, "43": 2, "44": 3};
++export function pcPartObjectColor(type, alpha=1, bright=1) {
++ const g=Math.floor(type/512),i=type%512;
++ const id=exact[type] ?? ((g>=7&&g<=11)?armor[i]:0) ?? 0;
++ const scale=Number(alpha)*Number(bright);
++ return palette[id].map(v=>v*scale);
++}
++export function pcPartObjectColor2(type, light, alpha=1, bright=1) {
++ const g=Math.floor(type/512),i=type%512;
++ const blue=(g===4&&(i===5||i===13))||(g===0&&i===14)||(g===5&&i===5);
++ const id=blue?2:((g>=7&&g<=11)?armor2[i]:0) ?? 0;
++ if(id===3)return [1,1,1];
++ const factors=[[1,1,1],[1,.5,0],[0,.5,1]][id];
++ const scale=Number(alpha)*Number(bright);
++ return light.map((v,c)=>v*factors[c]*scale);
++}
+diff --git a/graphics/PlayerComposer.js b/graphics/PlayerComposer.js
+index 07c1838..1f4fc54 100644
+--- a/graphics/PlayerComposer.js
++++ b/graphics/PlayerComposer.js
+@@ -19,6 +19,7 @@
+  */
+ 
+ import * as THREE from 'three';
++import { RemoteAssets } from '../data/RemoteAssets.js';
+ import { parseBMD, angleQuaternion } from './BmdParser.js';
+ import { extractPartMeshes, extractRigidAttachment, buildBindWorldTransforms } from './BmdAdapter.js';
+ import { decodeCharacterEquipment } from '../data/CharacterEquipmentCodec.js';
+@@ -299,11 +300,21 @@ export function isFemaleClass(classId) {
+ const _equipmentAttachCache = new Map();
+ const _equipmentAttachInflight = new Map();
+ let _characterCacheEpoch = 0;
++function characterAuthority(io) { return String(io?.assetAuthority ?? RemoteAssets.baseUrl ?? ''); }
++function assertCharacterAuthority(io, authority, epoch) {
++    if (epoch !== _characterCacheEpoch || characterAuthority(io) !== authority) {
++        const error = new Error('Character assets superseded by another Data authority');
++        error.code = 'MUWEB_STALE_CHARACTER_LOAD';
++        throw error;
++    }
++}
+ 
+ export async function buildEquipmentAttach(charset, io, playerBones, playerBoneCount) {
+     const bind = buildBindWorldTransforms(playerBones || []);
+     const bindSignature = JSON.stringify(bind.map(t => [...t.r,...t.p]));
+-    const equipCacheKey = Array.isArray(charset) ? `${charset.join(',')}|bones=${playerBoneCount}|bind=${bindSignature}` : 'empty';
++    const authority = characterAuthority(io);
++    const charsetKey = Array.isArray(charset) ? `${charset.join(',')}|bones=${playerBoneCount}|bind=${bindSignature}` : 'empty';
++    const equipCacheKey = JSON.stringify([authority, charsetKey]);
+     const epoch = _characterCacheEpoch;
+     if (_equipmentAttachCache.has(equipCacheKey)) return _equipmentAttachCache.get(equipCacheKey);
+     if (_equipmentAttachInflight.has(equipCacheKey)) return _equipmentAttachInflight.get(equipCacheKey);
+@@ -410,7 +421,10 @@ export async function buildEquipmentAttach(charset, io, playerBones, playerBoneC
+             customColor: resolved.wing.color || null, effectType: resolved.wing.effectType || 0,
+         };
+     }
+-    if (resolved.helper?.path) {
++    // Fenrir is intentionally pathless here: it is a CreateBug/PetSystem
++    // marker, not a bone-attached item. Gate on the resolved owner itself so
++    // HELPER+37 reaches out.fenrir; the old `.path` gate silently discarded it.
++    if (resolved.helper?.path || resolved.helper?.kind) {
+         if (resolved.helper.kind === 'dark-spirit') {
+             // R24: junction finalmente fechado. No PC o scepter DL (STAFF+5)
+             // é engolido por ChangeCharacterExt e vira CreatePetDarkSpirit;
+@@ -459,6 +473,8 @@ export async function buildEquipmentAttach(charset, io, playerBones, playerBoneC
+                 };
+             } else if (resolved.helper.kind === 'dark-horse') {
+                 out.rider = { species: 'dark-horse', petModelPath: 'Skill/DarkHorse.bmd' };
++            } else if (!resolved.helper.path) {
++                out.missing.push(`${resolved.helper.kind || 'helper'} (${resolved.helper.key}): sem modelo PC/Lua`);
+             } else {
+                 out.missing.push(`${resolved.helper.kind || 'helper'} (${resolved.helper.key}): lane PetSystem pendente (CreateBug)`);
+             }
+@@ -478,6 +494,7 @@ export async function buildEquipmentAttach(charset, io, playerBones, playerBoneC
+     _equipmentAttachInflight.set(equipCacheKey, equipmentJob);
+     try {
+         const result = await equipmentJob;
++        assertCharacterAuthority(io, authority, epoch);
+         // Temporary fetch/parse failures must not persist across reequip.
+         if (epoch === _characterCacheEpoch && !result.missing.length && !result.bodyMissing.length) _equipmentAttachCache.set(equipCacheKey, result);
+         return result;
+@@ -517,6 +534,9 @@ export function playerVisualLoadIssues(renderer, extras = [], equipment = null) {
+         for (const program of Object.values(programs)) {
+             for (const path of program.pendingBitmapPaths || []) issues.push(`bitmap-not-ready:${path}`);
+         }
++        for (const program of Object.values(owner?.userData?.muItemMaterialResidencyPrograms || {})) {
++            for (const path of program.pendingBitmapPaths || []) issues.push(`bitmap-not-ready:${path}`);
++        }
+         for (const mesh of owner?.meshes || []) {
+             if (mesh.userData?.textureReady !== true && !mesh.userData?.pcBitmapHide) {
+                 issues.push(`texture-not-ready:${mesh.userData?.textureMissing || mesh.name || 'mesh'}`);
+@@ -721,7 +741,8 @@ export function clearComposedCharacterCache() {
+ 
+ export async function composeCharacter(classId, io) {
+   const epoch = _characterCacheEpoch;
+-  const cacheKey = Number(classId) & 0xff;
++  const authority = characterAuthority(io);
++  const cacheKey = JSON.stringify([authority, Number(classId) & 0xff]);
+   if (_composedCharacterCache.has(cacheKey)) return _composedCharacterCache.get(cacheKey);
+   if (_composedCharacterInflight.has(cacheKey)) return _composedCharacterInflight.get(cacheKey);
+   const job = (async () => {
+@@ -774,6 +795,7 @@ export async function composeCharacter(classId, io) {
+   _composedCharacterInflight.set(cacheKey, job);
+   try {
+     const result = await job;
++    assertCharacterAuthority(io, authority, epoch);
+     if (epoch === _characterCacheEpoch && !result.missingParts.length) _composedCharacterCache.set(cacheKey, result);
+     return result;
+   } finally {
+diff --git a/graphics/Scene.js b/graphics/Scene.js
+index 4d18924..8e54847 100644
+--- a/graphics/Scene.js
++++ b/graphics/Scene.js
+@@ -27,7 +27,7 @@ import { applyMuUpAxis, bmdToRenderData } from './BmdAdapter.js';
+ import { MUModelRenderer } from '../assets/MUModelRenderer.js';
+ import { MUAssets } from '../assets/MUAssetLoader.js';
+ import { RemoteAssets } from '../data/RemoteAssets.js';
+-import { TerrainObjectLayer } from '../world/TerrainObjectWorld.js';
++import { TerrainObjectLayer, prefetchWorldTerrainObjects } from '../world/TerrainObjectWorld.js';
+ import { pcWorldActiveFromAssetWorld, pcInBloodCastle, pcInChaosCastle, pcInSwimLocomotionWorld } from '../game/PcMapContext.js';
+ import { loadItemEffectsLuaConfig, resolveRuneAuraForEquip
