@@ -1,84 +1,93 @@
-# Projeto MuWeb
+# Projeto MuWeb — MU Online Main 5.2 → Web
 
-Base experimental de uma engine/client Web inspirada no **MU Online Main 5.2**.
+Port experimental do cliente/engine **MU Online Main 5.2** para JavaScript/WebGL.
 
-> **Estado do projeto:** muito inicial. Esta publicação deve ser tratada como uma base de estudo e continuação, **não como um cliente completo**. Pelo escopo de paridade com o Main 5.2, o projeto ainda está abaixo de 10% de conclusão.
+**Autoridade publicada:** `MUWEB R90 FIX40 HOTFIX1` — 04/10/2026.
 
-O objetivo é permitir que outras pessoas estudem e continuem a adaptação de sistemas do cliente para JavaScript/WebGL, mantendo o Main 5.2 como referência de comportamento. A presença de um módulo na árvore não significa que aquele sistema esteja completo ou fiel ao PC.
+> Este projeto ainda é uma portabilidade parcial. A presença de um sistema ou módulo na árvore não significa paridade 100% com o cliente PC. A referência de comportamento continua sendo a source PC Main 5.2 + Data/Lua reais + protocolo real do servidor.
 
-## O que está neste repositório
+## Estado da FIX40
 
-- código da engine Web e do cliente;
-- parser e renderização de modelos BMD;
-- carregamento de terrain e objetos de mapa;
-- personagem, monstros, NPCs, viewport e movimento;
-- base de inventário/equipamento e renderização de itens;
-- base de skills, buffs e efeitos;
-- UI/HUD em desenvolvimento;
-- protocolo MU, gateway WebSocket↔TCP e roteamento de pacotes;
-- suporte a leitura de dados/configurações usados pelo cliente;
-- utilitários mínimos para servir a aplicação e os assets localmente.
+A FIX40 preserva os incrementos anteriores e adiciona um fechamento source-backed específico de Icarus (`WD_10HEAVEN`): `Object11` tipos 0–5 deixam de ser renderizados como BMD de cenário e passam a atuar como controladores do burst inicial de `BITMAP_CLOUD`, seguindo o comportamento do PC. A HOTFIX1 corrige somente o bootstrap do pacote, removendo launchers FIX39 herdados; a lógica de jogo/render da FIX40 não foi alterada.
 
-## O que NÃO está incluído
+Validação automatizada registrada para esta autoridade:
 
-- Data completa do cliente MU;
-- executáveis/servidores MU;
-- banco de dados pronto;
-- garantia de compatibilidade com qualquer Season/Data;
-- paridade completa com Main 5.2.
+- manifesto/launcher: **258 arquivos verificados**;
+- syntax set da entrega: **307 arquivos**;
+- contrato Icarus FIX40: **39 checks PASS**;
+- validação visual física em browser/GPU/Data real: **ainda necessária**.
 
-Você precisa fornecer sua própria pasta `Data` compatível e seu próprio ambiente de servidor, se quiser testar conexão real.
+Icarus não deve ser considerado 100% fechado: `MoveObjectOnEffect`, `MoveHeavenThunder`, o owner de `BITMAP_LIGHT` do tipo 10 e outros owners do mapa continuam no backlog.
 
-## Requisitos
+## Principais áreas já presentes
 
-- Node.js 18+;
-- navegador com WebGL;
-- pasta `Data` do cliente compatível com o projeto;
-- opcionalmente, ConnectServer/GameServer local para testes de rede.
+- carregamento BMD/OZJ/OZT/OZB/ATT e Data real;
+- renderer BMD, skinning, materiais, chrome/metal/alpha e owners de bitmap;
+- terrain, objetos de mapa, grass, culling e vários contratos map-specific;
+- personagens, viewport, NPCs, monstros, inventário, equipamentos e storage;
+- itens, materiais, Excellent/Ancient/Socket/Harmony e owners Lua/custom;
+- skills/cast/VFX em evolução;
+- login, ConnectServer/GameServer, gateway WebSocket↔TCP e roteamento MU;
+- HUD/UI/chat/social e click-to-move;
+- testes Node/WebGL e ferramentas de validação.
 
-## Executando a base
+Consulte a matriz atual em [`docs/ENGINE/11_PORTABILITY_STATUS.md`](docs/ENGINE/11_PORTABILITY_STATUS.md) e as pendências em [`docs/ENGINE/12_REMAINING_PORTS.md`](docs/ENGINE/12_REMAINING_PORTS.md).
 
-Instale as dependências:
+## Como executar no Windows
 
-```bash
-npm install
-```
+### Requisitos
 
-Em um terminal, publique sua pasta Data local:
+- Windows;
+- Node.js com npm;
+- uma pasta `Data` compatível do cliente MU;
+- GameServer/ConnectServer externos para conexão real.
 
-```bash
-node tools/asset-server.cjs "C:\caminho\para\Data" 9100
-```
+### Inicialização
 
-Em outro terminal, inicie o gateway MU:
+1. Extraia/clone a source completa.
+2. Execute `INSTALAR_DEPENDENCIAS_R90.bat`.
+3. Execute **somente** `LIGAR_WEB_R90_FIX40.bat`.
+4. Informe a Data quando solicitado, ou configure `MUWEB_OFFICIAL_CLIENT_ROOT` / `MUWEB_OFFICIAL_DATA`.
+5. Para encerrar os processos Node desta source, execute `DESLIGAR_WEB_R90_FIX40.bat`.
 
-```bash
-npm run gateway
-```
+A Data completa e os executáveis de servidor MU **não são distribuídos neste repositório**.
 
-Em outro terminal, inicie o servidor Web:
+## Verificação
 
 ```bash
-npm run serve
+npm ci
+node tools/start-r90-fix40-safe.cjs --verify-only
+node tools/test-fix40-runtime.mjs
 ```
 
-Abra:
+Para fixtures WebGL, use o servidor de desenvolvimento e abra as páginas em `tests/` conforme a documentação de validação.
 
-```text
-http://127.0.0.1:8080/
-```
+## Estrutura
 
-Por padrão, `runtime-config.js` aponta os assets para `http://127.0.0.1:9100/` e o gateway para `ws://127.0.0.1:9091`.
+- `assets/`, `graphics/`, `world/`: assets, modelos, materiais, terrain e render do mundo;
+- `core/`, `game/`, `scenes/`: runtime, gameplay e cenas;
+- `data/`, `database/`: owners/configurações e dados gerados;
+- `network/`, `protocol/`, `net/`: gateway, wire e protocolo;
+- `skills/`, `effects2/`: skills e efeitos;
+- `ui/`, `ui2/`, `social/`: HUD, janelas e sistemas sociais;
+- `tests/` e `test-r90-fix*.mjs`: regressões e fixtures;
+- `tools/`: launch/verify/generators e utilitários;
+- `docs/ENGINE/`: documentação técnica da engine e da portabilidade.
 
-## Documentação
+## Documentação técnica
 
-- [Engine e fluxo principal](docs/ENGINE.md)
-- [Mapa dos sistemas](docs/SYSTEMS.md)
-- [Como executar e configurar](docs/RUNNING.md)
-- [Portabilidade Main 5.2 → Web](docs/PORTING.md)
-- [O que falta](docs/ROADMAP.md)
-- [Estrutura da source](docs/SOURCE_LAYOUT.md)
+Comece por [`docs/ENGINE/00_INDEX.md`](docs/ENGINE/00_INDEX.md). A documentação cobre arquitetura, boot, render, mapas, itens, protocolo, skills, UI, Data/Lua, performance, status, backlog, testes e manutenção do GitHub.
 
-## Aviso de segurança
+Notas desta publicação: [`docs/ENGINE/16_FIX40_RELEASE_NOTES.md`](docs/ENGINE/16_FIX40_RELEASE_NOTES.md).
 
-Os serviços de desenvolvimento devem permanecer em `127.0.0.1` até que autenticação, autorização, rate-limit e configuração de produção sejam revisados. Não publique gateway, banco ou serviços internos diretamente na Internet.
+## Política de fidelidade
+
+Não preencher lacunas com placeholders que pareçam “funcionar”. Quando um owner PC não estiver provado, a implementação deve permanecer explícita/fail-closed até existir evidência da source PC, Data/Lua, wire real ou validação física correspondente.
+
+## Segurança
+
+Não versione `.env`, credenciais, senhas, dumps, Data proprietária completa ou segredos de servidor. Serviços de desenvolvimento devem permanecer locais até receberem hardening apropriado.
+
+## Licença e conteúdo do jogo
+
+Este repositório contém o código desta adaptação. Assets/Data e executáveis proprietários do jogo não são fornecidos aqui; use apenas conteúdo que você tenha direito de utilizar.
