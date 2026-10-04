@@ -1,0 +1,45 @@
+name: Apply current public source
+
+on:
+  push:
+    paths:
+      - '.source-patch/READY'
+
+permissions:
+  contents: write
+
+jobs:
+  apply-source:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Rebuild and verify patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat .source-patch/part*.txt > /tmp/current-source.patch.xz.b64
+          base64 --decode /tmp/current-source.patch.xz.b64 > /tmp/current-source.patch.xz
+          echo '7ee123716748196addcd1f6290e386375f3579faacf6b9cfd16648c44b56f090  /tmp/current-source.patch.xz' | sha256sum -c -
+          xz -dc /tmp/current-source.patch.xz > /tmp/current-source.patch
+
+      - name: Restore clean public base and apply current source
+        shell: bash
+        run: |
+          set -euo pipefail
+          git rm -rf .
+          git checkout 3bbfaf822232f89a4a6d6cf074c980fa381fbb3c -- .
+          git apply /tmp/current-source.patch
+          git add -A
+
+      - name: Commit source update
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'Atualiza source pública do Projeto MuWeb'
+          git push
