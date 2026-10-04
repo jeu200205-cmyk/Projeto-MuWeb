@@ -1,0 +1,221 @@
+._syncTextureAuthority();
++        const assertCurrent = () => this._assertTextureGeneration(generation, fileName);
+         const rawName = String(fileName).trim();
+         const extMatch = rawName.match(/^(.*)\.([^.\\/]+)$/);
+         let extHint = (extMatch?.[2] || '').toLowerCase();
+@@ -845,7 +926,7 @@ export class MUAssetLoader {
+         const texVariants = (dir) => preferredExts.flatMap((ext) => [
+             `${dir}/${base}.${ext}`, `${dir}/${base}.${ext.toUpperCase()}`
+         ]);
+-        // Mantém os spellings literais legados para auditorias/contratos R12.3;
++        // Mantém os spellings literais legados para auditorias/contratos versão anterior;
+         // Set dedup preserva a prioridade definida em texVariants acima.
+         const legacyLowercaseCandidates = [`${modelDir}/${base}.ozj`, `${modelDir}/${base}.ozt`];
+         // O Data real mistura extensão maiúscula/minúscula por mapa
+@@ -871,10 +952,14 @@ export class MUAssetLoader {
+         for (const cand of candidates) {
+             try {
+                 const canonical = await this.remoteAssets.resolveExistingPath(cand);
++                assertCurrent();
+                 if (!canonical) continue;
+                 // loadTexture fará o único fetch/cache necessário no path canônico.
+-                return await this.loadTexture(canonical);
++                const texture = await this.loadTexture(canonical);
++                assertCurrent();
++                return texture;
+             } catch (e) {
++                if (e?.code === 'MUWEB_STALE_ASSET_LOAD') throw e;
+                 // R12.6 (t-muhggfq5-u) OBSERVABILIDADE: candidato que RESOLVEU
+                 // no manifest mas falhou no fetch/decode é BUG REAL (ex.: o
+                 // flood físico tree_07 — buffer detacado por transfer antigo
+@@ -1258,7 +1343,7 @@ export class MUAssetLoader {
+ 
+     _createThreeTexture(parsed) {
+         // Descriptor lazy: cada asset mantém a própria instância THREE.Texture.
+-        // R12.3: FAIL-CLOSED. Nunca devolver Texture vazia e nunca marcar
++        // versão anterior: FAIL-CLOSED. Nunca devolver Texture vazia e nunca marcar
+         // needsUpdate antes de existir image/data — isso gerava milhares de:
+         // "Texture marked for update but no image data found" e contaminava
+         // World95/World75 com materiais vazios.
+@@ -1393,17 +1478,15 @@ export class MUAssetLoader {
+     // ---------- Cache Management ----------
+ 
+     clearCache(type = null) {
+-        if (!type || type === AssetType.BMD) this._bmdCache.clear();
+-        if (!type || type === AssetType.OZJ || type === AssetType.OZT) this._textureCache.clear();
++        if (!type || type === AssetType.BMD) {
++            this._bmdEpoch++;
++            this._bmdCache.clear();
++            this._bmdInflight.clear();
++        }
++        if (!type || type === AssetType.OZJ || type === AssetType.OZT) this._invalidateTextureGeneration();
+         if (!type || type === AssetType.WAV || type === AssetType.MP3) this._audioCache.clear();
+         if (!type || type === AssetType.ATT) this._attCache.clear();
+         if (!type || type === AssetType.LST || type === AssetType.TXT) this._dataCache.clear();
+-        if (!type || type === AssetType.OZJ || type === AssetType.OZT) {
+-            for (const v of this._imageSourceCache.values()) {
+-                Promise.resolve(v).then((img) => { try { img?.close?.(); } catch (_) {} }).catch(() => {});
+-            }
+-            this._imageSourceCache.clear();
+-        }
+     }
+ 
+     getCacheStats() {
+diff --git a/assets/MUModelRenderer.js b/assets/MUModelRenderer.js
+index b649868..d3dc78a 100644
+--- a/assets/MUModelRenderer.js
++++ b/assets/MUModelRenderer.js
+@@ -15,6 +15,7 @@
+ 
+ import * as THREE from 'three';
+ import { MUAssets, AssetType } from './MUAssetLoader.js';
++import {acquireBmdGeometry,isSharedBmdGeometry} from './BmdGeometryPool.js';
+ 
+ // PC Main 5.2 authority: ZzzAI.h REFERENCE_FPS = 25.0.
+ // BMD::PlayAnimation advances Speed * FPS_ANIMATION_FACTOR against this base.
+@@ -554,6 +555,10 @@ export class MUModelRenderer {
+         // They are registered once per item appearance and updated without
+         // allocating a second WebGL context or a second animation owner.
+         this._overlayMeshes = [];
++        // Main 5.2 CreateSprite owners attached to animated BMD bones.  These
++        // are persistent Web objects (instead of one-frame entries in the PC
++        // Sprites[] pool), so this renderer must own their material lifetime.
++        this._boneSprites = [];
+         this._presentationUpdates = [];
+         this.meshData = []; // Original mesh data for LOD
+         this.currentLOD = 0;
+@@ -604,6 +609,7 @@ export class MUModelRenderer {
+         this._elapsedTime = 0;
+         this._initialized = false;
+         this._materialCache = new Map();
++        this._geometryLeases = [];
+ 
+         // PERF R15.19: animation interpolation scratch. These objects are reused
+         // across tracks because _applyAnimation consumes each result before the
+@@ -740,18 +746,12 @@ export class MUModelRenderer {
+     }
+ 
+     _createSkinnedMesh(meshData, index) {
+-        const geometry = new THREE.BufferGeometry();
+-        geometry.setAttribute('position', new THREE.BufferAttribute(meshData.positions, 3));
+-        geometry.setAttribute('normal', new THREE.BufferAttribute(meshData.normals, 3));
+-        geometry.setAttribute('uv', new THREE.BufferAttribute(meshData.uvs, 2));
+-        geometry.setAttribute('skinIndex', new THREE.BufferAttribute(meshData.skinIndices, 4));
+-        const normalNodes = meshData.normalSkinIndices || Float32Array.from(
+-            { length: meshData.positions.length / 3 }, (_, i) => meshData.skinIndices[i * 4]);
+-        geometry.setAttribute('normalSkinIndex', new THREE.BufferAttribute(normalNodes, 1));
+-        geometry.setAttribute('skinWeight', new THREE.BufferAttribute(meshData.skinWeights, 4));
+-        geometry.setIndex(new THREE.BufferAttribute(meshData.indices, 1));
+-        geometry.computeBoundingBox();
+-        geometry.computeBoundingSphere();
++        const lease=acquireBmdGeometry(meshData);
++        this._geometryLeases.push(lease);
++        this.userData ??= {};
++        const metric=lease.reused?'muBmdGeometryReuses':'muBmdGeometryBuilds';
++        this.userData[metric]=(this.userData[metric]||0)+1;
++        const geometry=lease.geometry;
+         
+         // Store original for LOD
+         meshData._geometry = geometry;
+@@ -764,7 +764,7 @@ export class MUModelRenderer {
+         skinnedMesh.castShadow = true;
+         skinnedMesh.receiveShadow = true;
+         configurePcChromeBasis(skinnedMesh);
+-        // R12.3 zero-fake: BMD textured mesh nasce invisível e só é promovido
++        // versão anterior zero-fake: BMD textured mesh nasce invisível e só é promovido
+         // quando a textura REAL foi resolvida. O comportamento antigo deixava
+         // MeshStandardMaterial bege visível quando a textura dava 404, criando
+         // exatamente os blocos/placas marrons observados no World75.
+@@ -1329,6 +1329,10 @@ export class MUModelRenderer {
+         }
+     }
+ 
++    get hasPresentationUpdates() {
++        return this._presentationUpdates.length > 0;
++    }
++
+     /** Register a per-frame presentation callback owned by this model. */
+     addPresentationUpdate(fn) {
+         if (typeof fn !== 'function') return false;
+@@ -1352,6 +1356,73 @@ export class MUModelRenderer {
+         return this;
+     }
+ 
++    /** Apply the persistent BMD::StreamMesh state to one source mesh.
++     * StreamMesh consumes OBJECT::BlendMeshTexCoord U/V on the ordinary body
++     * draw and bypasses transformed-normal lighting for that mesh. Mutating a
++     * shared Texture.offset would leak the scroll into other actors/icons, so
++     * the offset stays in this renderer's per-material shader uniform. */
++    setBaseStreamMesh(meshIndex, u = 0, v = 0) {
++        const target = Number(meshIndex);
++        let updated = 0;
++        for (const mesh of this.meshes || []) {
++            if (Number(mesh?.userData?.muMeshIndex) !== target) continue;
++            const uniforms = mesh.material?.uniforms;
++            if (!uniforms?.uvOffset?.value?.set) continue;
++            uniforms.uvOffset.value.set(Number(u) || 0, Number(v) || 0);
++            if (uniforms.enableLight) uniforms.enableLight.value = false;
++            updated++;
++        }
++        this.userData ??= {};
++        this.userData.muStreamMesh = { index:target, u:Number(u)||0, v:Number(v)||0, updated };
++        return updated;
++    }
++
++    /** Apply OBJECT::BlendMesh to base BMD draws selected by m->Texture.
++     * The PC compares the BMD texture slot, not the local mesh index. Matching
++     * draws become textured ONE/ONE passes with depth writes/culling disabled,
++     * and use BodyLight*BlendMeshLight without transformed-normal lighting. */
++    setBaseBlendTexture(textureIndex, blendMeshLight = 1, options = {}) {
++        const target = Number(textureIndex);
++        const light = Number.isFinite(Number(blendMeshLight)) ? Number(blendMeshLight) : 1;
++        const alpha = Number.isFinite(Number(options.alpha)) ? Number(options.alpha) : 1;
++        const bodyLight = options.bodyLight?.isColor ? options.bodyLight : null;
++        const scrollMeshIndex = Number.isFinite(Number(options.scrollMeshIndex))
++            ? Number(options.scrollMeshIndex) : null;
++        const uvU = Number(options.u) || 0;
++        const uvV = Number(options.v) || 0;
++        let updated = 0;
++        for (const mesh of this.meshes || []) {
++            const material = mesh.material;
++            if (bodyLight && material) {
++                if (material.color?.copy) material.color.copy(bodyLight);
++                if (material.uniforms?.diffuse?.value?.copy) material.uniforms.diffuse.value.copy(bodyLight);
++            }
++            if (scrollMeshIndex !== null && Number(mesh?.userData?.muMeshIndex) === scrollMeshIndex) {
++                material?.uniforms?.uvOffset?.value?.set?.(uvU, uvV);
++            }
++            if (Number(mesh?.userData?.textureIndex) !== target) continue;
++            if (!material) continue;
++            const base = bodyLight || (mesh.userData?.muAuthoredBaseColor?.isColor
++                ? mesh.userData.muAuthoredBaseColor
++                : material.uniforms?.diffuse?.value);
++            const color = base?.isColor ? base.clone().multiplyScalar(light) : new THREE.Color(light,light,light);
++            if (material.color?.copy) material.color.copy(color);
++            if (material.uniforms?.diffuse?.value?.copy) material.uniforms.diffuse.value.copy(color);
++            if (material.uniforms?.enableLight) material.uniforms.enableLight.value = false;
++            applyPcRenderMeshPassState(material, RenderFlags.TEXTURE|RenderFlags.BRIGHT, alpha,
++                mesh.userData?.muSourceHasAlpha === true);
++            mesh.userData ??= {};
++            mesh.userData.muBlendMeshTexture = target;
++            updated++;
++        }
++        this.userData ??= {};
++        this.userData.muBlendMesh = { textureIndex:target, light, updated };
++        if (Object.keys(options).length) Object.assign(this.userData.muBlendMesh, {
++            alpha, bodyLight:bodyLight?.toArray?.() || null, scrollMeshIndex, u:uvU, v:uvV,
++        });
++        return updated;
++    }
++
+     /**
+      * Creates a stock Main-style material draw over selected meshes.
+      * The overlay reuses the same geometry + Skeleton, so glow follows the exact
+@@ -1387,7 +1458,7 @@ export class MUModelRenderer {
+             material.uniforms.opacity.value = alpha;
+             const chromeMode = pcChromeMode(flags);
+             material.uniforms.pcScaleAdditiveAlpha.value = chromeMode !== 0 && pcChromeAdditive(flags);
+-            material.uniforms.enableLight.value = false;
++            material.uniforms.enableLight.value = options.lightEnabled === true;
+             material.map = baseMap;
+             con
