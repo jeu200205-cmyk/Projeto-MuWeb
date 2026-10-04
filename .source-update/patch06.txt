@@ -1,0 +1,244 @@
+ (const extra of slot.sceneExtras || []) this.gameScene.scene.add(extra);
++        this.lastLoadIssues = [];
++        return true;
++    }
++
+     _removeSlot(slot) {
+         const objs = this.gameScene.objects;
+         const i = objs.indexOf(slot.outer);
+diff --git a/graphics/ItemMaterialPresentation.js b/graphics/ItemMaterialPresentation.js
+index 4143385..078eccc 100644
+--- a/graphics/ItemMaterialPresentation.js
++++ b/graphics/ItemMaterialPresentation.js
+@@ -12,12 +12,14 @@
+  * registry. This module deliberately does not invent those rules.
+  */
+ import * as THREE from 'three';
++import {pcPartObjectColor,pcPartObjectColor2} from './PcItemChromeColors.js';
+ import { RenderFlags } from '../assets/MUModelRenderer.js';
+ import { MUAssets } from '../assets/MUAssetLoader.js';
+ import { nativeRenderModelRange, nativeRenderModelPass, nativeRenderTextureOverride, RENDER_MODEL_ORACLE_COUNTS } from '../data/RenderModelNativeOracle.js';
+ import { pcBitmapTexture, pcBitmapOwner } from '../data/PcBitmapLuaOwners.js';
+ import { isExcellentDisabledForItemType } from '../data/DisableExcellentLua.js';
+ import { itemTransparencyForType } from '../data/ItemTransparencyLua.js';
++import { RemoteAssets } from '../data/RemoteAssets.js';
+ 
+ const MAX_ITEM_INDEX = 512;
+ const _specialTexturePromises = new Map();
+@@ -62,6 +64,10 @@ export async function applyPcNativeRenderModelPresentation(renderer, {
+     // original Lua flag: it may be a truncated high flag, or a real zero
+     // inheriting prior GL state. Never invent an independent opaque draw.
+     if (pass.mode === 0) { skipped++; continue; }
++    // HideSkin selects only the inventory part. Passes for excluded meshes
++    // must not fetch textures or mark this otherwise complete icon pending.
++    const targets = meshAt(pass.mesh);
++    if (!targets.length) { skipped++; continue; }
+     const bitmap = nativeRenderTextureOverride(type, rel);
+     // Exact numeric bitmap->asset path table is a different PC owner. Never
+     // substitute a random texture.
+@@ -79,8 +85,6 @@ export async function applyPcNativeRenderModelPresentation(renderer, {
+     // Plain TEXTURE|BRIGHT uses a private texture clone; chrome+scroll uses
+     // the renderer shader uvOffset. Other scroll combinations remain pending.
+     if (scroll && pass.mode !== (RenderFlags.TEXTURE | RenderFlags.BRIGHT) && !chromeScroll) { skipped++; continue; }
+-    const targets = meshAt(pass.mesh);
+-    if (!targets.length) { skipped++; continue; }
+ 
+     // Every authored call gets its own ordered draw, including opaque TEXTURE,
+     // COLOR, DARK and LIGHTMAP. A separate implicit base draw
+@@ -90,7 +94,12 @@ export async function applyPcNativeRenderModelPresentation(renderer, {
+     // instead of the authored Chrome/Shiny pass.
+     const implicitKind = explicitMap || (pass.mode & RenderFlags.COLOR) ? null : pcImplicitMaterialTextureKind(pass.mode);
+     const implicitMap = implicitKind ? await pcMaterialTexture(implicitKind) : null;
+-    if (implicitKind && !implicitMap) { skipped++; continue; }
++    if (implicitKind && !implicitMap) {
++      const [name, directory] = materialTextureDescriptor(implicitKind);
++      pendingBitmapPaths.push(`${directory}/${name}`);
++      skipped++;
++      continue;
++    }
+     let scrollMap = null;
+     if (scroll && !chromeScroll) {
+       const original = explicitMap || targets[0]?.userData?.originalMap || targets[0]?.material?.map || null;
+@@ -116,7 +125,7 @@ export async function applyPcNativeRenderModelPresentation(renderer, {
+         if ((pass.flags & 2) !== 0) overlay.setColor?.(authoredColor(pass, timeMs));
+         const scrollU = Number(timeMs) * (0.1 / 150);
+         if (scrollMap) scrollMap.offset.x = scrollU;
+-        // FIX2: all overlays use the PC shader. Texture.offset is not
++        // versão anterior: all overlays use the PC shader. Texture.offset is not
+         // automatically injected into a custom ShaderMaterial's UVs.
+         if (scrollMap || chromeScroll) overlay.setUvOffset?.(scrollU, 0);
+       });
+@@ -155,10 +164,24 @@ export function pcIsStandardEquipment(type) {
+  * `rawLevel` is the legacy packed ItemLevel byte; returned value is the
+  * presentation level used by mesh/chrome/bright branches (not gameplay level).
+  */
+-export function pcRenderPartObjectLevel(type, rawLevel = 0) {
++export function pcRenderPartObjectLevel(type, rawLevel = 0, modelFamily = 'item', modelIndex = null) {
+   let level = (Number(rawLevel) >> 3) & 0x0f;
+   const group = Math.floor(Number(type) / MAX_ITEM_INDEX), index = Number(type) % MAX_ITEM_INDEX;
+ 
++  // MODEL_EVENT is a distinct enum range after MODEL_BODY_BOOTS. It is not
++  // ITEM_ETC (group 15), despite both historically being represented by the
++  // same pair of group/index numbers in this Web adapter.
++  if (modelFamily === 'event') {
++    const event = Number(modelIndex);
++    if (event === 0 || event === 1 || event === 9 || event === 15) level = 8;
++    else if ([4,5,7,8,12,13,16].includes(event)) level = 0;
++    else if (event === 6) level = level === 13 ? 13 : 9;
++    else if (event === 10) level = (level - 8) * 2 + 1;
++    else if (event === 11) level -= 1;
++    else if (event === 14) level += 7;
++    return level;
++  }
++
+   // HELPER
+   if (group === 13) {
+     if (index === 3 || index === 10) level = 8;
+@@ -178,14 +201,6 @@ export function pcRenderPartObjectLevel(type, rawLevel = 0) {
+     else if ([12,22,25,26].includes(index)) level = 8;
+     else if ([41,42,43,44,64].includes(index)) level = 0;
+     else if (index === 51) level = 13;
+-  // EVENT
+-  } else if (group === 15) {
+-    if (index === 0 || index === 1 || index === 9 || index === 15) level = 8;
+-    else if ([4,5,7,8,12,13,16].includes(index)) level = 0;
+-    else if (index === 6) level = level === 13 ? 13 : 9;
+-    else if (index === 10) level = (level - 8) * 2 + 1;
+-    else if (index === 11) level -= 1;
+-    else if (index === 14) level += 7;
+   }
+ 
+   // BOW+7/+15 remap is part of the same source switch.
+@@ -197,9 +212,9 @@ export function pcRenderedItemLevel(type, rawLevel = 0) {
+   return pcRenderPartObjectLevel(type, rawLevel);
+ }
+ 
+-export function pcEquipmentBaseTint(type, rawLevel = 0, timeMs = performance.now()) {
+-  if (!pcIsStandardEquipment(type)) return new THREE.Color(1, 1, 1);
+-  const level = pcRenderedItemLevel(type, rawLevel);
++export function pcEquipmentBaseTint(type, rawLevel = 0, timeMs = performance.now(), modelFamily = 'item', modelIndex = null) {
++  if (modelFamily !== 'event' && !pcIsStandardEquipment(type)) return new THREE.Color(1, 1, 1);
++  const level = pcRenderPartObjectLevel(type, rawLevel, modelFamily, modelIndex);
+   const lum = Math.sin(Number(timeMs) * 0.004) * 0.15 + 0.6;
+   if (level >= 3 && level <= 4) return new THREE.Color(lum, lum * 0.6, lum * 0.6);
+   if (level >= 5 && level <= 6) return new THREE.Color(lum * 0.5, lum * 0.7, lum);
+@@ -226,18 +241,119 @@ export function pcSetTint(type) {
+   return new THREE.Color(0.1, 0.6, 1.0);
+ }
+ 
++/** C++ `(int)-WorldTime % 4000 * .00025f` used by MODEL_EVENT+13. */
++export function pcEvent13StreamV(timeMs = performance.now()) {
++  const t = Number(timeMs);
++  if (!Number.isFinite(t)) return 0;
++  const v=(Math.trunc(-t) % 4000) * 0.00025;
++  return Object.is(v,-0)?0:v;
++}
++
++/** Exact MODEL_POTION+17 OBJECT state from RenderPartObjectEffect. */
++export function pcPotion17BlendState(timeMs = performance.now()) {
++  const t=Number(timeMs);
++  if (!Number.isFinite(t)) return null;
++  const sine=Math.sin(t*.002)*10+15.65;
++  const v=(Math.trunc(t)%2000)*.0005;
++  return {textureIndex:1,scrollMeshIndex:1,blendMeshLight:sine,alpha:2,
++    u:0,v:Object.is(v,-0)?0:v,bodyLight:[sine/5,sine/5,sine/5]};
++}
++
++/** Exact ZzzObject.cpp EVENT12/EVENT13 BITMAP_SPARK+1 owner. */
++export function pcEventBoneSpritePlan(event, timeMs = performance.now()) {
++  const id=Number(event), t=Number(timeMs);
++  if (![12,13].includes(id) || !Number.isFinite(t)) return null;
++  const luminosity=Math.sin(t*.002)*.35+.65;
++  if (id===12) return {boneIndex:0,offset:[0,0,15],scale:luminosity*.8+2,
++    color:[luminosity*.32,luminosity*.32,luminosity*2]};
++  return {boneIndex:0,offset:[0,-5,-15],scale:luminosity*.8+2.5,
++    color:[luminosity*2,luminosity*.32,luminosity*.32]};
++}
++
++/** Bind the one-frame PC sprite owner to the persistent Web model lifecycle. */
++export function applyPcEventBoneSpritePresentation(renderer, {
++  event, map, dynamic=true, timeMs=performance.now(),
++} = {}) {
++  const plan=pcEventBoneSpritePlan(event,timeMs);
++  if (!plan || !map?.isTexture || typeof renderer?.createBoneSprite !== 'function') return null;
++  const owner=renderer.createBoneSprite({boneIndex:plan.boneIndex,map,offset:plan.offset,
++    scale:plan.scale,color:new THREE.Color(...plan.color)});
++  if (!owner) return null;
++  const update=(clock)=>{
++    const next=pcEventBoneSpritePlan(event,clock);
++    if (!next) return;
++    owner.setScale?.(next.scale);
++    owner.setColor?.(new THREE.Color(...next.color));
++  };
++  if (dynamic && typeof renderer.addPresentationUpdate === 'function') renderer.addPresentationUpdate(update);
++  renderer.userData ??= {};
++  renderer.userData.muEventBoneSprite={event:Number(event),bitmap:'BITMAP_SPARK+1',
++    physicalPath:'Effect/Spark03.OZJ',boneIndex:0,offset:[...plan.offset],dynamic:Boolean(dynamic)};
++  return owner;
++}
++
++/** ZzzObject.cpp MODEL_POTION+18/+19/+21 BITMAP_SPARK+1 programs. */
++export function pcPotionSpritePlans(index, timeMs = performance.now()) {
++  const id=Number(index), t=Number(timeMs);
++  if (![18,19,21].includes(id) || !Number.isFinite(t)) return [];
++  if (id===21) {
++    const luminosity=Math.sin(t*.002)*.25+.75;
++    return [{boneIndex:null,offset:[0,0,0],scale:2.5,color:[luminosity,luminosity*.5,0]}];
++  }
++  const luminosity=Math.sin(t*.002)*.35+.65;
++  const bones=id===18?[1,2]:[9,10];
++  return bones.map(boneIndex=>({boneIndex,offset:[0,0,0],scale:luminosity*.8,
++    color:[luminosity*2,luminosity*.32,luminosity*.32]}));
++}
++
++export function applyPcPotionSpritePresentation(renderer, {
++  index, map, dynamic=true, timeMs=performance.now(),
++} = {}) {
++  const plans=pcPotionSpritePlans(index,timeMs);
++  if (!plans.length || !map?.isTexture || typeof renderer?.createBoneSprite !== 'function') return null;
++  const owners=[];
++  for (const plan of plans) {
++    const owner=renderer.createBoneSprite({boneIndex:plan.boneIndex,map,offset:plan.offset,
++      scale:plan.scale,color:new THREE.Color(...plan.color)});
++    if (!owner) {
++      for (const prior of owners) prior.dispose?.();
++      return null;
++    }
++    owners.push(owner);
++  }
++  const update=(clock)=>{
++    const next=pcPotionSpritePlans(index,clock);
++    for (let i=0;i<owners.length&&i<next.length;i++) {
++      owners[i].setScale?.(next[i].scale);
++      owners[i].setColor?.(new THREE.Color(...next[i].color));
++    }
++  };
++  if (dynamic && typeof renderer.addPresentationUpdate === 'function') renderer.addPresentationUpdate(update);
++  renderer.userData ??= {};
++  renderer.userData.muPotionSprites={index:Number(index),bitmap:'BITMAP_SPARK+1',
++    physicalPath:'Effect/Spark03.OZJ',anchors:plans.map(p=>p.boneIndex===null?'OBJECT::Position':`Bone${p.boneIndex}`),dynamic:Boolean(dynamic)};
++  return owners;
++}
++
+ function materialTextureDescriptor(kind) {
+   switch (kind) {
+     case 'chrome': return ['Chrome01.OZJ', 'Effect'];
++    case 'chromePlus1': return ['bab2.OZJ', 'Effect'];
+     case 'chrome2':
+     case 'chrome3':
+     case 'chrome4': return ['Chrome02.OZJ', 'Effect'];
+     case 'chrome6': return ['Chrome06.OZJ', 'Effect'];
+     case 'metal': return ['Shiny01.OZJ', 'Effect'];
++    case 'sparkPlus1': return ['Spark03.OZJ', 'Effect'];
+     default: return null;
+   }
+ }
+ 
++function materialTexturePath(kind) {
++  const desc = materialTextureDescriptor(kind);
++  return desc ? `${desc[1]}/${desc[0]}` : null;
++}
++
+ export function pcImplicitMaterialTextureKind(flags) {
+   if (flags & RenderFlags.CHROME2) return 'chrome2';
+   if (flags & Ren
