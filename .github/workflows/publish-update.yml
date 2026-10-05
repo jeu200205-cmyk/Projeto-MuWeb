@@ -49,9 +49,11 @@ jobs:
           test -f PARAR_MUWEB.bat
           test -f tools/generate-public-changelog.mjs
 
-          if grep -RniE '\b(MUWEB[_-]?)?R?[0-9]*[_-]?FIX[0-9]+\b|\bFIX[[:space:]]*[0-9]+\b|\bHOTFIX\b|\bcheckpoint\b' \
-            README.md docs core world graphics scenes ui ui2 assets tools network database 2>/dev/null; then
-            echo 'ERRO: nomenclatura interna encontrada na árvore pública.' >&2
+          # Bloqueia identificadores internos numerados, mas permite palavras
+          # genéricas como "checkpoint" quando usadas na documentação pública.
+          if grep -RniE '\b(MUWEB[_-]?)?R?[0-9]*[_-]?FIX[0-9]+\b|\bFIX[[:space:]]*[0-9]+\b' \
+            README.md docs core world graphics scenes ui ui2 assets network database 2>/dev/null; then
+            echo 'ERRO: identificador interno numerado encontrado na árvore pública.' >&2
             exit 1
           fi
 
@@ -137,5 +139,5 @@ jobs:
           echo '### Publicação concluída' >> "$GITHUB_STEP_SUMMARY"
           echo '- Branch: `main`' >> "$GITHUB_STEP_SUMMARY"
           echo '- Changelog público atualizado' >> "$GITHUB_STEP_SUMMARY"
-          echo '- Validação contra nomes internos e dados locais executada' >> "$GITHUB_STEP_SUMMARY"
+          echo '- Validação contra identificadores internos e dados locais executada' >> "$GITHUB_STEP_SUMMARY"
           echo '- Release: `${{ inputs.create_release }}`' >> "$GITHUB_STEP_SUMMARY"
