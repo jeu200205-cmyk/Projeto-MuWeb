@@ -49,6 +49,9 @@ export class SkillEffects {
   createDeathCannonEffect(position, facing = 0, opts = {}) { return this.pcPackA.createDeathCannonEffect(position, facing, opts); }
   createDeathStabAuthoring(position, facing = 0, opts = {}) { return this.pcPackA.createDeathStabAuthoring(position, facing, opts); }
   createBlowOfDestructionEffect(position, facing = 0, opts = {}) { return this.pcPackA.createBlowOfDestructionEffect(position, facing, opts); }
+  createComboEffect(position, opts = {}) { return this.pcPackA.createComboEffect(position, opts); }
+  createRiderAuthoring(position, opts = {}) { return this.pcPackA.createRiderAuthoring(position, opts); }
+  playPcSwordReceiveSound(skillType) { return this.pcPackA.playPcSwordReceiveSound(skillType); }
   createElfSupportGroundEffect(position, facing = 0, subtype = 1, opts = {}) { return this.pcPackA.createElfSupportGroundEffect(position, facing, subtype, opts); }
 
   /** Exibe número de dano flutuante no ponto de impacto */

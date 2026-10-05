@@ -1054,9 +1054,9 @@ export class MUTextureManager {
         
         try {
             return await this.loadTexture(path, index);
-        } catch {
-            // Fallback procedural cursor
-            return this._createProceduralCursor(name);
+        } catch (e) {
+            console.warn(`[MUTextureManager] cursor PC ausente ${path} (fail-closed):`, e?.message || e);
+            return null;
         }
     }
 

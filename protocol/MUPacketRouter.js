@@ -185,11 +185,35 @@ export function routeMUPacket(packet, ctx = {}) {
 
         case MAIN_OPCODE.CHARACTER: { // 0xF3 — GameServer (WSclient.h: CHARACTER)
             if (subcode === 0x70) {
-                // PMSG_CHARACTER_LIST_NEWS_SEND. O GameServer desta base envia
-                // F3:70 imediatamente ANTES de F3:00. É informação auxiliar
-                // de pet/wing por nome, não a lista autoritativa de slots.
+                // F3:70 has two proven shapes in the retained custom lineage:
+                //   A) short CHARACTER_LIST_NEWS helper immediately before F3:00;
+                //   B) custom preview rows keyed by CHARACTER NAME.
+                // Distinguish by exact byte law instead of hard-wiring the opcode
+                // to only shape A. This fixes SelectChar custom mounts/wings being
+                // silently discarded while preserving the existing short packet.
                 if (!need(1, 'charListNews')) return 'payload_short';
-                if (ctx.onCharacterListNews) ctx.onCharacterListNews({ count: payload[0], payload });
+                const count = payload[0] || 0;
+                const customLen = 2 + count * 24;
+                if (payload.length === customLen) {
+                    const rd16 = (o) => payload[o] | (payload[o + 1] << 8);
+                    const decoder = new TextDecoder('ascii');
+                    const records = [];
+                    for (let i = 0; i < count; i++) {
+                        const at = 2 + i * 24;
+                        const rawName = payload.subarray(at, at + 11);
+                        const nul = rawName.indexOf(0);
+                        const name = decoder.decode(nul >= 0 ? rawName.subarray(0, nul) : rawName);
+                        records.push({
+                            name, petIndex: rd16(at + 12), secondPetIndex: rd16(at + 14),
+                            wingIndex: rd16(at + 16), key: rd16(at + 18) & 0x7FFF,
+                            element: [rd16(at + 20), rd16(at + 22)],
+                        });
+                    }
+                    const msg = { count, viewport: payload[1] !== 0, records, opcode: 0x70 };
+                    if (ctx.onCustomPreview) ctx.onCustomPreview(msg);
+                    return 'custom_preview_70';
+                }
+                if (ctx.onCharacterListNews) ctx.onCharacterListNews({ count, payload });
                 return 'character_news';
             }
             if (subcode === 0x00) {
@@ -328,6 +352,16 @@ export function routeMUPacket(packet, ctx = {}) {
                     ctx.onCharacterCreate({ result, name, slot, level, classByte });
                 }
                 return result === 1 ? 'character_create_success' : 'character_create_fail';
+            }
+            if (subcode === 0x20) {
+                // F3:20 ReceiveSummonLife — WSclient.cpp:6565-6569.
+                // PHEADER_DEFAULT_SUBCODE = [PBMSG_HEADER][SubCode][Value], so
+                // after the router strips F3:20 the payload is exactly one byte.
+                if (!need(1, 'summonLife')) return 'payload_short';
+                if (payload.length !== 1) return 'payload_short';
+                const value = payload[0];
+                if (ctx.onSummonLife) ctx.onSummonLife({ value });
+                return 'summon_life';
             }
             if (subcode === 0x11) {
                 // F3:11 ReceiveMagicList (WSclient.cpp:1179-1245).
@@ -712,6 +746,16 @@ export function routeMUPacket(packet, ctx = {}) {
                 }
                 if (ctx.onPatent) ctx.onPatent({ count, stride, records });
                 return 'patent';
+            }
+            if (subcode === 0x08) {
+                // F3:08 ReceivePK — WSclient.h PRECEIVE_PK:
+                // Header + SubCode + KeyH + KeyL + PK. Router payload excludes
+                // header/head/sub, so the exact body is 3 bytes.
+                if (!need(3, 'pk')) return 'payload_short';
+                if (payload.length !== 3) return 'payload_short';
+                const msg = { key: (payload[0] << 8) | payload[1], pk: payload[2] };
+                if (ctx.onPkChange) ctx.onPkChange(msg);
+                return 'pk';
             }
             if (subcode === 0x07) {
                 // F3:07 ReceiveDamage (WSclient.cpp:13190 → ReceiveDamage;
@@ -1242,6 +1286,57 @@ export function routeMUPacket(packet, ctx = {}) {
             const msg = { value: payload[0] };
             if (ctx.onTalk) ctx.onTalk(msg);
             return 'talk';
+        }
+
+        case MAIN_OPCODE.TRADE_INVENTORY: { // 0x31 — ReceiveTradeInventory
+            // PHEADER_DEFAULT_SUBCODE_WORD = Header3 + SubCode1 + Value WORD LE.
+            // payload therefore starts [SubCode][CountLo][CountHi], followed by
+            // Count × PRECEIVE_INVENTORY {Index:1, ItemInfo[12]}.
+            if (!need(3, 'tradeInventory')) return 'payload_short';
+            const count = payload[1] | (payload[2] << 8);
+            const required = 3 + count * (1 + PACKET_ITEM_LENGTH);
+            if (payload.length !== required) {
+                log(`[MU] 0x31 trade-inventory tamanho inválido (${payload.length}/${required}, count=${count})`, 'warn');
+                return 'payload_short';
+            }
+            const items=[]; let off=3;
+            for(let i=0;i<count;i++) {
+                const index=payload[off++];
+                items.push({index,item:payload.slice(off,off+PACKET_ITEM_LENGTH)});
+                off += PACKET_ITEM_LENGTH;
+            }
+            const msg={subCode:payload[0],count,items};
+            if(ctx.onTradeInventory) ctx.onTradeInventory(msg);
+            return 'trade_inventory';
+        }
+
+        case MAIN_OPCODE.BUY: { // 0x32 — ReceiveBuy / PHEADER_DEFAULT_ITEM
+            if (!need(1 + PACKET_ITEM_LENGTH, 'buy')) return 'payload_short';
+            if (payload.length !== 1 + PACKET_ITEM_LENGTH) {
+                log(`[MU] 0x32 buy tamanho inválido (${payload.length}/${1+PACKET_ITEM_LENGTH})`, 'warn');
+                return 'payload_short';
+            }
+            const msg={index:payload[0],item:payload.slice(1,1+PACKET_ITEM_LENGTH)};
+            if(ctx.onBuy)ctx.onBuy(msg);
+            return 'buy';
+        }
+
+        case MAIN_OPCODE.SELL: { // 0x33 — ReceiveSell / PRECEIVE_GOLD
+            if (!need(5, 'sell')) return 'payload_short';
+            if (payload.length !== 5) { log(`[MU] 0x33 sell tamanho inválido (${payload.length}/5)`, 'warn'); return 'payload_short'; }
+            const gold=new DataView(payload.buffer,payload.byteOffset+1,4).getUint32(0,true);
+            const msg={flag:payload[0],gold};
+            if(ctx.onSell)ctx.onSell(msg);
+            return 'sell';
+        }
+
+        case MAIN_OPCODE.REPAIR: { // 0x34 — ReceiveRepair / PRECEIVE_REPAIR_GOLD
+            // MSVC packet layout: Header3 then one alignment byte then DWORD Gold.
+            if (!need(5, 'repair')) return 'payload_short';
+            if (payload.length !== 5) { log(`[MU] 0x34 repair tamanho inválido (${payload.length}/5)`, 'warn'); return 'payload_short'; }
+            const gold=new DataView(payload.buffer,payload.byteOffset+1,4).getUint32(0,true);
+            if(ctx.onRepair)ctx.onRepair({gold,pad:payload[0]});
+            return 'repair';
         }
 
         case MAIN_OPCODE.STORAGE_GOLD: { // 0x81 — PRECEIVE_STORAGE_GOLD

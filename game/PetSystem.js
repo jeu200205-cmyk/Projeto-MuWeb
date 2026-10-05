@@ -80,6 +80,7 @@ import { MUAssets } from '../assets/MUAssetLoader.js';
 import { MUModelRenderer } from '../assets/MUModelRenderer.js';
 import { applyMuUpAxis } from '../graphics/BmdAdapter.js';
 import { decodeCharacterEquipment } from '../data/CharacterEquipmentCodec.js';
+import { resolveCustomPreviewElements } from '../data/CustomPreviewElements.js';
 import { serverClassToClientClass, CLASS } from '../data/CharacterClassMap.js';
 
 /** Actions do darkspirit.bmd — enum AI do PC (CSPetSystem.cpp:387-393). */
@@ -172,9 +173,10 @@ async function _loadSparkTexture() {
  * @param {THREE.Scene} scene
  */
 export class Pet {
-    constructor(owner, scene) {
+    constructor(owner, scene, petModelPath = PET_BMD) {
         this.owner = owner;
         this.scene = scene;
+        this.petModelPath = petModelPath || PET_BMD;
         this.level = 1;
         this.experience = 0;
         this.attackCooldown = 0;
@@ -191,7 +193,7 @@ export class Pet {
 
     /** Carrega o BMD real e monta o visual (fail-closed). */
     async init() {
-        const bmd = await MUAssets.loadBMD(PET_BMD); // throw se ausente
+        const bmd = await MUAssets.loadBMD(this.petModelPath); // throw se ausente
         this.renderer = new MUModelRenderer();
         await this.renderer.initFromBMD(bmd);        // throw se 0 meshes
         applyMuUpAxis(this.renderer.group);
@@ -199,6 +201,7 @@ export class Pet {
         this.root.add(this.renderer.group);
         this.root.position.copy(this.owner.position)
             .add(new THREE.Vector3(FLY_RANGE * 0.5, HOVER_HEIGHT, 0));
+        this.scene?.add?.(this.root);
         this.setAction(PET_ACTIONS.FLYING);
         _loadSparkTexture().catch(() => {});
         return this;
@@ -208,7 +211,7 @@ export class Pet {
     setAction(idx) {
         if (!this.renderer) return;
         const act = this.renderer.playAction(`action_${idx}`);
-        if (!act) console.warn(`[PetSystem] action_${idx} ausente em ${PET_BMD}`);
+        if (!act) console.warn(`[PetSystem] action_${idx} ausente em ${this.petModelPath}`);
     }
 
     /**
@@ -374,7 +377,7 @@ export class Pet {
  * @param {number} option Option1 do codec (0=red,1=black,2=blue,4=gold)
  */
 export class MountCompanion {
-    constructor(owner, scene, petModelPath, option) {
+    constructor(owner, scene, petModelPath, option, visibility = null) {
         this.owner = owner;
         this.scene = scene;
         this.petModelPath = petModelPath;
@@ -391,6 +394,8 @@ export class MountCompanion {
         this._currentFenrirAction = -1;
         this._ownerAnimState = null;
         this._riderActionIdx = null;
+        this._safeZone = typeof visibility?.safeZone === 'function'
+            ? visibility.safeZone : () => false;
     }
 
     async init() {
@@ -449,6 +454,19 @@ export class MountCompanion {
         const ownerYaw = this.owner.mesh?.rotation?.y ?? 0;
         this.root.rotation.y = ownerYaw;
 
+        // PC MoveBug hides Fenrir/Unicon/Pegasus on TW_SAFEZONE before
+        // advancing the creature or forcing PLAYER_FENRIR_* on the owner.
+        // Keeping the Web mount visible here caused it to enter Lorencia city
+        // and overwrite ordinary safe-zone walk/idle.
+        let safeZone = false;
+        try { safeZone = Boolean(this._safeZone()); } catch (_) { safeZone = false; }
+        this.root.visible = !safeZone;
+        if (safeZone) {
+            this._ownerAnimState = null;
+            this._riderActionIdx = null;
+            return;
+        }
+
         // Avança animação própria (PlayAnimation com Velocity do SetAction)
         this._elapsed += dt;
         this.renderer.update(dt, this._elapsed);
@@ -458,7 +476,11 @@ export class MountCompanion {
         const state = control?._current ?? 'idle';
 
         // Rider: herói toca PLAYER_FENRIR_* enquanto montado (ZzzAI.cpp:302-448)
-        if (heroRenderer) this.applyRiderAction(heroRenderer, state);
+        // The live PlayerComposer controller owns equipment/class/SafeZone and
+        // already selects exact species-specific actions. A second Fenrir-only
+        // override here replaced Unicon/DarkHorse poses and interrupted skills.
+        // Keep the compatibility owner only when no character controller exists.
+        if (heroRenderer && !control) this.applyRiderAction(heroRenderer, state);
 
         if (state === this._ownerAnimState) return;
         this._ownerAnimState = state;
@@ -649,10 +671,16 @@ export class MountCompanion {
  */
 export class HelperCompanion {
     /** @param {number} [previewScale] 1.0 mundo | 1.2 preview (RenderBug L692) */
-    constructor(owner, scene, previewScale = 1.0) {
+    constructor(owner, scene, previewScale = 1.0, helperInfo = null) {
         this.owner = owner;
         this.scene = scene;
         this.previewScale = previewScale;
+        this.helperInfo = helperInfo || null;
+        this.modelPath = helperInfo?.petModelPath || HELPER_BMD;
+        this.authoredScale = Number(helperInfo?.size) || 0.7;
+        this.authoredPreviewScale = Number(helperInfo?.sizeCharList) || this.authoredScale;
+        this.authoredMovement = Number(helperInfo?.movement) || 0;
+        this.authoredHeight = Number(helperInfo?.height) || 0;
         this.renderer = null;
         this.root = null;
         this._elapsed = 0;
@@ -664,10 +692,11 @@ export class HelperCompanion {
         this._dirZ = 0;
         this._yaw = 0;
         this._alpha = 0;               // CreateBugSub: Alpha 0 → AlphaTarget 1
+        this._currentAuthoredAction = null;
     }
 
     async init() {
-        const bmd = await MUAssets.loadBMD(HELPER_BMD); // throw se ausente (fail-closed)
+        const bmd = await MUAssets.loadBMD(this.modelPath); // CharacterHelper.lua first owner, stock fallback
         this.renderer = new MUModelRenderer();
         await this.renderer.initFromBMD(bmd);          // throw se 0 meshes
         applyMuUpAxis(this.renderer.group);
@@ -682,8 +711,10 @@ export class HelperCompanion {
             oz + (Math.random() * 512 - 256),
         );
         // Scale: 0.7 do CreateBugSub × 1.0 mundo / 1.2 CHARACTER_SCENE (RenderBug)
-        this.root.scale.setScalar(0.7 * this.previewScale);
-        this.renderer.playAction('action_0'); // 1 action (probe fairy.smd)
+        const scale = this.previewScale !== 1.0 ? this.authoredPreviewScale : this.authoredScale;
+        this.root.scale.setScalar(scale);
+        this.scene?.add?.(this.root);
+        this.renderer.playAction('action_0'); // CharacterHelper/stock authored action
         _loadHelperSparkTexture().catch(() => {});
         return this;
     }
@@ -714,6 +745,15 @@ export class HelperCompanion {
         const dx = ownerPos.x - this.root.position.x;
         const dz = ownerPos.z - this.root.position.z;
         const dist2 = dx * dx + dz * dz;
+
+        // FIX53 — CharacterHelper.lua Movement=2, Type=0. Exact owner from
+        // HelperView::WorkMoviment: walk/run toward owner beyond MaxPos=150,
+        // teleport when distance explodes, vertical owner Scale*230, action 2
+        // while walking and action 0 when idle. Web x/z are PC x/y; Web y is PC z.
+        if (this.helperInfo && Number(this.helperInfo.type) === 0 && this.authoredMovement === 2) {
+            this._updateAuthoredWalking(dt, ownerPos, dx, dz, dist2);
+            return;
+        }
 
         // Drift re-roll a cada rand_fps_check(32) (GOBoid.cpp:645-658):
         // fora: Speed=−(rand%64+128)*0.1 | dentro: Speed=−(rand%64+16)*0.1 e
@@ -754,6 +794,58 @@ export class HelperCompanion {
 
         // Sparks BITMAP_SPARK 4×/frame-check (L614-621) — fail-closed sem textura
         this._sparks(dt);
+    }
+
+    _playAuthoredAction(index) {
+        if (this._currentAuthoredAction === index) return;
+        const a = this.renderer?.playAction?.(`action_${index}`, 0.08);
+        if (a) this._currentAuthoredAction = index;
+    }
+
+    _updateAuthoredWalking(dt, ownerPos, dx, dz, dist2) {
+        const maxPos = 150.0;
+        const ownerScale = Number(this.owner?.scale) || Number(this.owner?.root?.scale?.x) || 1;
+        // HelperView.cpp: ObjectStruct->Position[2] = Owner->Scale*230 + Owner->Position[2].
+        this.root.position.y = ownerPos.y + ownerScale * 230.0;
+
+        const tooFar2 = Math.pow(maxPos, 4);
+        if (dist2 >= tooFar2) {
+            // PC teleports the helper back to owner and leaves it 200 above.
+            this.root.position.x = ownerPos.x;
+            this.root.position.z = ownerPos.z;
+            this.root.position.y = ownerPos.y + 200.0;
+            const ownerYaw = Number(this.owner?.rotation?.y);
+            if (Number.isFinite(ownerYaw)) this._yaw = ownerYaw;
+            this.root.rotation.y = this._yaw;
+            this._playAuthoredAction(0);
+            return;
+        }
+
+        let walking = false;
+        if (dist2 >= maxPos * maxPos) {
+            const targetYaw = Math.atan2(dx, dz);
+            let diff = targetYaw - this._yaw;
+            while (diff > Math.PI) diff -= Math.PI * 2;
+            while (diff < -Math.PI) diff += Math.PI * 2;
+            // TurnAngle2(...,10.0) — deterministic 10-degree logical turn owner.
+            const maxTurn = THREE.MathUtils.degToRad(10) * Math.max(1, dt * 25);
+            this._yaw += THREE.MathUtils.clamp(diff, -maxTurn, maxTurn);
+            walking = true;
+        }
+
+        let velocity = 0;
+        if (dist2 > maxPos * maxPos) {
+            if (dist2 >= Math.pow(maxPos * 2, 2)) velocity = Math.log(dist2) * 1.30;
+            else if (dist2 >= Math.pow(maxPos + maxPos / 2, 2)) velocity = Math.log(dist2) * 1.20;
+            else velocity = Math.log(dist2) * 1.05;
+        }
+        // PC Direction[1] = -Velocity and rotates it by the helper angle.
+        // Keep the same logical 25Hz magnitude in world units.
+        const step = velocity * 25 * dt;
+        this.root.position.x += Math.sin(this._yaw) * step;
+        this.root.position.z += Math.cos(this._yaw) * step;
+        this.root.rotation.y = this._yaw;
+        this._playAuthoredAction(walking ? 2 : 0);
     }
 
     _sparks(dt) {
@@ -800,24 +892,26 @@ export class HelperCompanion {
     }
 }
 
+
 export class PetSystem {
     constructor(scene = null) {
         this.scene = scene;
         this.pets = new Map(); // character -> Pet (dark raven)
         this.mounts = new Map(); // character -> MountCompanion (fenrir)
         this.helpers = new Map(); // character -> HelperCompanion (HELPER:0)
+        this.elementPets = new Map(); // character -> {signature, first, second} from F3:72 Element[]
     }
 
     /**
      * Summon com modelo REAL (fail-closed: BMD ausente → null + log).
      * Anteriormente criava esfera/cone procedural — removido (zero-fake).
      */
-    async summon(character, _petKey = 'dark_raven') {
+    async summon(character, _petKey = 'dark_raven', petInfo = null) {
         const old = this.pets.get(character);
         if (old) { old.dispose(); this.pets.delete(character); }
         if (!this.scene) return null;
         try {
-            const pet = new Pet(character, this.scene);
+            const pet = new Pet(character, this.scene, petInfo?.petModelPath || PET_BMD);
             await pet.init(); // throw = sem pet fake
             this.pets.set(character, pet);
             character.calculateStats?.();
@@ -844,7 +938,9 @@ export class PetSystem {
         const old = this.mounts.get(character);
         if (old) { old.dispose(); this.mounts.delete(character); }
         try {
-            const mount = new MountCompanion(character, this.scene, fenrirInfo.petModelPath, fenrirInfo.option);
+            const mount = new MountCompanion(character, this.scene, fenrirInfo.petModelPath, fenrirInfo.option, {
+                safeZone: fenrirInfo.safeZone,
+            });
             await mount.init(); // throw = sem mount fake
             this.mounts.set(character, mount);
             return mount;
@@ -871,12 +967,12 @@ export class PetSystem {
      * @param {number} [previewScale] 1.0 mundo | 1.2 preview CHARACTER_SCENE
      * @returns {Promise<HelperCompanion|null>}
      */
-    async summonHelper(character, previewScale = 1.0) {
+    async summonHelper(character, previewScale = 1.0, helperInfo = null) {
         if (!this.scene) return null;
         const old = this.helpers.get(character);
         if (old) { old.dispose(); this.helpers.delete(character); }
         try {
-            const helper = new HelperCompanion(character, this.scene, previewScale);
+            const helper = new HelperCompanion(character, this.scene, previewScale, helperInfo);
             await helper.init(); // throw = sem helper fake
             this.helpers.set(character, helper);
             return helper;
@@ -893,6 +989,56 @@ export class PetSystem {
             h.dispose();
             this.helpers.delete(character);
         }
+    }
+
+    /**
+     * Apply exact F3:72 Element[] companion ownership from ZzzCharacter.cpp.
+     * Rebuilds only when the two WORDs change; unresolved Lua rows stay
+     * fail-closed and never fabricate a model path.
+     */
+    async syncPreviewElements(character, customPreview = null) {
+        if (!this.scene || !character) return null;
+        const e = Array.isArray(customPreview?.element) ? customPreview.element : [0, 0];
+        const signature = `${Number(e[0] || 0) & 0xFFFF}:${Number(e[1] || 0) & 0xFFFF}`;
+        const old = this.elementPets.get(character);
+        if (old?.signature === signature) return old;
+        if (old) {
+            old.first?.dispose?.(); old.second?.dispose?.();
+            this.elementPets.delete(character);
+        }
+        const spec = resolveCustomPreviewElements(customPreview);
+        let first = null, second = null;
+        try {
+            if (spec.first?.kind === 'dark-spirit') {
+                first = new Pet(character, this.scene, spec.first.petModelPath);
+                await first.init();
+            } else if (spec.first?.kind === 'helper') {
+                first = new HelperCompanion(character, this.scene, 1.0, spec.first);
+                await first.init();
+            }
+        } catch (e) {
+            first?.dispose?.(); first = null;
+            console.warn('[PetSystem] F3:72 Element[0] falhou (fail-closed):', e?.message || e);
+        }
+        try {
+            if (spec.second?.kind === 'helper') {
+                second = new HelperCompanion(character, this.scene, 1.0, spec.second);
+                await second.init();
+            }
+        } catch (e) {
+            second?.dispose?.(); second = null;
+            console.warn('[PetSystem] F3:72 Element[1] falhou (fail-closed):', e?.message || e);
+        }
+        const next = { signature, first, second, spec };
+        this.elementPets.set(character, next);
+        return next;
+    }
+
+    dismissPreviewElements(character) {
+        const e = this.elementPets.get(character);
+        if (!e) return;
+        e.first?.dispose?.(); e.second?.dispose?.();
+        this.elementPets.delete(character);
     }
 
     getHelper(character) { return this.helpers.get(character) || null; }
@@ -950,6 +1096,14 @@ export class PetSystem {
         for (const [owner, helper] of this.helpers) {
             helper.update(dt);
             if (!helper.renderer) this.helpers.delete(owner); // disposed (dono morreu)
+        }
+        // F3:72 Element[0]/Element[1] are independent pet lanes in the PC
+        // (gElementPetFirst/gElementPetSecond and DarkSpirit). Keep them alive
+        // beside the ordinary helper/mount owner instead of collapsing them.
+        for (const [owner, pair] of this.elementPets) {
+            pair.first?.update?.(dt, localTargets);
+            pair.second?.update?.(dt);
+            if ((!pair.first || !pair.first.renderer) && (!pair.second || !pair.second.renderer)) this.elementPets.delete(owner);
         }
     }
 

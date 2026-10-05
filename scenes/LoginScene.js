@@ -1,6 +1,6 @@
-// scenes/LoginScene.js — Tela de login FIEL ao cliente PC (CLoginWin).
+// scenes/LoginScene.js — Tela de login com arte/protocolo PC (CLoginWin) e layout Web corrigido.
 //
-// PORT FIEL DA SOURCE (LoginWin.cpp + UIMng.cpp:200-233):
+// REFERÊNCIAS DA SOURCE (LoginWin.cpp + UIMng.cpp:200-233):
 //   Janela 329×245 @ ((W-329)/2, (H-245)*2/3) — coordenadas lógicas 800×600,
 //   escala visual 1.6 (mesma da ServerSelectScene).
 //   RenderControls (LoginWin.cpp:381+):
@@ -21,7 +21,10 @@
 // custom PC base itself overlaps password and Save Account; reproducing that bug
 // in a browser made the physical R45.2 layout unreadable. Assets/protocol remain
 // PC-authored; only control presentation spacing is repaired on the 800x600 board.
-// Lógica de login: 100% preservada (event-driven GameNet, sem simulação).
+// FIX19: panel height185 contains all controls; labels fit inside; single UV crop;
+// input/save hitboxes use border-box. Intentional browser layout repair, not pixel
+// identity with the custom desktop branch (which itself overlaps controls).
+// Lógica de login: preservada (event-driven GameNet, sem simulação).
 // Eventos: 'login' { accountId, account, remember }, 'join-server'.
 
 import { RemoteAssets } from '../data/RemoteAssets.js';
@@ -80,8 +83,8 @@ export default class LoginScene {
     // ---- painel 200×137 (login_back recorte UV 0,0→64.9%,89.5%) ----
     this.panelEl = document.createElement('div');
     this.panelEl.style.cssText = `position:absolute;left:${64}px;top:${30}px;
-      width:${200}px;height:${137}px;
-      background-size:154% 112%;background-position:top left;`;
+      width:${200}px;height:${185}px;
+      background-size:100% 100%;background-position:top left;`;
     win.appendChild(this.panelEl);
 
     // ---- nome do servidor (topo do painel, centrado) ----
@@ -95,7 +98,7 @@ export default class LoginScene {
     const mkLabel = (txt, top) => {
       const l = document.createElement('div');
       l.textContent = txt;
-      l.style.cssText = `position:absolute;left:${45}px;top:${top}px;
+      l.style.cssText = `position:absolute;left:${78}px;top:${top}px;
         color:#fff;font-size:13px;font-family:Georgia,serif;text-shadow:0 1px 2px #000;`;
       return l;
     };
@@ -114,7 +117,7 @@ export default class LoginScene {
       const inp = document.createElement('input');
       inp.type = type; inp.placeholder = placeholder; inp.maxLength = 20;
       inp.style.cssText = `position:absolute;inset:0;width:100%;height:100%;
-        border:none;outline:none;background:transparent;padding:0 14px;
+        box-sizing:border-box;border:none;outline:none;background:transparent;padding:0 8px;
         color:#ffe6d2;font-size:13px;font-family:Georgia,serif;`;
       wrap.appendChild(inp);
       return { wrap, inp };
@@ -157,7 +160,7 @@ export default class LoginScene {
     // ---- "Salvar Conta" 156×25: R13/R46 browser correction avoids the
     //      custom-PC password overlap while retaining the same real artwork. ----
     const saveWrap = document.createElement('label');
-    saveWrap.style.cssText = `position:absolute;left:${109}px;top:${155}px;
+    saveWrap.style.cssText = `position:absolute;box-sizing:border-box;left:${86}px;top:${155}px;
       width:${156}px;height:${25}px;border:1px solid rgba(179,179,179,0.7);
       cursor:pointer;display:flex;align-items:center;gap:8px;padding:0 10px;
       color:#fff;font-size:12px;font-family:Georgia,serif;user-select:none;`;

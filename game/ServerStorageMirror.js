@@ -82,6 +82,20 @@ export class ServerStorageMirror {
     return view;
   }
 
+  applySnapshot({items,count} = {}) {
+    if (!Array.isArray(items) || (count !== undefined && count !== items.length)) return false;
+    const next = new Array(STORAGE_CAPACITY).fill(null), seen = new Set();
+    for (const entry of items) {
+      if (!this._valid(entry?.index) || seen.has(entry.index)) return false;
+      const decoded = decodeServerItemInfo(entry.item);
+      if (!decoded) return false;
+      seen.add(entry.index); next[entry.index] = decoded;
+    }
+    this.slots = next; this.open = true;
+    this._emit({type:'snapshot',count:items.length,source:'0x31'});
+    return true;
+  }
+
   setItem(index, bytes, {source='0x24/sub2'} = {}) {
     if (!this._valid(index)) return false;
     const decoded = decodeServerItemInfo(bytes);

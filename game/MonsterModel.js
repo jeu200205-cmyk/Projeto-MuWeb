@@ -24,6 +24,7 @@ import * as THREE from 'three';
 import { MUModelRenderer } from '../assets/MUModelRenderer.js';
 import { MUAssets } from '../assets/MUAssetLoader.js';
 import { applyMuUpAxis } from '../graphics/BmdAdapter.js';
+import { attachPcMonsterLuaPresentation } from './PcMonsterLuaPresentation.js';
 import {
     CLASS_TO_MODEL, CLASS_SCALE, RAND2_CLASSES, monsterBmdPath,
 } from '../data/generated/MonsterModelMap.js';
@@ -71,6 +72,7 @@ export async function createMonsterVisual(monsterClass, customRule = null) {
     root.scale.setScalar(Number.isFinite(customRule?.size) ? customRule.size : classScale(monsterClass));
 
     let currentAction = -1;
+    const luaPresentation = await attachPcMonsterLuaPresentation(renderer, monsterClass).catch((e)=>{ console.warn(`[MonsterModel] Lua presentation ${monsterClass}: ${e.message}`); return null; });
     const visual = {
         root,
         renderer,
@@ -102,7 +104,10 @@ export async function createMonsterVisual(monsterClass, customRule = null) {
         /** Avança a animação da instância (mixer + bone texture). */
         update(dt, elapsed = 0) {
             renderer.update(dt, elapsed);
+            luaPresentation?.update?.(dt, elapsed);
         },
+        luaPresentation,
+        dispose() { luaPresentation?.dispose?.(); renderer.dispose?.(); },
     };
     visual.setAction(MONSTER_ACTIONS.STOP1);
     return visual;

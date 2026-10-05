@@ -202,11 +202,11 @@ export async function buildWorldTerrain(worldNum, { loginScene = false, attVaria
   // scene is the only caller that still uses the legacy two-alpha layout.
   const legacyLoginTileLayout = loginScene && worldNum === 95;
   const visual = await createMuTerrainMesh(
-    { fetchImageURL: (p) => RemoteAssets.fetchImageURL(p), THREE },
+    { fetchImageURL: (p, options) => RemoteAssets.fetchImageURL(p, options), THREE },
     worldNum,
     mapping,
     heights,
-    { loginScenes: legacyLoginTileLayout },
+    { loginScenes: legacyLoginTileLayout, walls: att?.walls || null },
   );
   const mesh = visual.mesh;
 

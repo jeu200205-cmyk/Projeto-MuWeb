@@ -34,6 +34,8 @@ import { serverClassToClientClass } from '../data/CharacterClassMap.js';
 import { BuffContainer } from './BuffSystem.js';
 import { Movement } from './Movement.js';
 import { pcWorldActiveFromAssetWorld, pcInBloodCastle, pcInChaosCastle, pcInSwimLocomotionWorld } from './PcMapContext.js';
+import { HelperCompanion, Pet } from './PetSystem.js';
+import { resolveCustomPreviewElements } from '../data/CustomPreviewElements.js';
 
 
 // ---------------------------------------------------------------------------
@@ -315,6 +317,9 @@ export class PlayerViewportManager {
         }
         try { entry.renderer?.dispose?.(); } catch (_ignore) { /* noop */ }
         for (const wr of entry.extras || []) { try { wr.dispose?.(); } catch (_ignore) { /* noop */ } }
+        try { entry.customHelperCompanion?.dispose?.(); } catch (_ignore) { /* noop */ }
+        try { entry.elementCompanions?.first?.dispose?.(); } catch (_ignore) { /* noop */ }
+        try { entry.elementCompanions?.second?.dispose?.(); } catch (_ignore) { /* noop */ }
     }
 
     /** Full authoritative appearance snapshot (0x12 or F3:13). */
@@ -339,13 +344,22 @@ export class PlayerViewportManager {
             const old = this.byKey.get(key);
             if (!old) return false;
             const sig = equipmentSignature(classByte, eq);
-            if (sig === old.appearanceSignature && playerVisualLoadIssues(old.renderer, old.extras, old.equipment).length === 0) return false;
+            const requestedPreview = meta.customPreview ?? old.customPreview ?? null;
+            const previewChanged = (
+                Number(requestedPreview?.wingIndex || 0) !== Number(old.customPreview?.wingIndex || 0) ||
+                Number(requestedPreview?.petIndex || 0) !== Number(old.customPreview?.petIndex || 0) ||
+                Number(requestedPreview?.secondPetIndex || 0) !== Number(old.customPreview?.secondPetIndex || 0) ||
+                Number(requestedPreview?.element?.[0] || 0) !== Number(old.customPreview?.element?.[0] || 0) ||
+                Number(requestedPreview?.element?.[1] || 0) !== Number(old.customPreview?.element?.[1] || 0)
+            );
+            if (!meta.forcePreview && !previewChanged && sig === old.appearanceSignature && playerVisualLoadIssues(old.renderer, old.extras, old.equipment).length === 0) return false;
             const spawnSpec = {
                 key, id: old.id, classByte: Number(classByte) & 0xFF, equipment: eq,
                 x: Number.isInteger(old.serverTileX) ? old.serverTileX : Math.max(0, Math.min(255, Math.floor((old.outer.position.x + 12800) / 100))),
                 y: Number.isInteger(old.serverTileY) ? old.serverTileY : Math.max(0, Math.min(255, Math.floor((12800 - old.outer.position.z) / 100))),
                 dir: Number.isInteger(old.serverDir) ? old.serverDir : 0,
                 buffs: Array.from(old.serverBuffSnapshot || []),
+                customPreview: requestedPreview,
             };
             const fresh = await this._trySpawnRemote(spawnSpec, { publish:false });
             if (!fresh) return false;
@@ -360,7 +374,7 @@ export class PlayerViewportManager {
             fresh.outer.rotation.copy(old.outer.rotation);
             fresh.moveTarget = old.moveTarget ? { ...old.moveTarget } : null;
             fresh.motionChar._muRunProgress = old.motionChar?._muRunProgress || 0;
-            fresh.customPreview = old.customPreview || null;
+            fresh.customPreview = requestedPreview;
             this.scene.addObject(fresh.outer);
             this.byKey.set(key, fresh);
             this._disposeEntry(old);
@@ -417,8 +431,29 @@ export class PlayerViewportManager {
         if (!owner?.get) return 0;
         let applied = 0;
         for (const [key, entry] of this.byKey) {
-            entry.customPreview = owner.get(key);
-            if (entry.customPreview) applied++;
+            // PC/custom lineage can associate preview metadata by character name
+            // before the runtime viewport key is stable. Prefer key, then exact
+            // normalized name; never infer from slot/order.
+            const next = owner.get(key) || owner.getByName?.(entry.id) || null;
+            const prevWing = Number(entry.customPreview?.wingIndex || 0);
+            const nextWing = Number(next?.wingIndex || 0);
+            const prevPet = Number(entry.customPreview?.petIndex || 0);
+            const nextPet = Number(next?.petIndex || 0);
+            const prevElement0 = Number(entry.customPreview?.element?.[0] || 0);
+            const nextElement0 = Number(next?.element?.[0] || 0);
+            const prevElement1 = Number(entry.customPreview?.element?.[1] || 0);
+            const nextElement1 = Number(next?.element?.[1] || 0);
+            entry.customPreview = next;
+            if (next) applied++;
+            // FIX51: F3:72 is not metadata-only. In the PC lineage WingIndex is
+            // applied after ChangeCharacterExt, therefore an already-published
+            // remote actor must transactionally rebuild its linked wing owner
+            // when that authoritative index changes. Body/weapons stay cached.
+            if ((prevWing !== nextWing || prevPet !== nextPet || prevElement0 !== nextElement0 || prevElement1 !== nextElement1) && Array.isArray(entry.equipmentBytes) && entry.equipmentBytes.length === 17) {
+                this.applyEquipmentSnapshot(key, entry.classByte, entry.equipmentBytes, {
+                    source:'F3:72', customPreview:next, forcePreview:true,
+                }).catch((err) => console.warn(`[PlayerViewport] F3:72 custom preview key=${key} falhou: ${err?.message || err}`));
+            }
         }
         return applied;
     }
@@ -446,7 +481,7 @@ export class PlayerViewportManager {
         let renderData = composed.renderData;
         let attach = null;
         if (charset) {
-            attach = await buildEquipmentAttach(charset, this.io, renderData.bones, renderData.bones.length);
+            attach = await buildEquipmentAttach(charset, this.io, renderData.bones, renderData.bones.length, { customPreview: e.customPreview || null });
             if (attach.missing.length || attach.bodyMissing?.length) {
                 console.info(`[PlayerViewport] ${e.id} equipamento ausente (fail-closed): ${JSON.stringify({ attachments:attach.missing, body:attach.bodyMissing || [] })}`);
             }
@@ -520,6 +555,48 @@ export class PlayerViewportManager {
         }
         outer.rotation.y = muDirectionToThreeYaw(e.dir ?? ((e.path >> 4) & 7));
 
+        // FIX52: F3:72 PetIndex is a physical custom helper on remote players,
+        // not metadata. CharacterHelper.lua supplies the exact BMD + scale.
+        let customHelperCompanion = null;
+        if (attach?.customHelper?.petModelPath) {
+            try {
+                const helperOwner = { position: outer.position, isAlive: () => !customHelperCompanion?.disposed };
+                customHelperCompanion = new HelperCompanion(helperOwner, this.scene.scene, 1.0, attach.customHelper);
+                await customHelperCompanion.init();
+            } catch (err) {
+                customHelperCompanion?.dispose?.(); customHelperCompanion = null;
+                console.warn(`[PlayerViewport] custom helper ${e.id} falhou (fail-closed): ${err?.message || err}`);
+            }
+        }
+
+        // FIX53: F3:72 Element[0]/Element[1] are physical companions in
+        // ZzzCharacter.cpp, independent of PetIndex. Resolve only through the
+        // real DarkSpirit.lua / CharacterHelper.lua registries.
+        const elementCompanions = { first:null, second:null };
+        const elementSpec = resolveCustomPreviewElements(e.customPreview || null);
+        const elementOwner = { position: outer.position, isAlive: () => true };
+        try {
+            if (elementSpec.first?.kind === 'dark-spirit') {
+                elementCompanions.first = new Pet(elementOwner, this.scene.scene, elementSpec.first.petModelPath);
+                await elementCompanions.first.init();
+            } else if (elementSpec.first?.kind === 'helper') {
+                elementCompanions.first = new HelperCompanion(elementOwner, this.scene.scene, 1.0, elementSpec.first);
+                await elementCompanions.first.init();
+            }
+        } catch (err) {
+            elementCompanions.first?.dispose?.(); elementCompanions.first = null;
+            console.warn(`[PlayerViewport] F3:72 Element[0] ${e.id} falhou (fail-closed): ${err?.message || err}`);
+        }
+        try {
+            if (elementSpec.second?.kind === 'helper') {
+                elementCompanions.second = new HelperCompanion(elementOwner, this.scene.scene, 1.0, elementSpec.second);
+                await elementCompanions.second.init();
+            }
+        } catch (err) {
+            elementCompanions.second?.dispose?.(); elementCompanions.second = null;
+            console.warn(`[PlayerViewport] F3:72 Element[1] ${e.id} falhou (fail-closed): ${err?.message || err}`);
+        }
+
         // SetPlayerStop/Walk uses the same real equipment metadata as the hero.
         outer.userData.animationControl = buildAnimationControl(renderer, classId, attach, {
             safeZone: () => Boolean(this.scene?.terrainWallAt?.(outer.position.x, outer.position.z) & 0x0001),
@@ -549,7 +626,8 @@ export class PlayerViewportManager {
             classByte, equipmentBytes, appearanceSignature: equipmentSignature(classByte, equipmentBytes),
             serverTileX: e.x, serverTileY: e.y, serverDir: e.dir ?? ((e.path >> 4) & 7),
             serverBuffSnapshot: Array.from(e.buffs || []),
-            weaponRightSpec: attach?.weaponRightSpec || null, equipment: attach,
+            customPreview: e.customPreview || null,
+            weaponRightSpec: attach?.weaponRightSpec || null, equipment: attach, customHelperCompanion, elementCompanions,
             moveTarget: null,
             motionChar: { classId, _muRunProgress: 0, mesh: outer },
             bodyLightColor: new THREE.Color(1, 1, 1),
@@ -617,6 +695,9 @@ export class PlayerViewportManager {
                 entry.t += poseDt;
                 renderer.update(poseDt, entry.t);
                 for (const wr of extras) wr.update(poseDt, entry.t);
+                customHelperCompanion?.update?.(poseDt);
+                elementCompanions.first?.update?.(poseDt, []);
+                elementCompanions.second?.update?.(poseDt);
                 poseSteps++;
             }
         };

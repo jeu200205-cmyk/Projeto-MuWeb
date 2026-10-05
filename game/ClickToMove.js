@@ -37,7 +37,12 @@ class ClickToMoveController {
     }
 
     _getTerrainTargets() {
-        if (this.terrain) return [this.terrain];
+        if (this.terrain) {
+            if(this.terrain.isMesh)return [this.terrain];
+            const surfaces=[];
+            this.terrain.traverse(o=>{if(o.isMesh&&!o.name.startsWith('MU_TERRAIN_GRASS'))surfaces.push(o)});
+            return surfaces;
+        }
         const candidates = [];
         this.scene.traverse(o => {
             if (o.isMesh && o.geometry &&
@@ -67,6 +72,8 @@ class ClickToMoveController {
             const hits = this.raycaster.intersectObjects(targets, false);
             if (hits.length > 0) return hits[0].point.clone();
         }
+        // A loaded real terrain owns height and bounds. A miss is not a y=0 destination.
+        if(this.terrain)return null;
         // Apenas fallback geométrico do plano do mundo, sem VFX/marker fake.
         const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
         const p = new THREE.Vector3();

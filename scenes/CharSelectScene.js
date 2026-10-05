@@ -33,6 +33,7 @@
 // Hooks E2E: [data-mu=char-slot][data-mu-char], botões por dataset.mu
 
 import { MUSprites } from '../ui/MUSprites.js';
+import { RemoteAssets } from '../data/RemoteAssets.js';
 import { attachMuVirtualBoard } from '../ui/MUVirtualViewport.js';
 
 // ---- Geometria dos contratos ----
@@ -50,7 +51,12 @@ const COL_NAME = 'rgb(255,189,25)';
 const COL_TEXT = 'rgb(255,255,255)';
 
 // Cache de módulo
-const cache = { loaded: false, loading: null, slotFrames: null };
+let cache;
+function sceneAssetCache() {
+  const authority = String(RemoteAssets.baseUrl || '');
+  if (!cache || cache.authority !== authority) cache = {authority, loaded:false, loading:null, slotFrames:null};
+  return cache;
+}
 
 export default class CharSelectScene {
   constructor() {
@@ -182,9 +188,11 @@ export default class CharSelectScene {
   }
 
   async _loadAssets() {
+    const cache = sceneAssetCache();
     await MUSprites.load().catch(() => {});
+    if (sceneAssetCache() !== cache) return false;
     if (cache.loaded) { this._applyAssets(); return this._ownersReady(); }
-    if (cache.loading) { await cache.loading; this._applyAssets(); return this._ownersReady(); }
+    if (cache.loading) { await cache.loading; if (sceneAssetCache() !== cache) return false; this._applyAssets(); return this._ownersReady(); }
     cache.loading = (async () => {
       try {
         // CharacterSelect_Button01/02/03.ozt 225×52, UV (0,0,0.878,0.82)
@@ -193,11 +201,13 @@ export default class CharSelectScene {
           'Custom/Interface/CharacterSelect_Button02.ozt',
           'Custom/Interface/CharacterSelect_Button03.ozt'];
         const decodedOwners = await Promise.all(states.map((p) => MUSprites.fetchDecodedImage(p)));
-        cache.slotFrames = await Promise.all(decodedOwners.map(async (owner) => {
+        const frames = await Promise.all(decodedOwners.map(async (owner) => {
           if (!owner) return null;
           const sliced = await MUSprites.slice(owner, [{ x: 0, y: 0, w: 197, h: 42 }]);
           return sliced[0];
         }));
+        if (sceneAssetCache() !== cache) return;
+        cache.slotFrames = frames;
       } catch (e) {
         console.warn('[CharSelect] slot sprites incompletos:', e?.message || e);
         cache.slotFrames = [null, null, null];
@@ -205,20 +215,23 @@ export default class CharSelectScene {
       cache.loaded = this._ownersReady();
     })();
     try { await cache.loading; } finally { cache.loading = null; }
+    if (sceneAssetCache() !== cache) return false;
     this._applyAssets();
     return this._ownersReady();
   }
 
   _ownersReady() {
+    const cache = sceneAssetCache();
     return Boolean(
       cache.slotFrames?.length === 3 && cache.slotFrames.every(Boolean) &&
       MUSprites.get('chaId') && MUSprites.get('deco') &&
-      MUSprites.frames('btnCreate')?.[0] && MUSprites.frames('btnDelete')?.[0] &&
-      MUSprites.frames('btnConnect')?.[0]
+      ['btnCreate', 'btnDelete', 'btnConnect'].every(key => MUSprites.frames(key)?.length === 4 && MUSprites.frames(key).every(Boolean)) &&
+      MUSprites.frames('btnMenu')?.length === 3 && MUSprites.frames('btnMenu').every(Boolean)
     );
   }
 
   _applyAssets() {
+    const cache = sceneAssetCache();
     if (!this.el || !this.el.isConnected) return;
     const chaId = MUSprites.get('chaId');
     const idEl = this.board.querySelector('.cha-id');
@@ -268,6 +281,7 @@ export default class CharSelectScene {
   hide() {}
   dispose() {
     this._destroyed = true;
+    this._closeModal();
     if (this.board) this.board.style.visibility = 'hidden';
     this._stopRotate();
     if (this._keyHandler) document.removeEventListener('keydown', this._keyHandler);
@@ -277,6 +291,7 @@ export default class CharSelectScene {
   update() {}
 
   _render() {
+    const cache = sceneAssetCache();
     if (this._destroyed || !this.slotCol) return;
     this.slotCol.innerHTML = '';
     this._slotEls = [];
@@ -389,7 +404,7 @@ export default class CharSelectScene {
     const c = this.chars[this.selected];
     if (!c || this.modal) return;
     const overlay = document.createElement('div');
-    overlay.style.cssText = `position:absolute;inset:0;background:rgba(0,0,0,0.7);z-index:100;
+    overlay.style.cssText = `position:absolute;inset:0;background:rgba(0,0,0,0.7);z-index:100;pointer-events:auto;
       display:flex;align-items:center;justify-content:center;`;
     const box = document.createElement('div');
     box.style.cssText = `width:320px;padding:22px 26px;background:rgba(10,8,20,0.95);
@@ -421,6 +436,7 @@ export default class CharSelectScene {
     box.appendChild(row);
     overlay.appendChild(box);
     this.el.appendChild(overlay);
+    overlay.dataset.muModal = 'delete-confirm';
     this.modal = overlay;
     requestAnimationFrame(() => security.focus());
   }
@@ -446,6 +462,8 @@ export default class CharSelectScene {
   }
 
   showDeleteResult(result, name = '') {
+    // Repeated/late server replies replace the current dialog, never stack.
+    this._closeModal();
     const code = Number(result);
     const target = String(name || this._deletePendingName || 'personagem');
     this._deletePending = false;
@@ -459,7 +477,7 @@ export default class CharSelectScene {
     this._statusMessage = '';
     this._render();
     const overlay = document.createElement('div');
-    overlay.style.cssText = `position:absolute;inset:0;background:rgba(0,0,0,0.7);z-index:101;display:flex;align-items:center;justify-content:center;`;
+    overlay.style.cssText = `position:absolute;inset:0;background:rgba(0,0,0,0.7);z-index:101;pointer-events:auto;display:flex;align-items:center;justify-content:center;`;
     const box = document.createElement('div');
     box.style.cssText = `width:340px;padding:22px 26px;background:rgba(10,8,20,0.97);border:1px solid #c9a22785;text-align:center;font-size:13px;color:#cfc29c;`;
     const reason = code === 2
@@ -470,6 +488,8 @@ export default class CharSelectScene {
     ok.textContent = 'OK';
     ok.style.cssText = 'margin-top:16px;min-width:70px;height:28px;background:#17130d;color:#d7c899;border:1px solid #806f46;cursor:pointer;';
     ok.onclick = () => this._closeModal();
+    overlay.dataset.muModal = 'delete-result';
+    ok.dataset.mu = 'delete-result-ok';
     box.appendChild(ok); overlay.appendChild(box); this.el.appendChild(overlay); this.modal = overlay;
   }
 

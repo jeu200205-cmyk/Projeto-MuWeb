@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { RemoteAssets } from '../data/RemoteAssets.js';
 import { MAP_SIZE } from './TerrainWorld.js';
+import { pcIcarusSourceHidden } from './PcIcarusVisualContract.js';
 
 const BITMAPS = Object.freeze({
   LIGHT: 'Effect/flare01.OZJ',
@@ -43,6 +44,8 @@ export function pcMapBoneVisualContract(worldNum,serial){
   ]};
   if(w===7&&t===9)return {points:[{bitmap:'LIGHT',bone:1,offset:[0,0,0],scale:5,scaleByLum:true,law:'merchant'}]};
   if(w===9&&(t===63||t===64))return {points:[{bitmap:'IMPACT',bone:2,offset:[0,0,0],scale:1.5,scaleByLum:true,law:t===63?'tarkanCyan':'tarkanRed'}]};
+  // WD_10HEAVEN RenderObjectVisual type10: bone 3 -> BITMAP_LIGHT, white, scale 1.
+  if(w===11&&t===10)return {points:[{bitmap:'LIGHT',bone:3,offset:[0,0,0],scale:1,law:'white'}]};
   if(w===52&&t===63)return {points:[{bitmap:'LIGHT',bone:5,offset:[-40,-10,0],scale:6,scaleByObject:true,law:'newTown63'}]};
   if(w===52&&t===121)return {points:[3,4,5,6,7,8].map(b=>({bitmap:'LIGHT',bone:b,offset:[5,-4,-1],scale:1,scaleByLum:true,law:'newTown121'}))};
   if(isBloodCastleWorld(w)&&t===11)return {points:[1,2,4,6,9,10,11].map(b=>({bitmap:'LIGHT',bone:b,offset:[0,0,2],scale:.5,law:'blood11'}))};
@@ -104,12 +107,21 @@ export async function createPcMapWorldVisualOwner(worldNum,placements){
 // never apply those offsets to every mesh as a guess.
 export function pcMapRuntimePresentationContract(worldNum,serial){
   const w=worldNum|0,t=serial|0;
-  // WD_0LORENCIA: only branches already on a per-placement owner lane.
-  // Bonfire random BlendMeshLight is a MoveObject/source-tick value; Waterspout
-  // scrolls mesh 3 and uses texture slot 3 as the additive BlendMesh owner.
+  // WD_0LORENCIA: exact CreateObject + MoveObject material owners from Main 5.2.
+  // NOTE: BMD::RenderMesh uses OBJECT::BlendMesh twice with different domains:
+  //   - mesh index for UV wave ownership (i == BlendMesh), and
+  //   - texture index for GL_ONE/GL_ONE additive ownership (m->Texture == BlendMesh).
+  // installPcMapRuntimePresentation intentionally preserves that split.
   if(w===1){
-    if(t===52)return {blendMesh:1,light25hz:()=> (ri(6)+4)*.1};
-    if(t===105)return {blendMesh:3,uv:(ms)=>[0,-(Math.trunc(ms)%1000)*.001]};
+    if(t===52)return {blendMesh:1,light25hz:()=> (ri(6)+4)*.1};              // Bonfire
+    if(t===90)return {blendMesh:1};                                         // StreetLight
+    if(t===98)return {blendMesh:2};                                         // Carriage01
+    if(t===105)return {blendMesh:3,uv:(ms)=>[0,-(Math.trunc(ms)%1000)*.001]}; // Waterspout
+    if(t===117)return {blendMesh:4,light25hz:()=> (ri(4)+4)*.1};             // House03
+    if(t===118)return {blendMesh:8,uv:(ms)=>[0,-(Math.trunc(ms)%1000)*.001]}; // House04
+    if(t===119)return {blendMesh:2,uv:(ms)=>[0,-(Math.trunc(ms)%1000)*.001]}; // House05
+    if(t===122)return {blendMesh:4,light25hz:()=> (ri(4)+4)*.1};             // HouseWall02
+    if(t===150)return {blendMesh:1};                                        // Candle
   }
   // WD_1DUNGEON: source explicitly assigns Models[o->Type].StreamMesh = 1.
   if(w===2&&(t===22||t===23||t===24))return {streamMesh:1,uv:(ms)=>[0,-(Math.trunc(ms)%1000)*.001]};
@@ -155,6 +167,18 @@ export function pcMapRuntimePresentationContract(worldNum,serial){
   return null;
 }
 export function hasPcMapRuntimePresentation(worldNum,serial){return !!pcMapRuntimePresentationContract(worldNum,serial);}
+
+// OBJECT::Velocity / BMD action-0 playback ownership for classic map props.
+// Default CreateObject velocity is 0.16f; Lorencia overrides only these serials.
+export function pcMapObjectPlaySpeed(worldNum,serial,scale=1){
+  const w=worldNum|0,t=serial|0,s=Math.max(0.0001,Number(scale)||1);
+  if(w===1){
+    if(t===0||t===1)return 0.4/s;       // Tree01/Tree02: 1/Scale * 0.4f
+    if(t===90||t===96||t===97||t===150)return 0.3; // StreetLight, Sign01/02, Candle
+    if(t===59)return 0;                 // TreasureChest: OBJECT::Velocity = 0.f
+  }
+  return 0.16;
+}
 
 export function installPcMapRuntimePresentation(worldNum,serial,renderer,obj){
   const c=pcMapRuntimePresentationContract(worldNum,serial);if(!c||!renderer)return false;
@@ -224,6 +248,11 @@ export function pcMapHideBaseBmd(worldNum,serial){
   if(w===7)return t===38;                                            // Stadium
   if(w===8)return t===22||t===39;                                    // Atlans
   if(w===9)return t===60||t===63||t===64||t===70||t===76||t===83;    // Tarkan
+  // WD_10HEAVEN: Object11 types 0..5 are one-shot BITMAP_CLOUD emitters.
+  // RenderObjectVisual creates 20 clouds for 0..2 / 10 for 3..5 on the
+  // first visible call, then sets OBJECT::HiddenMesh=-2.  Keeping the raw
+  // BMD visible is not a valid fallback for a missing particle owner.
+  if(w===11)return pcIcarusSourceHidden(t);                           // Icarus
   return false;
 }
 

@@ -623,6 +623,26 @@ class RealMUProtocol {
     await this.sendPacket(this.createTalkPacket(npcKey));
   }
 
+
+  createBuyPacket(index) {
+    if (!Number.isInteger(index) || index < 0 || index > 0xFF) throw new RangeError(`shop index invalido: ${index}`);
+    return this._buildC1NoSub(0x32, Uint8Array.from([index & 0xFF]));
+  }
+  async requestBuy(index) { await this.sendPacket(this.createBuyPacket(index)); }
+
+  createSellPacket(index) {
+    if (!Number.isInteger(index) || index < 0 || index > 0xFF) throw new RangeError(`inventory index invalido: ${index}`);
+    return this._buildC1NoSub(0x33, Uint8Array.from([index & 0xFF]));
+  }
+  async requestSell(index) { await this.sendPacket(this.createSellPacket(index)); }
+
+  createRepairPacket(index, addGold = 0) {
+    if (!Number.isInteger(index) || index < 0 || index > 0xFF) throw new RangeError(`repair index invalido: ${index}`);
+    if (!Number.isInteger(addGold) || addGold < 0 || addGold > 0xFF) throw new RangeError(`repair addGold invalido: ${addGold}`);
+    return this._buildC1NoSub(0x34, Uint8Array.from([index & 0xFF, addGold & 0xFF]));
+  }
+  async requestRepair(index, addGold = 0) { await this.sendPacket(this.createRepairPacket(index, addGold)); }
+
   async requestMagic(type, key) {
     await this.sendPacket(this.createMagicPacket(type, key));
   }

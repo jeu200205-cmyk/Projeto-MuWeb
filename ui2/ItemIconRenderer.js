@@ -17,6 +17,7 @@ import { loadCustomItemPresentation, customItemPosition, customItemSize } from '
 import { itemAttributeFor } from '../data/ItemAttributeData.js';
 import { parseBMD } from '../graphics/BmdParser.js';
 import { extractPartMeshes } from '../graphics/BmdAdapter.js';
+import { RemoteAssets } from '../data/RemoteAssets.js';
 
 // ---- categoria por Type 12-bit (_define.h:379-394: cat=floor(Type/512)) ----
 const CAT = (t) => Math.floor(t / 512);
@@ -25,6 +26,57 @@ const ITEM_SWORD = 0, ITEM_AXE = 1, ITEM_MACE = 2, ITEM_SPEAR = 3, ITEM_BOW = 4,
     ITEM_STAFF = 5, ITEM_SHIELD = 6, ITEM_HELM = 7, ITEM_ARMOR = 8, ITEM_PANTS = 9,
     ITEM_GLOVES = 10, ITEM_BOOTS = 11, ITEM_WING = 12, ITEM_HELPER = 13, ITEM_POTION = 14, ITEM_ETC = 15;
 const MAX_ITEM_INDEX = 512; // por família (12-bit domain)
+
+// RenderItem3D chooses a MODEL_* before RenderObjectScreen/RenderPartObject.
+// Regular alternates query Lua by their resolved MODEL_ITEM type. EVENT and
+// ARMORINVEN have independent enum ranges and must never inherit original
+// item Lua ownership or be aliased to ITEM_ETC.
+export function pcInventoryMaterialIdentity(type, rawLevel = 0) {
+    const g = CAT(type), i = OFF(type), lv = (Number(rawLevel) >> 3) & 0x0F;
+    if (g === ITEM_ARMOR && i >= 59 && i <= 61) {
+        return {type, rawLevel, remapped:true, modelFamily:'armorinven', modelIndex:i + 1};
+    }
+    let eventIndex = null, eventRawLevel = rawLevel;
+    if (g === ITEM_POTION && i === 12 && lv === 0) eventIndex = 0;
+    else if (g === ITEM_POTION && i === 12 && lv === 2) eventIndex = 1;
+    else if (g === ITEM_POTION && i === 11) eventIndex = ({1:4,2:5,3:6,5:8,6:9,8:10,9:10,10:10,11:10,12:10,13:6,14:5,15:5})[lv] ?? null;
+    else if (g === ITEM_HELPER && i === 14 && lv === 1) eventIndex = 16;
+    else if (g === ITEM_POTION && i === 9 && lv === 1) eventIndex = 7;
+    else if (g === ITEM_POTION && i === 21 && (lv === 1 || lv === 2)) eventIndex = 11;
+    else if (g === ITEM_POTION && i >= 32 && i <= 34 && lv === 1) eventIndex = 21 + i - 32;
+    else if (g === ITEM_POTION && i === 23 && lv === 1) { eventIndex = 12; eventRawLevel = -1; }
+    else if (g === ITEM_POTION && i === 24 && lv === 1) { eventIndex = 13; eventRawLevel = -1; }
+    else if (g === ITEM_HELPER && i === 20 && lv === 0) eventIndex = 15;
+    else if (g === ITEM_HELPER && i === 20 && lv >= 1 && lv <= 3) eventIndex = 14;
+    else if (g === ITEM_HELPER && i === 11 && lv === 1) eventIndex = 18;
+    if (eventIndex !== null) {
+        return { type, rawLevel: eventRawLevel, remapped: true, modelFamily: 'event', modelIndex: eventIndex };
+    }
+    if (g === ITEM_POTION && (i === 47 || i === 48)) {
+        return { type: ITEM_POTION * MAX_ITEM_INDEX + 46, rawLevel, remapped: true };
+    }
+    if (g === ITEM_HELPER && i === 19 && lv >= 0 && lv <= 2) {
+        const target = [ITEM_STAFF * MAX_ITEM_INDEX + 10, 19, ITEM_BOW * MAX_ITEM_INDEX + 18][lv];
+        // PC passes -1 to select miniature scale, then RenderObjectScreen
+        // resets ItemLevel=0 for STAFF+10 / SWORD+19 / BOW+18 before materials.
+        return { type: target, rawLevel: 0, remapped: true };
+    }
+    return { type, rawLevel, remapped: false };
+}
+
+export function pcInventoryMaterialOptions(type, rawLevel = 0, presentation = {}) {
+    const identity = pcInventoryMaterialIdentity(type, rawLevel);
+    const owner = identity.modelFamily ? null : customItemModelForType(identity.type);
+    const color = identity.remapped ? owner?.color : (presentation.customColor ?? owner?.color);
+    const effectType = identity.remapped ? owner?.effectType : (presentation.effectType || owner?.effectType);
+    return {
+        type: identity.type, rawLevel: identity.rawLevel,
+        modelFamily: identity.modelFamily ?? 'item', modelIndex: identity.modelIndex ?? null,
+        option1: Number(presentation.option1) || 0, extOption: Number(presentation.extOption) || 0,
+        customColor: Array.isArray(color) ? color : null,
+        effectType: Number(effectType) || 0,
+    };
+}
 
 
 // ---- Main 5.2 item-view camera / absolute presentation --------------------
@@ -55,6 +107,8 @@ export function pcItemViewRect(width, height) {
 
 export function renderItem3dUsesAlternateModel(type, rawLevel = 0) {
     const g = CAT(type), i = OFF(type), lv = (rawLevel >> 3) & 0x0F;
+    if (g === ITEM_ARMOR && i >= 59 && i <= 61) return true;
+    if (g === ITEM_POTION && i === 12 && (lv === 0 || lv === 2)) return true;
     if (g === ITEM_POTION && i === 11 && [1,2,3,5,6,8,9,10,11,12,13,14,15].includes(lv)) return true;
     if (g === ITEM_HELPER && i === 14 && lv === 1) return true;
     if (g === ITEM_POTION && i === 9 && lv === 1) return true;
@@ -127,6 +181,7 @@ export function pcItemProjectionPosition(width, height, fx, fy, customPosition =
 export function inventoryItemPositionOffset(type, rawLevel = 0, customPosition = null) {
     const group = CAT(type), index = OFF(type), level = (rawLevel >> 3) & 0x0F;
     if (customPosition) return [0, 0, 0];
+    if (group === ITEM_ARMOR && index >= 59 && index <= 61) return [0.01, 0.08, 0];
     let x = 0, y = 0, z = 0;
 
     // Primary weapon/body branches, in the exact else-if priority used by PC.
@@ -258,6 +313,7 @@ export function pcInventoryModelScale(type, rawLevel = 0, customSize = null) {
     const g = CAT(type), i = OFF(type), lv = (rawLevel >> 3) & 0x0F;
 
     // RenderItem3D remaps whose RenderObjectScreen Type is MODEL_EVENT/etc.
+    if (g === ITEM_ARMOR && i >= 59 && i <= 61) return 0.0039;
     if (g === ITEM_POTION && i === 11) {
         if (lv === 3 || lv === 13) return 0.0039; // EVENT+6
         if (lv === 5) return 0.0015;             // EVENT+8
@@ -502,6 +558,7 @@ export function inventoryItemAngles(type, rawLevel = 0, twoHand = null, customPo
     const group = CAT(type), index = OFF(type), level = (rawLevel >> 3) & 0x0F;
     let a = [270, -10, 0]; // fallback desktop
     if (customPosition && Number.isFinite(customPosition.angleX) && Number.isFinite(customPosition.angleY) && Number.isFinite(customPosition.angleZ)) return [customPosition.angleX, customPosition.angleY, customPosition.angleZ];
+    if (group === ITEM_ARMOR && index >= 59 && index <= 61) return [0, 0, 0];
 
     // Alternate MODEL_EVENT presentations selected by RenderItem3D.
     if (type === ITEM_HELPER * 512 + 14 && level === 1) return [-90, 0, 0];
@@ -600,6 +657,8 @@ export function inventoryItemAngles(type, rawLevel = 0, twoHand = null, customPo
     }
 
     if (group === ITEM_POTION) {
+        if (index === 18) return [270, 0, 270];
+        if (index === 19 || index === 21) return [270, 0, 90];
         if (index === 12) {
             if (level === 0) return [180, 0, 0];
             if (level === 1) return [270, 90, 0];
@@ -641,13 +700,73 @@ function muAngleMatrix4([x, y, z]) {
 }
 
 /**
+ * Remaps de modelo que o RenderItem3D do Main 5.2 resolve ANTES de chamar
+ * RenderObject. Eles têm precedência sobre o AccessModel do tipo original,
+ * inclusive sobre LoadItens.lua: nesses casos o PC muda o ModelID conforme
+ * Level>>3 e renderiza o proprietário do ModelID alternativo.
+ *
+ * `rawLevel` é Attribute1 de ItemInfo[12], não o nível já reduzido.
+ */
+export function pcAlternateInventoryModelPath(type, rawLevel = 0) {
+    if (!Number.isInteger(type) || type < 0 || type === 0x1FFF) return null;
+    const group = CAT(type), index = OFF(type), level = (rawLevel >> 3) & 0x0F;
+    if (group === ITEM_ARMOR && index >= 59 && index <= 61) {
+        return ['Player/Armor_inventory60.bmd', 'Player/ArmorMale61_inventory.bmd', 'Player/ArmorMale62_inventory.bmd'][index - 59];
+    }
+    // RenderPartObject rewrites MODEL_POTION+12 to MODEL_EVENT before looking
+    // up Models[Type]. These are Event02/Event03, not Potion12's BMD.
+    if (group === ITEM_POTION && index === 12 && level === 0) return 'Item/Event02.bmd';
+    if (group === ITEM_POTION && index === 12 && level === 2) return 'Item/Event03.bmd';
+
+    if (group === ITEM_POTION && index === 11) {
+        if (level === 1) return 'Item/MagicBox02.bmd';
+        if (level === 2 || level === 14 || level === 15) return 'Item/MagicBox03.bmd';
+        if (level === 3 || level === 13) return 'Item/MagicBox05.bmd';
+        if (level === 5) return 'Item/MagicBox06.bmd';
+        if (level === 6) return 'Item/MagicBox07.bmd';
+        if (level >= 8 && level <= 12) return 'Item/MagicBox08.bmd';
+    }
+    if (group === ITEM_HELPER && index === 14 && level === 1) return 'Item/DarkLordSleeve.bmd';
+    if (group === ITEM_POTION && index === 9 && level === 1) return 'Item/Beer02.bmd';
+    if (group === ITEM_POTION && index === 21 && (level === 1 || level === 2)) return 'Item/EventBloodCastle03.bmd';
+
+    // RenderItem3D converte Item 14:47/48 para MODEL_POTION+46. O arquivo é
+    // compartilhado pelos três registros, mas a precedência importa quando o
+    // LoadItens atual declara um modelo próprio para 47 ou 48.
+    if (group === ITEM_POTION && (index === 47 || index === 48)) return 'Item/hellowinscroll.bmd';
+
+    if (group === ITEM_POTION && index === 32 && level === 1) return 'Item/p03box.bmd';
+    if (group === ITEM_POTION && index === 33 && level === 1) return 'Item/obox02.bmd';
+    if (group === ITEM_POTION && index === 34 && level === 1) return 'Item/blue01.bmd';
+    if (group === ITEM_POTION && index === 23 && level === 1) return 'Item/QuestItem3rd00.bmd';
+    if (group === ITEM_POTION && index === 24 && level === 1) return 'Item/QuestItem3rd01.bmd';
+    if (group === ITEM_HELPER && index === 20) {
+        if (level === 0) return 'Item/MagicRing00.bmd';
+        if (level >= 1 && level <= 3) return 'Item/RingOfLordEvent00.bmd';
+    }
+    if (group === ITEM_HELPER && index === 11 && level === 1) return 'Item/LifestoneItem.bmd';
+    if (group === ITEM_HELPER && index === 19) {
+        if (level === 0) return 'Item/Staff11.bmd';
+        if (level === 1) return 'Item/Sword20.bmd';
+        if (level === 2) return 'Item/Bow19.bmd';
+    }
+    return null;
+}
+
+/**
  * Modelo real do item pela tabela AccessModel + remaps verificados do
  * RenderItem3D/CreateItem que dependem de Level>>3. `rawLevel` é o byte
  * Attribute1 do ItemInfo[12], não o +level já reduzido.
  */
 export function itemModelPath(type, rawLevel = 0) {
     if (!Number.isInteger(type) || type < 0 || type === 0x1FFF) return null;
-    const group = CAT(type), index = OFF(type), level = (rawLevel >> 3) & 0x0F;
+    const group = CAT(type), index = OFF(type);
+
+    // O switch do RenderItem3D substitui o ModelID antes do AccessModel. FIX25
+    // fazia esta resolução depois do custom e deixava um dono do tipo original
+    // esconder o modelo alternativo que o PC realmente apresenta.
+    const alternate = pcAlternateInventoryModelPath(type, rawLevel);
+    if (alternate) return alternate;
 
     // Same owner/order as ItemModelResolver: retained current-client
     // LoadItens.lua is appended after the stock AccessModel table, so an exact
@@ -695,33 +814,6 @@ export function itemModelPath(type, rawLevel = 0) {
         if (index >= 59 && index <= 61 && group !== ITEM_GLOVES)
             return path(`${part}Male`, index + 1);
         return null;
-    }
-
-    if (group === ITEM_POTION && index === 11) {
-        if (level === 1) return 'Item/MagicBox02.bmd';
-        if (level === 2 || level === 14 || level === 15) return 'Item/MagicBox03.bmd';
-        if (level === 3 || level === 13) return 'Item/MagicBox05.bmd';
-        if (level === 5) return 'Item/MagicBox06.bmd';
-        if (level === 6) return 'Item/MagicBox07.bmd';
-        if (level >= 8 && level <= 12) return 'Item/MagicBox08.bmd';
-    }
-    if (group === ITEM_HELPER && index === 14 && level === 1) return 'Item/DarkLordSleeve.bmd';
-    if (group === ITEM_POTION && index === 9 && level === 1) return 'Item/Beer02.bmd';
-    if (group === ITEM_POTION && index === 21 && (level === 1 || level === 2)) return 'Item/EventBloodCastle03.bmd';
-    if (group === ITEM_POTION && index === 32 && level === 1) return 'Item/p03box.bmd';
-    if (group === ITEM_POTION && index === 33 && level === 1) return 'Item/obox02.bmd';
-    if (group === ITEM_POTION && index === 34 && level === 1) return 'Item/blue01.bmd';
-    if (group === ITEM_POTION && index === 23 && level === 1) return 'Item/QuestItem3rd00.bmd';
-    if (group === ITEM_POTION && index === 24 && level === 1) return 'Item/QuestItem3rd01.bmd';
-    if (group === ITEM_HELPER && index === 20) {
-        if (level === 0) return 'Item/MagicRing00.bmd';
-        if (level >= 1 && level <= 3) return 'Item/RingOfLordEvent00.bmd';
-    }
-    if (group === ITEM_HELPER && index === 11 && level === 1) return 'Item/LifestoneItem.bmd';
-    if (group === ITEM_HELPER && index === 19) {
-        if (level === 0) return 'Item/Staff11.bmd';
-        if (level === 1) return 'Item/Sword20.bmd';
-        if (level === 2) return 'Item/Bow19.bmd';
     }
 
     // R46 physical inventory closure. These are NOT filename guesses: the
@@ -844,7 +936,7 @@ export function pcInventoryHideSkinTextureOverride(type) {
 async function loadInventoryRenderData(io, type, path) {
     const g = CAT(type);
     if (g < ITEM_HELM || g > ITEM_BOOTS) return io.loadBMD(path);
-    const key = `body:${type}:${path}`;
+    const key = `${RemoteAssets.baseUrl}:body:${type}:${path}`;
     if (_inventoryRenderDataCache.has(key)) return _inventoryRenderDataCache.get(key);
     const job = (async()=>{
         const [player, raw] = await Promise.all([io.loadBMD('Player/Player.bmd'), io.fetchBinary(path)]);
@@ -854,12 +946,6 @@ async function loadInventoryRenderData(io, type, path) {
         const tag = ['helm','armor','pants','gloves','boots'][g - ITEM_HELM];
         const meshes = extractPartMeshes(part, `inventory_${tag}`, player.bones.length, player.bones);
         if (!meshes.length) throw new Error(`body-part sem meshes: ${path}`);
-        const h = pcInventoryBodyHeight(type);
-        const bones = player.bones.map((b, i)=>{
-            if (i !== 0 || !(Array.isArray(b.bindPosition) || ArrayBuffer.isView(b.bindPosition))) return b;
-            const bp = Array.from(b.bindPosition); bp[2] = (bp[2] || 0) + h;
-            return {...b, bindPosition:bp};
-        });
         const textures=meshes.map(m=>({FileName:m.texFileName,Dir:'Player'}));
         // RenderPartObject receives HideSkin=true from RenderObjectScreen.
         // Several body families replace mesh0 with dedicated inventory textures;
@@ -870,7 +956,7 @@ async function loadInventoryRenderData(io, type, path) {
         return {
             ...player,
             source:`inventory:Player.bmd+${path}`,
-            meshes, bones, textures,
+            meshes, bones: player.bones, textures,
         };
     })();
     _inventoryRenderDataCache.set(key, job);
@@ -879,11 +965,41 @@ async function loadInventoryRenderData(io, type, path) {
     } catch (e) { _inventoryRenderDataCache.delete(key); throw e; }
 }
 
+export function applyInventoryBodyPose(renderer, type) {
+    // ZzzBMD::Animation adds BodyHeight to bone 0 in LockPositions action 0.
+    // Apply after bind/inverse creation; modifying the bind itself cancels it.
+    const height = pcInventoryBodyHeight(type);
+    if (height && renderer.bmdData?.actions?.[0]?.lockPositions && renderer.bones?.[0]) {
+        renderer.bones[0].position.z += height;
+        renderer.group.updateMatrixWorld(true);
+        renderer.skeleton?.update?.();
+    }
+    return height;
+}
+
+export function inventoryIconLoadIssues(renderer, meshFilter = null) {
+    const issues = [];
+    for (const mesh of renderer.meshes || []) {
+        if (meshFilter && !meshFilter(mesh)) continue;
+        if (mesh.userData?.textureReady !== true && !mesh.userData?.pcBitmapHide) {
+            issues.push(mesh.userData?.textureMissing || mesh.name || 'texture');
+        }
+    }
+    for (const program of Object.values(renderer.userData?.muRenderModelPrograms || {})) {
+        issues.push(...(program.pendingBitmapPaths || []));
+    }
+    for (const program of Object.values(renderer.userData?.muItemMaterialResidencyPrograms || {})) {
+        issues.push(...(program.pendingBitmapPaths || []));
+    }
+    return issues;
+}
+
 function cloneIconCanvas(source) {
     if (!source) return null;
     const cv = document.createElement('canvas');
     cv.width = source.width;
     cv.height = source.height;
+    Object.assign(cv.dataset, source.dataset);
     const ctx = cv.getContext('2d');
     if (!ctx) return null;
     ctx.clearRect(0, 0, cv.width, cv.height);
@@ -896,6 +1012,9 @@ function cloneIconCanvas(source) {
 // world context. That destroyed frame pacing and could blank the world.
 let _sharedIconGL = null;
 let _sharedIconContextLost = false;
+export function inventoryIconContextUsable(renderer) {
+    return !_sharedIconContextLost && renderer.getContext().isContextLost() === false;
+}
 function sharedIconRenderer(width, height = width) {
     if (!_sharedIconGL || _sharedIconContextLost) {
         try { _sharedIconGL?.dispose?.(); } catch {}
@@ -921,6 +1040,8 @@ function sharedIconRenderer(width, height = width) {
 export async function renderIcon3D(io, type, level = 0, size = 40, presentation = {}) {
     const iconW = Math.max(8, Math.round(typeof size === 'object' ? Number(size?.w || size?.width || 40) : Number(size || 40)));
     const iconH = Math.max(8, Math.round(typeof size === 'object' ? Number(size?.h || size?.height || iconW) : Number(size || 40)));
+    const padding = Math.max(0, Math.min(128, Math.round(Number(presentation.iconPadding) || 0)));
+    const authority = RemoteAssets.baseUrl;
     const option1 = Number(presentation?.option1) || 0;
     const extOption = Number(presentation?.extOption) || 0;
     if (typeof io?.fetchBinary === 'function') await loadCustomItemPresentation(io.fetchBinary.bind(io));
@@ -931,6 +1052,7 @@ export async function renderIcon3D(io, type, level = 0, size = 40, presentation 
         const attr = await itemAttributeFor(io.fetchBinary.bind(io), type);
         if (attr) twoHand = attr.twoHand === true;
     }
+    if (authority !== RemoteAssets.baseUrl) return null;
     const custom = customItemModelForType(type);
     const customColor = Array.isArray(presentation?.customColor)
         ? presentation.customColor
@@ -939,7 +1061,7 @@ export async function renderIcon3D(io, type, level = 0, size = 40, presentation 
         ? Number(presentation.effectType)
         : Number(custom?.effectType || 0);
     const colorKey = customColor ? customColor.slice(0, 3).map((v) => Number(v) || 0).join(',') : '';
-    const cacheKey = `${type}:${level}:${iconW}x${iconH}:${option1}:${extOption}:${effectType}:${colorKey}:th=${twoHand===null?'?':twoHand?1:0}:cp=${authoredPosition?`${authoredPosition.posX},${authoredPosition.posY},${authoredPosition.angleX},${authoredPosition.angleY},${authoredPosition.angleZ}`:''}:cs=${authoredSize??''}`;
+    const cacheKey = `${authority}:${type}:${level}:${iconW}x${iconH}:pad=${padding}:${option1}:${extOption}:${effectType}:${colorKey}:th=${twoHand===null?'?':twoHand?1:0}:cp=${authoredPosition?`${authoredPosition.posX},${authoredPosition.posY},${authoredPosition.angleX},${authoredPosition.angleY},${authoredPosition.angleZ}`:''}:cs=${authoredSize??''}`;
     if (_iconCache.has(cacheKey)) return cloneIconCanvas(_iconCache.get(cacheKey));
     if (_iconInflight.has(cacheKey)) {
         const cached=await _iconInflight.get(cacheKey);
@@ -956,6 +1078,7 @@ export async function renderIcon3D(io, type, level = 0, size = 40, presentation 
     }
 
     const job=scheduleColdIcon(async()=>{
+        let renderer = null;
         try {
             const { MUModelRenderer } = await import('../assets/MUModelRenderer.js');
             // loadBMD devolve renderData pronto (meshes/textures/bones); o
@@ -967,8 +1090,9 @@ export async function renderIcon3D(io, type, level = 0, size = 40, presentation 
             // Cena offscreen mínima (1 luz + fundo transparente), como o
             // RenderObjectScreen do PC (janela ortho da célula do slot).
             const scene = new THREE.Scene();
-            const renderer = new MUModelRenderer();
+            renderer = new MUModelRenderer();
             await renderer.initFromBMD(bmd);
+            applyInventoryBodyPose(renderer, type);
             const hideSkinSet = pcInventoryHideSkinMeshSet(type);
             const inventoryMeshFilter = hideSkinSet
                 ? (mesh) => hideSkinSet.has(Number(mesh?.userData?.muMeshIndex))
@@ -982,9 +1106,12 @@ export async function renderIcon3D(io, type, level = 0, size = 40, presentation 
             // overlay for the thumbnail and does not add a per-frame UI animation loop.
             const { applyPcStockItemPresentation } = await import('../graphics/ItemMaterialPresentation.js');
             await applyPcStockItemPresentation(renderer, {
-                type, rawLevel: level, option1, extOption, customColor, effectType, dynamic: false,
+                ...pcInventoryMaterialOptions(type, level, { option1, extOption, customColor, effectType }),
+                dynamic: false,
                 meshFilter: inventoryMeshFilter,
             });
+            const issues = inventoryIconLoadIssues(renderer, inventoryMeshFilter);
+            if (issues.length) throw new Error('ícone incompleto: ' + issues.join(', '));
             // ZzzInventory::RenderObjectScreen creates OBJECT Armor and sets
             // o->LightEnable=false immediately before RenderPartObject. Keeping
             // the generic world-light law here multiplies many bright textures
@@ -1032,24 +1159,27 @@ export async function renderIcon3D(io, type, level = 0, size = 40, presentation 
             cam.lookAt(0, 0, -1);
             cam.setViewOffset(
                 PC_ITEM_VIEW_LOGICAL_WIDTH, PC_ITEM_VIEW_LOGICAL_HEIGHT,
-                view.x, view.y, view.w, view.h,
+                view.x-padding, view.y-padding, view.w+padding*2, view.h+padding*2,
             );
             cam.updateProjectionMatrix();
 
             const cv = document.createElement('canvas');
-            cv.width = iconW; cv.height = iconH;
+            cv.width = iconW+padding*2; cv.height = iconH+padding*2;
             const ctx = cv.getContext('2d');
             // Render em UM contexto offscreen compartilhado → copia 2D. Never
             // create/dispose a WebGL context per slot: Chrome caps active contexts
             // and was evicting the main GameScene renderer during F3:10 inventory.
-            const gl = sharedIconRenderer(iconW, iconH);
+            const gl = sharedIconRenderer(cv.width, cv.height);
             gl.render(scene, cam);
-            ctx.clearRect(0, 0, iconW, iconH);
-            ctx.drawImage(gl.domElement, 0, 0, iconW, iconH);
-            renderer.dispose?.();
+            if (!inventoryIconContextUsable(gl)) throw new Error('WebGL context lost before icon capture; uncached/retryable');
+            ctx.clearRect(0, 0, cv.width, cv.height);
+            ctx.drawImage(gl.domElement, 0, 0, cv.width, cv.height);
+            if (!inventoryIconContextUsable(gl)) throw new Error('WebGL context lost during icon capture; uncached/retryable');
+            cv.dataset.muIconPadding = String(padding);
 
             cv.dataset.muCustomItemPosition = authoredPosition ? '1' : '0';
             cv.dataset.muCustomItemSize = Number.isFinite(authoredSize) ? String(authoredSize) : '';
+            if (authority !== RemoteAssets.baseUrl) return null;
             _iconCache.set(cacheKey, cv);
             return cv;
         } catch (e) {
@@ -1058,6 +1188,8 @@ export async function renderIcon3D(io, type, level = 0, size = 40, presentation 
                 console.warn(`[ItemIcon] render falhou p/ ${path} — slot vazio (fail-closed): ${e.message}`);
             }
             return null;
+        } finally {
+            renderer?.dispose?.();
         }
     });
     _iconInflight.set(cacheKey,job);

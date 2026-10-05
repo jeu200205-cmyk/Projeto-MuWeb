@@ -29,7 +29,7 @@ import { bmdToRenderData } from '../graphics/BmdAdapter.js';
 
 const ASSET_BASE_URL = (typeof window !== 'undefined' && window.__MU_ASSET_BASE__) || 'http://localhost:9100/';
 const INDEXEDB_NAME = 'mu-asset-cache';
-const INDEXEDB_VERSION = 3; // R12.5 purge v3 (t-mugt0lc4-j): stores v1 E v2
+const INDEXEDB_VERSION = 4; // FIX44: purge stale parsed records and scope by physical Data authority // R12.5 purge v3 (t-mugt0lc4-j): stores v1 E v2
 // receberam payloads parseados por decoders PRE-fix (strip 2o-SOI errado /
 // TGA offsets errados w=0) servidos para sempre pelo idbGet sem revalidacao —
 // causa raiz do flood "JPEG decode falhou" persistir no runtime fisico mesmo
@@ -588,10 +588,16 @@ export class MUAssetLoader {
         
         // In-memory caches
         this._bmdCache = new Map();
+        this._bmdInflight = new Map();
+        this._bmdAuthority = this.remoteAssets.authorityKey;
+        this._bmdEpoch = 0;
         this._textureCache = new Map();
         this._textureInflight = new Map();
+        this._textureAuthority = this.remoteAssets.authorityKey;
+        this._textureEpoch = 0;
         this._audioCache = new Map();
         this._attCache = new Map();
+        this._attAuthority = this.remoteAssets.authorityKey;
         this._dataCache = new Map();
         // R13: CanvasImageSource cache para UI 2D (skills/buffs). loadTexture()
         // retorna um descriptor lazy, não uma THREE.Texture pronta; consumidores
@@ -632,12 +638,41 @@ export class MUAssetLoader {
      * @returns {Promise<Object>} { meshes, bones, actions, version, source }
      */
     async loadBMD(relPath) {
+        const authority = this.remoteAssets.authorityKey;
+        if (authority !== this._bmdAuthority) {
+            this._bmdAuthority = authority;
+            this._bmdEpoch++;
+            this._bmdCache.clear();
+            this._bmdInflight.clear();
+        }
         // Check memory cache
         if (this._bmdCache.has(relPath)) return this._bmdCache.get(relPath);
+        if (this._bmdInflight.has(relPath)) return this._bmdInflight.get(relPath);
+        const epoch = this._bmdEpoch;
+        const job = this._loadBMDUncached(relPath, authority, epoch);
+        this._bmdInflight.set(relPath, job);
+        try { return await job; }
+        finally {
+            if (this._bmdInflight.get(relPath) === job) this._bmdInflight.delete(relPath);
+        }
+    }
+
+    async _loadBMDUncached(relPath, authority, epoch) {
+        const assertCurrent = () => {
+            if (epoch !== this._bmdEpoch || authority !== this.remoteAssets.authorityKey) {
+                const error = new Error(`BMD load superseded: ${relPath}`);
+                error.code = 'MUWEB_STALE_ASSET_LOAD';
+                throw error;
+            }
+        };
+        // Parsed records from another Data root (including legacy unscoped
+        // records) must never become the new authority's skeleton/geometry.
+        const storageKey = `bmd:${authority}:${relPath}`;
 
         // Check IndexedDB
         if (this.useIDB) {
-            const cached = await idbGet(relPath);
+            const cached = await idbGet(storageKey);
+            assertCurrent();
             if (cached) {
                 this._bmdCache.set(relPath, cached);
                 return cached;
@@ -646,6 +681,7 @@ export class MUAssetLoader {
 
         // Fetch binary
         const buf = await this.remoteAssets.fetchBinary(relPath);
+        assertCurrent();
         if (!buf) throw new Error(`Failed to fetch BMD: ${relPath}`);
 
         // Detect format
@@ -668,9 +704,12 @@ export class MUAssetLoader {
             throw new Error(`BMD formato inválido (${fmt}): ${relPath}`);
         }
 
+        // A worker may finish after Data/cache authority changed during parse.
+        assertCurrent();
         // Cache
         this._bmdCache.set(relPath, parsed);
-        if (this.useIDB) await idbSet(relPath, parsed, AssetType.BMD);
+        if (this.useIDB) await idbSet(storageKey, parsed, AssetType.BMD);
+        assertCurrent();
 
         return parsed;
     }
@@ -680,19 +719,59 @@ export class MUAssetLoader {
      * @param {string} relPath - e.g. 'Interface/back1.OZJ' or 'Player/Armor01.ozt'
      * @returns {Promise<THREE.Texture>}
      */
+    _invalidateTextureGeneration() {
+        this._textureEpoch++;
+        this._textureCache.clear();
+        this._textureInflight.clear();
+        for (const v of this._imageSourceCache.values()) {
+            Promise.resolve(v).then((img) => { try { img?.close?.(); } catch (_) {} }).catch(() => {});
+        }
+        this._imageSourceCache.clear();
+        this._texErrLogged.clear();
+        // Published scene textures remain owned by their existing consumers.
+        // Invalidation prevents reuse/publication, not a premature GPU disposal.
+    }
+
+    _syncTextureAuthority() {
+        // FIX49: compare the exact same identity that is stored/published.
+        // authorityKey = baseUrl + physical Data revision. Comparing the stored
+        // authorityKey against baseUrl made every texture request look like a
+        // Data-root change, incrementing the epoch and superseding concurrent
+        // loads. The renderer then fail-closed those stale jobs as invisible
+        // meshes, making terrain objects, player parts, weapons and items vanish.
+        const authority = this.remoteAssets.authorityKey;
+        if (this._textureAuthority !== authority) {
+            this._textureAuthority = authority;
+            this._invalidateTextureGeneration();
+        }
+        return { authority: this._textureAuthority, epoch: this._textureEpoch };
+    }
+
+    _assertTextureGeneration({ authority, epoch }, relPath) {
+        if (authority !== this.remoteAssets.authorityKey || epoch !== this._textureEpoch) {
+            const error = new Error(`Texture load superseded: ${relPath}`);
+            error.code = 'MUWEB_STALE_ASSET_LOAD';
+            throw error;
+        }
+    }
+
     async loadTexture(relPath) {
+        const generation = this._syncTextureAuthority();
         if (this._textureCache.has(relPath)) return this._textureCache.get(relPath);
         if (this._textureInflight.has(relPath)) return this._textureInflight.get(relPath);
-        const job = this._loadTextureUncached(relPath);
+        const job = this._loadTextureUncached(relPath, generation);
         this._textureInflight.set(relPath, job);
         try { return await job; }
         finally { if (this._textureInflight.get(relPath) === job) this._textureInflight.delete(relPath); }
     }
 
-    async _loadTextureUncached(relPath) {
+    async _loadTextureUncached(relPath, generation) {
+        const assertCurrent = () => this._assertTextureGeneration(generation, relPath);
+        const storageKey = `texture:${generation.authority}:${relPath}`;
 
         if (this.useIDB) {
-            const cached = await idbGet(relPath);
+            const cached = await idbGet(storageKey);
+            assertCurrent();
             // R12.5 anti-poison (t-mugt0lc4-j): registros pré-fix não são
             // servidos — self-healing: registro inválido → re-fetch + re-decode
             // (e o novo payload válido sobrescreve o veneno no idbSet abaixo).
@@ -708,6 +787,7 @@ export class MUAssetLoader {
         }
 
         const buf = await this.remoteAssets.fetchBinary(relPath);
+        assertCurrent();
         if (!buf) throw new Error(`Failed to fetch texture: ${relPath}`);
 
         const ext = relPath.split('.').pop().toLowerCase();
@@ -722,18 +802,20 @@ export class MUAssetLoader {
             parsed = ext === 'ozj' ? this._decodeOZJ(buf) : this._decodeOZT(buf);
         }
 
+        assertCurrent();
         // Cache parsed pixel data
         parsed._path = relPath; // diagnóstico: o TextureLoader async-fail deve saber qual arquivo
         // Write-path anti-poison: nunca persistir payload que o validador
         // rejeitaria no read — fail-closed na origem, não só no consumo.
         if (this.useIDB) {
             if (isValidParsedTexture(parsed)) {
-                await idbSet(relPath, parsed, ext === 'ozj' ? AssetType.OZJ : AssetType.OZT);
+                await idbSet(storageKey, parsed, ext === 'ozj' ? AssetType.OZJ : AssetType.OZT);
             } else {
                 console.warn(`[MUAssetLoader] payload pós-decode inválido NÃO cacheado: ${relPath}`);
             }
         }
 
+        assertCurrent();
         const tex = this._createThreeTexture(parsed);
         this._textureCache.set(relPath, tex);
         return tex;
@@ -750,10 +832,13 @@ export class MUAssetLoader {
      * depois do decode concluído. Nenhum placeholder é criado.
      */
     async loadImageSource(relPath) {
+        const generation = this._syncTextureAuthority();
+        const assertCurrent = () => this._assertTextureGeneration(generation, relPath);
         if (this._imageSourceCache.has(relPath)) return this._imageSourceCache.get(relPath);
 
         const pending = (async () => {
             const desc = await this.loadTexture(relPath);
+            assertCurrent();
             if (!desc) throw new Error(`Texture descriptor ausente: ${relPath}`);
 
             if (desc.format === 'rgba' && desc.data && desc.width > 0 && desc.height > 0) {
@@ -779,6 +864,7 @@ export class MUAssetLoader {
                         try { bitmap?.close?.(); } catch (_) {}
                         throw new Error('ImageBitmap JPEG sem pixels');
                     }
+                    try { assertCurrent(); } catch (e) { bitmap.close?.(); throw e; }
                     return bitmap;
                 }
                 if (typeof Image === 'undefined') throw new Error('Decoder de imagem do browser indisponível');
@@ -793,6 +879,7 @@ export class MUAssetLoader {
                     if (!img || img.naturalWidth <= 0 || img.naturalHeight <= 0) {
                         throw new Error('HTMLImageElement JPEG sem pixels');
                     }
+                    assertCurrent();
                     return img;
                 } finally {
                     URL.revokeObjectURL(url);
@@ -806,7 +893,7 @@ export class MUAssetLoader {
         try {
             return await pending;
         } catch (e) {
-            this._imageSourceCache.delete(relPath);
+            if (this._imageSourceCache.get(relPath) === pending) this._imageSourceCache.delete(relPath);
             throw e;
         }
     }
@@ -820,6 +907,8 @@ export class MUAssetLoader {
      */
     async loadModelTexture(fileName, modelDir = 'Player') {
         if (!fileName) return null;
+        const generation = this._syncTextureAuthority();
+        const assertCurrent = () => this._assertTextureGeneration(generation, fileName);
         const rawName = String(fileName).trim();
         const extMatch = rawName.match(/^(.*)\.([^.\\/]+)$/);
         let extHint = (extMatch?.[2] || '').toLowerCase();
@@ -871,10 +960,14 @@ export class MUAssetLoader {
         for (const cand of candidates) {
             try {
                 const canonical = await this.remoteAssets.resolveExistingPath(cand);
+                assertCurrent();
                 if (!canonical) continue;
                 // loadTexture fará o único fetch/cache necessário no path canônico.
-                return await this.loadTexture(canonical);
+                const texture = await this.loadTexture(canonical);
+                assertCurrent();
+                return texture;
             } catch (e) {
+                if (e?.code === 'MUWEB_STALE_ASSET_LOAD') throw e;
                 // R12.6 (t-muhggfq5-u) OBSERVABILIDADE: candidato que RESOLVEU
                 // no manifest mas falhou no fetch/decode é BUG REAL (ex.: o
                 // flood físico tree_07 — buffer detacado por transfer antigo
@@ -923,10 +1016,16 @@ export class MUAssetLoader {
      * @returns {Promise<Object>} { width, height, cells: Uint8Array, format }
      */
     async loadAttMap(relPath) {
+        const currentAuthority = this.remoteAssets.authorityKey;
+        if (this._attAuthority !== currentAuthority) {
+            this._attAuthority = currentAuthority;
+            this._attCache.clear();
+        }
         if (this._attCache.has(relPath)) return this._attCache.get(relPath);
 
+        const attStorageKey = `att:${currentAuthority}:${relPath}`;
         if (this.useIDB) {
-            const cached = await idbGet(relPath);
+            const cached = await idbGet(attStorageKey);
             if (cached) {
                 this._attCache.set(relPath, cached);
                 return cached;
@@ -946,7 +1045,7 @@ export class MUAssetLoader {
         if (!parsed) throw new Error(`Failed to parse ATT: ${relPath}`);
 
         this._attCache.set(relPath, parsed);
-        if (this.useIDB) await idbSet(relPath, parsed, AssetType.ATT);
+        if (this.useIDB) await idbSet(attStorageKey, parsed, AssetType.ATT);
 
         return parsed;
     }
@@ -1393,17 +1492,15 @@ export class MUAssetLoader {
     // ---------- Cache Management ----------
 
     clearCache(type = null) {
-        if (!type || type === AssetType.BMD) this._bmdCache.clear();
-        if (!type || type === AssetType.OZJ || type === AssetType.OZT) this._textureCache.clear();
+        if (!type || type === AssetType.BMD) {
+            this._bmdEpoch++;
+            this._bmdCache.clear();
+            this._bmdInflight.clear();
+        }
+        if (!type || type === AssetType.OZJ || type === AssetType.OZT) this._invalidateTextureGeneration();
         if (!type || type === AssetType.WAV || type === AssetType.MP3) this._audioCache.clear();
         if (!type || type === AssetType.ATT) this._attCache.clear();
         if (!type || type === AssetType.LST || type === AssetType.TXT) this._dataCache.clear();
-        if (!type || type === AssetType.OZJ || type === AssetType.OZT) {
-            for (const v of this._imageSourceCache.values()) {
-                Promise.resolve(v).then((img) => { try { img?.close?.(); } catch (_) {} }).catch(() => {});
-            }
-            this._imageSourceCache.clear();
-        }
     }
 
     getCacheStats() {

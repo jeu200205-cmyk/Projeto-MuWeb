@@ -1,6 +1,6 @@
 {
   "gateway": {
-    "host": "127.0.0.1",
+    "host": "0.0.0.0",
     "port": 9091,
     "maxConnections": 10000,
     "heartbeatInterval": 30000,
@@ -18,7 +18,7 @@
     "timeout": 10000,
     "encryption": {
       "enabled": true,
-      "key": "",
+      "key": "MuEMU_ConnectServer_Key_2024",
       "version": "S6"
     }
   },
@@ -54,7 +54,7 @@
     },
     "encryption": {
       "enabled": true,
-      "key": ""
+      "key": "MuEMU_JoinServer_Key_2024"
     }
   },
   "dataServer": {
@@ -71,7 +71,7 @@
     },
     "encryption": {
       "enabled": true,
-      "key": ""
+      "key": "MuEMU_DataServer_Key_2024"
     }
   },
   "serverList": [
@@ -161,7 +161,7 @@
     "autoRestart": true,
     "maxRestarts": 5,
     "restartDelay": 10000,
-    "workingDirectory": "C:\\MU\\Server",
+    "workingDirectory": "C:\\server-files",
     "servers": {
       "connectServer": {
         "executable": "ConnectServer.exe",

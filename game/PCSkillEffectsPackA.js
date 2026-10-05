@@ -1,6 +1,10 @@
 // PCSkillEffectsPackA.js — source-evidenced MU Main 5.2 skill presentation lane.
 // No generic fallback: missing authored asset/owner => fail-closed.
 import * as THREE from 'three';
+import { angleQuaternion } from '../graphics/BmdParser.js';
+import { pcWheelWeaponPose, applyPcWheelWeaponAlpha } from './PcWheelWeaponPose.js';
+import { applyPcStockItemPresentation } from '../graphics/ItemMaterialPresentation.js';
+import { playerVisualLoadIssues } from '../graphics/PlayerComposer.js';
 import { loadSkillTexture } from '../graphics/Effects.js';
 import { Sound } from '../audio/SoundManager.js';
 import {
@@ -74,17 +78,38 @@ export class PCSkillEffectsPackA {
     loadSkillTexture('Effect/hole.OZJ').catch(() => {});
     loadSkillTexture('Effect/Magic_Ground2.OZJ').catch(() => {});
     for (const path of ['Effect/nightwater01.bmd','Effect/knight_plancrack_a.bmd','Effect/knight_plancrack_b.bmd','Effect/knight_plancrack_grand.bmd']) this._loadBlowBmd(path).catch(() => {});
-    for (const path of ['Skill/tail.bmd','Skill/flashing.bmd','Skill/EarthQuake01.bmd','Skill/EarthQuake02.bmd','Skill/EarthQuake03.bmd']) this._loadFuryBmd(path).catch(() => {});
+    for (const path of ['Skill/tail.bmd','Skill/flashing.bmd','Skill/EarthQuake01.bmd','Skill/EarthQuake02.bmd','Skill/EarthQuake03.bmd','Skill/combo.bmd']) this._loadFuryBmd(path).catch(() => {});
     if (typeof Sound.loadWav === 'function') {
-      if (!Sound.buffers?.has?.('pc-vitality')) Sound.loadWav('pc-vitality', 'eSwellLife.wav').catch(() => {});
-      if (!Sound.buffers?.has?.('pc-blow232')) Sound.loadWav('pc-blow232', 'BLOW_OF_DESTRUCTION.wav').catch(() => {});
+      const exactWavs = [
+        ['pc-vitality','eSwellLife.wav'], ['pc-blow232','BLOW_OF_DESTRUCTION.wav'],
+        ['pc-sword1','sKnightSkill1.wav'], ['pc-sword2','sKnightSkill2.wav'],
+        ['pc-sword3','sKnightSkill3.wav'], ['pc-sword4','sKnightSkill4.wav'],
+        ['pc-combo','eCombo.wav'],
+        ['pc-fury1','eRageBlow_1.wav'], ['pc-fury2','eRageBlow_2.wav'], ['pc-fury3','eRageBlow_3.wav'],
+      ];
+      for (const [id,wav] of exactWavs) if (!Sound.buffers?.has?.(id)) Sound.loadWav(id,wav).catch(() => {});
     }
+  }
+
+  _playExact(id) {
+    try { if (Sound.buffers?.has?.(id)) return Sound.play(id); } catch (_) {}
+    return null;
+  }
+
+  /** WSclient.cpp::ReceiveMagic exact Sword1..5 audio owner. */
+  playPcSwordReceiveSound(skillType) {
+    const type=Number(skillType)|0;
+    const id = type===19?'pc-sword1':type===20?'pc-sword2':type===21?'pc-sword3':(type===22||type===23)?'pc-sword4':null;
+    return id ? this._playExact(id) : null;
   }
 
   // Main 5.2: WHEEL1 lives 5 ticks and owns WHEEL2 subtypes 0..4; each WHEEL2
   // lives 25 ticks and renders the owner's RIGHT weapon. We refuse to replace
   // that weapon-owned graph with a ring/plane approximation.
   createTwistingSlashEffect(position, facing = 0, opts = {}) {
+    // ZzzCharacter AttackStage WHEEL: SOUND_SKILL_SWORD4 is independent of
+    // whether the right-hand RenderPartObject owner can be materialized.
+    this._playExact('pc-sword4');
     const spec = opts.ownerWeaponSpec || null;
     if (!spec?.model || !spec?.path) {
       this._warnOnce('wheel-owner', '[PCSkillFX] Twisting Slash: PC requires the caster right-hand weapon owner; no resolved weapon spec; owner weapon was not supplied — fail-closed.');
@@ -92,29 +117,40 @@ export class PCSkillEffectsPackA {
     }
     const root = new THREE.Group();
     root.position.copy(position);
-    root.rotation.y = facing;
     this.scene.add(root);
     const alphas = [1.0, 0.6, 0.5, 0.4, 0.3];
     const owners = [];
     let alive = true;
     (async () => {
+      let pendingRenderer = null;
       try {
         const { MUModelRenderer } = await import('../assets/MUModelRenderer.js');
         const { bmdToRenderData, applyMuUpAxis } = await import('../graphics/BmdAdapter.js');
         for (let i = 0; i < 5 && alive; i++) {
           const wr = new MUModelRenderer({ scene: this.scene });
+          pendingRenderer = wr;
           await wr.initFromBMD(bmdToRenderData(spec.model, spec.path));
+          if (Number.isInteger(spec.extType)) {
+            await applyPcStockItemPresentation(wr, {
+              type: spec.extType, rawLevel: spec.rawLevel || 0,
+              option1: spec.option1 || 0, extOption: spec.extOption || 0,
+              customColor: spec.customColor || null, effectType: spec.effectType || 0,
+            });
+          }
+          const issues = playerVisualLoadIssues(wr);
+          if (issues.length) throw new Error(`weapon presentation incomplete: ${issues.join(', ')}`);
           if (!alive) { wr.dispose?.(); break; }
           applyMuUpAxis(wr.group);
           wr.group.userData.pcWheelSubtype = i;
           wr.group.userData.pcWheelAlpha = alphas[i];
-          wr.group.traverse?.((o) => {
-            const mats = Array.isArray(o.material) ? o.material : (o.material ? [o.material] : []);
-            for (const m of mats) { m.transparent = true; m.opacity = alphas[i]; m.depthWrite = false; }
-          });
-          root.add(wr.group); owners.push(wr);
+          applyPcWheelWeaponAlpha(wr, alphas[i]);
+          const pose = pcWheelWeaponPose(facing, 0, spec.category === 3);
+          wr.group.position.fromArray(pose.position);
+          wr.group.quaternion.multiply(new THREE.Quaternion(...angleQuaternion(pose.angles)));
+          root.add(wr.group); owners.push(wr); pendingRenderer = null;
         }
       } catch (e) {
+        pendingRenderer?.dispose?.();
         this._warnOnce('wheel-owner-build', `[PCSkillFX] Twisting Slash weapon owner failed (${spec.path}): ${e.message}`);
       }
     })();
@@ -124,11 +160,17 @@ export class PCSkillEffectsPackA {
     this.register({
       update: (dt) => {
         age += dt;
+        if (opts.ownerPosition?.isVector3) root.position.copy(opts.ownerPosition);
         const tick = age / TICK;
         // WHEEL1 is the 5-tick controller; WHEEL2 owners persist for 25 ticks.
         root.userData.pcWheel1Alive = age < wheel1Life;
-        root.rotation.y = facing - THREE.MathUtils.degToRad(18 * tick);
-        for (const wr of owners) wr.update?.(dt, age);
+        const pose = pcWheelWeaponPose(facing, tick, spec.category === 3, dt / TICK);
+        for (const wr of owners) {
+          wr.group.position.fromArray(pose.position);
+          wr.group.quaternion.setFromAxisAngle(new THREE.Vector3(1, 0, 0), -Math.PI / 2)
+            .multiply(new THREE.Quaternion(...angleQuaternion(pose.angles)));
+          wr.update?.(dt, age);
+        }
         return age < life;
       },
       dispose: () => { alive = false; for (const wr of owners) try { wr.dispose?.(); } catch {} root.parent?.remove(root); },
@@ -271,6 +313,8 @@ export class PCSkillEffectsPackA {
       this._warnOnce('fury-authority', '[PCSkillFX] Fury Strike is server-routed; refusing non-authoritative production spawn.');
       return null;
     }
+    // AttackStage creates MODEL_SKILL_FURY_STRIKE then immediately plays RageBlow_1.
+    this._playExact('pc-fury1');
     const serial = (++this._furySerial) >>> 0;
     const source = [position.x, position.y, position.z];
     const terrainHeightAt = typeof opts.terrainHeightAt === 'function' ? opts.terrainHeightAt : null;
@@ -292,6 +336,7 @@ export class PCSkillEffectsPackA {
     this.scene.add(root);
 
     let alive = true, age = 0, tailSpawned = false, impactSpawned = false;
+    let furySound2=false, furySound3=false;
     const live = [];
 
     const setIntensity = (r, intensity) => {
@@ -341,8 +386,12 @@ export class PCSkillEffectsPackA {
       update: (dt) => {
         const step=Math.max(0,Number.isFinite(dt)?dt:0), prev=age; age+=step;
         if (!tailSpawned && prev < FURY_TAIL_SECONDS && age + 1e-9 >= FURY_TAIL_SECONDS) spawnTail();
+        // MoveEffect root LifeTime 13 / 10 owns RageBlow_2 / RageBlow_3.
+        // The existing parity constants map those exact authored root events.
+        if (!furySound2 && prev < FURY_TAIL_SECONDS && age + 1e-9 >= FURY_TAIL_SECONDS) { furySound2=true; this._playExact('pc-fury2'); }
         if (!impactSpawned && prev < FURY_IMPACT_SECONDS && age + 1e-9 >= FURY_IMPACT_SECONDS) spawnImpact();
         if (!travelSpawned && prev < FURY_TRAVEL_SECONDS && age + 1e-9 >= FURY_TRAVEL_SECONDS) spawnTravel();
+        if (!furySound3 && prev < FURY_TRAVEL_SECONDS && age + 1e-9 >= FURY_TRAVEL_SECONDS) { furySound3=true; this._playExact('pc-fury3'); }
         for (const st of live) {
           if (st.dead) continue;
           const localAge=age-st.bornAge;
@@ -580,8 +629,70 @@ export class PCSkillEffectsPackA {
       facing,
     });
     this._lastPcDeathStabAuthoring = authoring;
-    this._warnOnce('death-stab-r85-owner', '[PCSkillFX] Death Stab 43 owner corrected; old Death Cannon FORCE/4 substitution removed from production. Exact SPEARSKILL/SPEAR update remains fail-closed.');
+    // AttackTime starts at 1 on ReceiveMagic. CheckAttackTime(8) therefore
+    // reaches SOUND_SKILL_SWORD2 after seven authored 40-ms ticks. Keep this
+    // independent from the still fail-closed SPEARSKILL visual renderer.
+    let age=0,played=false;
+    this.register({
+      update:(dt)=>{ age+=Math.max(0,Number(dt)||0); if(!played&&age+1e-9>=7*TICK){played=true;this._playExact('pc-sword2');} return age<9*TICK; },
+      dispose:()=>{},
+    });
+    this._warnOnce('death-stab-r85-owner', '[PCSkillFX] Death Stab 43 owner corrected; old Death Cannon FORCE/4 substitution removed from production. Exact SPEARSKILL/SPEAR visual update remains fail-closed; AttackTime8 sound is source-owned.');
     return authoring;
+  }
+
+  /** Main 5.2 AT_SKILL_RIDER release owner: BITMAP_SHOTGUN + Sword3 sound.
+   *  The SHOTGUN child graph (40 JOINT_SPARK + FIRE+2 + Bomb2) remains
+   *  fail-closed until its joint/fire renderers are exact; never substitute a ring. */
+  createRiderAuthoring(position, opts = {}) {
+    if (opts.serverAuthoritative !== true) return null;
+    this._playExact('pc-sword3');
+    const authoring=Object.freeze({
+      skillType:49, owner:'ZzzCharacter.cpp::AT_SKILL_RIDER', effect:'BITMAP_SHOTGUN',
+      lifeTicks:10, initialVelocity:1, direction:[0,-30,0],
+      initialOffset:[0,-20,50], sparkJoints:40, sound:'SOUND_SKILL_SWORD3',
+      visible:false, reason:'BITMAP_JOINT_SPARK/FIRE+2/Bomb2 renderer parity pending',
+      position:position?.clone?position.clone():position,
+    });
+    this._lastPcRiderAuthoring=authoring;
+    this._warnOnce('rider-shotgun-fix43','[PCSkillFX] Rider action + Sword3 sound closed; BITMAP_SHOTGUN children remain fail-closed until exact joint/fire renderers.');
+    return authoring;
+  }
+
+  /** Main 5.2 ReceiveMagic AT_SKILL_COMBO -> MODEL_COMBO + SOUND_COMBO. */
+  createComboEffect(position, opts = {}) {
+    if (opts.serverAuthoritative !== true) {
+      this._warnOnce('combo-authority-fix43','[PCSkillFX] Combo requires server-authoritative ReceiveMagic owner.');
+      return null;
+    }
+    this._playExact('pc-combo');
+    const root=new THREE.Group();
+    root.name='PC_MODEL_COMBO';
+    root.position.copy(position); root.position.y += 50;
+    root.userData.pcOwner='WSclient::AT_SKILL_COMBO -> ZzzEffect::MODEL_COMBO';
+    root.userData.pcLifeTicks=20; root.userData.pcInitialScale=.9; root.userData.pcInitialGravity=.1;
+    root.userData.pcSecondaryLightJoints=60; root.userData.pcSecondaryLightJointsVisible=false;
+    root.userData.pcSecondaryOpenReason='BITMAP_LIGHT joint renderer remains fail-closed';
+    this.scene.add(root);
+    let alive=true,age=0,acc=0,life=20,scale=.9,gravity=.1,blendLight=1,renderer=null;
+    (async()=>{
+      try {
+        const [{MUModelRenderer},{applyMuUpAxis},bmd]=await Promise.all([
+          import('../assets/MUModelRenderer.js'),import('../graphics/BmdAdapter.js'),this._loadFuryBmd('Skill/combo.bmd')]);
+        const r=new MUModelRenderer({scene:this.scene}); await r.initFromBMD(bmd);
+        if(!alive){r.dispose?.();return;} renderer=r; applyMuUpAxis(r.group); r.group.scale.setScalar(scale);
+        r.group.userData.pcBlendMesh=-2; r.group.userData.pcBlendMeshLight=blendLight; r.playAction?.('action_0'); root.add(r.group);
+      } catch(e){ this._warnOnce('combo-bmd-fix43',`[PCSkillFX] Skill/combo.bmd unavailable — Combo BMD omitted fail-closed: ${e.message}`); }
+    })();
+    const tick=()=>{
+      // ZzzEffect MoveEffect MODEL_COMBO subtype0. LifeTime is the authored
+      // remaining-tick state; scale grows only while >4 and light decays /1.4.
+      if(life>4){scale+=gravity;gravity+=.1;} blendLight/=1.4; life--;
+      if(renderer){renderer.group.scale.setScalar(scale);renderer.setBodyLight?.(new THREE.Color(blendLight,blendLight,blendLight));renderer.group.userData.pcBlendMeshLight=blendLight;}
+    };
+    this.register({update:(dt)=>{const d=Math.max(0,Number(dt)||0);age+=d;acc+=d;let guard=0;while(acc+1e-9>=TICK&&life>0&&guard++<8){acc-=TICK;tick();}renderer?.update?.(d,age);return life>0;},
+      dispose:()=>{alive=false;try{renderer?.dispose?.();}catch{}root.parent?.remove(root);}});
+    return root;
   }
 
   // Regression contract: terrain BITMAP_FLARE_BLUE, sword/light one-frame owners, quake and waterfall/smoke window remain fail-closed where their renderer families are unresolved.

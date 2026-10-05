@@ -19,12 +19,18 @@
  */
 
 import * as THREE from 'three';
+import { RemoteAssets } from '../data/RemoteAssets.js';
 import { parseBMD, angleQuaternion } from './BmdParser.js';
 import { extractPartMeshes, extractRigidAttachment, buildBindWorldTransforms } from './BmdAdapter.js';
 import { decodeCharacterEquipment } from '../data/CharacterEquipmentCodec.js';
 import { resolveCharacterModels } from '../data/ItemModelResolver.js';
+import { customItemModelForType } from '../data/CustomItemModelMap.js';
 import { itemAttributeFor } from '../data/ItemAttributeData.js';
 import { applyPcStockItemPresentation } from './ItemMaterialPresentation.js';
+import { customBowType } from '../data/CustomBowLua.js';
+import { characterItemEffectPlan, characterSetEffectPlan } from '../data/PcCharacterLuaEffects.js';
+import { pcBitmapTexture } from '../data/PcBitmapLuaOwners.js';
+import { characterHelperRule } from '../data/CharacterHelperLua.js';
 
 /** PC ZzzCharacter.cpp (LinkBone) + prova Player.bmd real (bone names). */
 export const PLAYER_WEAPON_LINK_BONE = { right: 33, left: 42 }; // "knife_gdf" / "hand_bofdgne01"
@@ -73,6 +79,28 @@ export function accessoryAttachRule(input) {
     if (key === 'HELPER:30') return { bone: 47, offset: [0, 0, 15], rotYDeg: 0, playSpeed: 0.25 };
     if (key === 'HELPER:1') return { bone: 34, offset: [20, 0, 0], rotYDeg: 0, playSpeed: 0.5 };
     return { bone: 47, offset: [0, 0, 15], rotYDeg: 0, playSpeed: 0.25 };
+}
+
+
+/** PC ZzzCharacter.cpp:12821-12863 custom-preview override. */
+export function applyCustomPreviewWingOverride(decoded, customPreview) {
+  const previewWingIndex = Number(customPreview?.wingIndex || 0);
+  if (!decoded || !Number.isInteger(previewWingIndex) || previewWingIndex <= 0 || previewWingIndex >= 512) return decoded;
+  const customType = 12 * 512 + previewWingIndex;
+  if (!customItemModelForType(customType)?.customWing) return decoded;
+  return { ...decoded, wing: { family:'wing', offset:previewWingIndex, customPreview:true } };
+}
+
+/** PC ZzzCharacter.cpp:12830-12853 / 12866-12889 F3:72 PetIndex override.
+ * The current-client helper table is the authority: a server PetIndex only
+ * replaces CharSet helper when CharacterHelper.lua owns HELPER+index. */
+export function applyCustomPreviewHelperOverride(decoded, customPreview) {
+  const petIndex = Number(customPreview?.petIndex || 0);
+  if (!decoded || !Number.isInteger(petIndex) || petIndex <= 0 || petIndex >= 512) return decoded;
+  const itemType = 13 * 512 + petIndex;
+  const rule = characterHelperRule(itemType);
+  if (!rule?.modelPath) return decoded;
+  return { ...decoded, helper: { family:'helper', offset:petIndex, kind:'custom-preview', customPreview:true } };
 }
 
 export const MAX_CLASS = 7; // _define.h:399 (PBG_ADD_NEWCHAR_MONK)
@@ -146,6 +174,15 @@ export const PLAYER_ACTIONS = {
   FLY_CROSSBOW: 35,
   RUN_RIDE: 36,
   RUN_RIDE_WEAPON: 37,
+  ATTACK_FIST: 38,
+  ATTACK_SWORD_RIGHT1: 39,
+  ATTACK_SWORD_RIGHT2: 40,
+  ATTACK_SWORD_LEFT1: 41,
+  ATTACK_SWORD_LEFT2: 42,
+  ATTACK_TWO_HAND_SWORD1: 43,
+  ATTACK_TWO_HAND_SWORD2: 44,
+
+  ATTACK_TWO_HAND_SWORD3: 45,
 
   // Main 5.2 clean _enum.h: ride/Fenrir/special two-hand actions.
   DARKLORD_STAND: 76,
@@ -207,6 +244,33 @@ export const PLAYER_ACTIONS = {
   SKILL_LIGHTNING_SHOCK: 185, // _enum.h exact
   RUSH1: 234,              // AttackElf INFINITY_ARROW unmounted
   RECOVER_SKILL: 252,      // AttackElf RECOVER
+  ATTACK_STRIKE: 81,       // PLAYER_ATTACK_STRIKE
+  ATTACK_TELEPORT: 82,     // PLAYER_ATTACK_TELEPORT
+  ATTACK_RIDE_STRIKE: 83,  // PLAYER_ATTACK_RIDE_STRIKE
+  ATTACK_RIDE_TELEPORT: 84,// PLAYER_ATTACK_RIDE_TELEPORT
+  ATTACK_RIDE_ATTACK_MAGIC: 87, // PLAYER_ATTACK_RIDE_ATTACK_MAGIC
+  ATTACK_DARKHORSE: 88,    // PLAYER_ATTACK_DARKHORSE
+  FENRIR_ATTACK_DARKLORD_STRIKE: 93,
+  FENRIR_ATTACK_DARKLORD_TELEPORT: 95,
+  FENRIR_ATTACK_DARKLORD_FLASH: 96,
+  ATTACK_ONE_FLASH: 137,
+  ATTACK_RUSH: 138,
+  ATTACK_REMOVAL: 140,
+  SKILL_SLEEP: 157,
+  SKILL_SLEEP_UNI: 158,
+  SKILL_SLEEP_DINO: 159,
+  SKILL_SLEEP_FENRIR: 160,
+  SKILL_LIGHTNING_ORB: 165,
+  SKILL_LIGHTNING_ORB_UNI: 166,
+  SKILL_LIGHTNING_ORB_DINO: 167,
+  SKILL_LIGHTNING_ORB_FENRIR: 168,
+  SKILL_DRAIN_LIFE: 169,
+  SKILL_DRAIN_LIFE_UNI: 170,
+  SKILL_DRAIN_LIFE_DINO: 171,
+  SKILL_DRAIN_LIFE_FENRIR: 172,
+  SKILL_SWELL_OF_MP: 178,
+  SKILL_GIGANTICSTORM: 184,
+  SKILL_FLAMESTRIKE: 185,
 };
 
 /** GetSkinModelIndex — porte EXATO de CharacterManager.cpp:273. */
@@ -299,22 +363,40 @@ export function isFemaleClass(classId) {
 const _equipmentAttachCache = new Map();
 const _equipmentAttachInflight = new Map();
 let _characterCacheEpoch = 0;
+function characterAuthority(io) { return String(io?.assetAuthority ?? RemoteAssets.baseUrl ?? ''); }
+function assertCharacterAuthority(io, authority, epoch) {
+    if (epoch !== _characterCacheEpoch || characterAuthority(io) !== authority) {
+        const error = new Error('Character assets superseded by another Data authority');
+        error.code = 'MUWEB_STALE_CHARACTER_LOAD';
+        throw error;
+    }
+}
 
-export async function buildEquipmentAttach(charset, io, playerBones, playerBoneCount) {
+export async function buildEquipmentAttach(charset, io, playerBones, playerBoneCount, opts = {}) {
     const bind = buildBindWorldTransforms(playerBones || []);
     const bindSignature = JSON.stringify(bind.map(t => [...t.r,...t.p]));
-    const equipCacheKey = Array.isArray(charset) ? `${charset.join(',')}|bones=${playerBoneCount}|bind=${bindSignature}` : 'empty';
+    const authority = characterAuthority(io);
+    const previewWingIndex = Number(opts?.customPreview?.wingIndex || 0);
+    const previewPetIndex = Number(opts?.customPreview?.petIndex || 0);
+    const charsetKey = Array.isArray(charset) ? `${charset.join(',')}|previewWing=${previewWingIndex}|previewPet=${previewPetIndex}|bones=${playerBoneCount}|bind=${bindSignature}` : 'empty';
+    const equipCacheKey = JSON.stringify([authority, charsetKey]);
     const epoch = _characterCacheEpoch;
     if (_equipmentAttachCache.has(equipCacheKey)) return _equipmentAttachCache.get(equipCacheKey);
     if (_equipmentAttachInflight.has(equipCacheKey)) return _equipmentAttachInflight.get(equipCacheKey);
     const equipmentJob = (async () => {
 
-    const out = { meshes: [], textures: [], bodyMeshes: [], bodyTextures: [], bodySpecs: {}, replacedBodyKeys: [], bodyMissing: [], wing: null, helper: null, darkSpirit: null, fenrir: null, rider: null, helperKind: null, missing: [], weaponRightSpec: null, weaponLeftSpec: null, weaponRenderMode: 'render-link-object' };
+    const out = { meshes: [], textures: [], bodyMeshes: [], bodyTextures: [], bodySpecs: {}, replacedBodyKeys: [], bodyMissing: [], wing: null, helper: null, customHelper: null, darkSpirit: null, fenrir: null, rider: null, helperKind: null, missing: [], weaponRightSpec: null, weaponLeftSpec: null, weaponRenderMode: 'render-link-object' };
     if (!charset || !Array.isArray(charset) || charset.length < 18) return out;
 
     let decoded;
     try { decoded = decodeCharacterEquipment(charset); }
     catch (e) { out.missing.push(`charset-decode: ${e.message}`); return out; }
+    // FIX50 / PC ZzzCharacter.cpp:12821-12863: F3:72 custom preview is an
+    // authoritative post-ChangeCharacterExt override. When WingIndex>0 and the
+    // current CustomWings.lua owns WING+index, it REPLACES the stock CharSet
+    // wing. This closes the bug where customs were displayed as Wing01/Wing06.
+    decoded = applyCustomPreviewWingOverride(decoded, opts?.customPreview || null);
+    decoded = applyCustomPreviewHelperOverride(decoded, opts?.customPreview || null);
 
     const resolved = resolveCharacterModels(decoded);
     for (const m of resolved.missing) out.missing.push(m);
@@ -332,13 +414,17 @@ export async function buildEquipmentAttach(charset, io, playerBones, playerBoneC
         }
     };
 
-    // Weapons/shield — meshes skinned nos bones de mão do player
-    for (const [entry, side, key] of [
+    // FIX51: prepare held weapons and all five body families concurrently.
+    // Publication is still atomic because this function returns only after every
+    // real owner has settled. This removes the serial BMD/fetch chain that made
+    // a single F3:13 equipment snapshot stall the render thread for hundreds ms.
+    const weaponRequests = [
         [resolved.weaponRight, 'right', 'weaponR'],
         [resolved.weaponLeft, 'left', 'weaponL'],
-    ]) {
+    ];
+    const weaponResults = await Promise.all(weaponRequests.map(async ([entry, side, key]) => {
         const built = await buildItem(entry);
-        if (!built) continue;
+        if (!built) return null;
         const extType = side === 'right' ? decoded.weaponRight?.extType : decoded.weaponLeft?.extType;
         const meta = Number.isInteger(extType) ? await itemAttributeFor(io.fetchBinary, extType).catch(() => null) : null;
         const spec = {
@@ -352,52 +438,57 @@ export async function buildEquipmentAttach(charset, io, playerBones, playerBoneC
             twoHand: meta ? Boolean(meta.twoHand) : null, itemName: meta?.name || '',
             customColor: entry.color || null, effectType: entry.effectType || 0,
         };
-        if (side === 'right') out.weaponRightSpec = spec; else out.weaponLeftSpec = spec;
-        // Compatibility data remains available for old audits, but production
-        // R46 renders weapons through their OWN BMD hierarchy under LinkBone
-        // (RenderLinkObject), not by remapping every item vertex onto Player.bmd.
         const linkBone = PLAYER_WEAPON_LINK_BONE[side];
         const meshes = extractRigidAttachment(built.model, key, linkBone, playerBones, playerBoneCount);
-        for (const m of meshes) {
+        return { side, spec, meshes };
+    }));
+    for (const result of weaponResults) {
+        if (!result) continue;
+        if (result.side === 'right') out.weaponRightSpec = result.spec; else out.weaponLeftSpec = result.spec;
+        for (const m of result.meshes) {
             out.meshes.push(m);
             out.textures.push({ FileName: m.texFileName, Dir: 'Item' });
         }
     }
 
-    // Body equipment (helm/armor/pants/gloves/boots) uses the item's own
-    // Player/*.bmd meshes skinned by the shared Player.bmd skeleton. R48 still
-    // kept the class base pieces even when CharSet carried real equipped armor,
-    // which made sets/textures/glow visibly wrong. Replace only the authored
-    // body family that has a real model; missing/custom entries remain fail-closed.
+    // Body equipment (helm/armor/pants/gloves/boots) shares Player.bmd bones.
     const bodyKeyInfo = {
         helm: ['helm', 'Player'], armor: ['armor', 'Player'], pants: ['pant', 'Player'],
         gloves: ['glove', 'Player'], boots: ['boot', 'Player'],
     };
-    for (const key of Object.keys(bodyKeyInfo)) {
+    const bodyResults = await Promise.all(Object.keys(bodyKeyInfo).map(async (key) => {
         const src = decoded.body?.[key];
         const entry = resolved.body?.[key];
-        if (!src || src.baseSkin || !entry?.path) continue;
+        if (!src || src.baseSkin || !entry?.path) return null;
         const built = await buildItem(entry);
-        if (!built) { out.bodyMissing.push(`body-load-failed: ${key}:${entry.path}`); continue; }
+        if (!built) return { key, error:`body-load-failed: ${key}:${entry.path}` };
         const [meshKey, fallbackDir] = bodyKeyInfo[key];
         const dir = entry.path.includes('/') ? entry.path.slice(0, entry.path.lastIndexOf('/')) : fallbackDir;
         const partMeshes = extractPartMeshes(built.model, meshKey, playerBoneCount, playerBones);
-        if (!partMeshes.length) { out.bodyMissing.push(`body-empty: ${key}:${entry.path}`); continue; }
-        for (const m of partMeshes) {
-            out.bodyMeshes.push(m);
-            out.bodyTextures.push({ FileName: m.texFileName, Dir: dir });
-        }
-        out.replacedBodyKeys.push(meshKey);
-        out.bodySpecs[meshKey] = {
-            path: entry.path,
-            extType: entry.itemType,
-            bodyOffset: src.extType,
-            rawLevel: (src.level || 0) << 3,
-            visualLevel: src.level || 0,
-            option1: src.option1 || 0,
-            extOption: src.extOption || 0,
-            customColor: entry.color || null, effectType: entry.effectType || 0,
+        if (!partMeshes.length) return { key, error:`body-empty: ${key}:${entry.path}` };
+        return {
+            key, meshKey, dir, entry, src, partMeshes,
+            spec: {
+                path: entry.path,
+                extType: entry.itemType,
+                bodyOffset: src.extType,
+                rawLevel: (src.level || 0) << 3,
+                visualLevel: src.level || 0,
+                option1: src.option1 || 0,
+                extOption: src.extOption || 0,
+                customColor: entry.color || null, effectType: entry.effectType || 0,
+            },
         };
+    }));
+    for (const result of bodyResults) {
+        if (!result) continue;
+        if (result.error) { out.bodyMissing.push(result.error); continue; }
+        for (const m of result.partMeshes) {
+            out.bodyMeshes.push(m);
+            out.bodyTextures.push({ FileName: m.texFileName, Dir: result.dir });
+        }
+        out.replacedBodyKeys.push(result.meshKey);
+        out.bodySpecs[result.meshKey] = result.spec;
     }
 
     // Wing/helper — renderData próprio (skeleton/actions próprios) + regra de
@@ -410,7 +501,10 @@ export async function buildEquipmentAttach(charset, io, playerBones, playerBoneC
             customColor: resolved.wing.color || null, effectType: resolved.wing.effectType || 0,
         };
     }
-    if (resolved.helper?.path) {
+    // Fenrir is intentionally pathless here: it is a CreateBug/PetSystem
+    // marker, not a bone-attached item. Gate on the resolved owner itself so
+    // HELPER+37 reaches out.fenrir; the old `.path` gate silently discarded it.
+    if (resolved.helper?.path || resolved.helper?.kind) {
         if (resolved.helper.kind === 'dark-spirit') {
             // R24: junction finalmente fechado. No PC o scepter DL (STAFF+5)
             // é engolido por ChangeCharacterExt e vira CreatePetDarkSpirit;
@@ -418,8 +512,14 @@ export async function buildEquipmentAttach(charset, io, playerBones, playerBoneC
             // CSPetSystem, nunca um item rígido anexado ao bone da mão.
             out.darkSpirit = {
                 kind: 'dark-spirit',
-                petModelPath: 'Skill/darkspirit.bmd',
+                // Current-client DarkSpirit.lua is the first owner. The stock
+                // Main 5.2 AccessModel remains the exact fallback only when
+                // no Lua row owns HELPER+5.
+                petModelPath: resolved.helper.darkSpirit?.modelPath || resolved.helper.path || 'Skill/darkspirit.bmd',
+                objectModelPath: resolved.helper.darkSpirit?.objectModelPath || null,
+                itemType: resolved.helper.itemType ?? (13 * 512 + 5),
                 viaCacheKey: resolved.helper.key || 'HELPER:5',
+                owner: resolved.helper.darkSpirit ? 'DarkSpirit.lua' : 'stock-PC',
             };
         } else if (resolved.helper.kind === 'fenrir') {
             // PC: HELPER+37 é marcador + CreateBug(MODEL_FENRIR_*). Os modelos
@@ -452,6 +552,17 @@ export async function buildEquipmentAttach(charset, io, playerBones, playerBoneC
             // DARKHORSE_ACTIONS (MoveBug GOBoid.cpp:324-494).
             if (resolved.helper.kind === 'helper') {
                 out.helperKind = 'helper';
+            } else if (resolved.helper.kind === 'custom-preview' && resolved.helper.helper?.modelPath) {
+                const h = resolved.helper.helper;
+                out.customHelper = {
+                    kind: 'custom-helper', itemType: resolved.helper.itemType,
+                    petModelPath: h.modelPath, objectModelPath: h.objectModelPath || null,
+                    movement: Number(h.movement) || 0, height: Number(h.height) || 0,
+                    size: Number(h.size) || 0.7, sizeCharList: Number(h.sizeCharList) || Number(h.size) || 0.7,
+                    type: Number(h.type) || 0, miniature: Number(h.miniature) || 0,
+                    sizeMiniature: Number(h.sizeMiniature) || 1, velocityMiniature: Number(h.velocityMiniature) || 1,
+                    owner: 'CharacterHelper.lua', viaCacheKey: resolved.helper.key,
+                };
             } else if (resolved.helper.kind === 'unicon' || resolved.helper.kind === 'pegasus') {
                 out.rider = {
                     species: resolved.helper.kind,
@@ -459,6 +570,8 @@ export async function buildEquipmentAttach(charset, io, playerBones, playerBoneC
                 };
             } else if (resolved.helper.kind === 'dark-horse') {
                 out.rider = { species: 'dark-horse', petModelPath: 'Skill/DarkHorse.bmd' };
+            } else if (!resolved.helper.path) {
+                out.missing.push(`${resolved.helper.kind || 'helper'} (${resolved.helper.key}): sem modelo PC/Lua`);
             } else {
                 out.missing.push(`${resolved.helper.kind || 'helper'} (${resolved.helper.key}): lane PetSystem pendente (CreateBug)`);
             }
@@ -478,6 +591,7 @@ export async function buildEquipmentAttach(charset, io, playerBones, playerBoneC
     _equipmentAttachInflight.set(equipCacheKey, equipmentJob);
     try {
         const result = await equipmentJob;
+        assertCharacterAuthority(io, authority, epoch);
         // Temporary fetch/parse failures must not persist across reequip.
         if (epoch === _characterCacheEpoch && !result.missing.length && !result.bodyMissing.length) _equipmentAttachCache.set(equipCacheKey, result);
         return result;
@@ -517,6 +631,9 @@ export function playerVisualLoadIssues(renderer, extras = [], equipment = null) 
         for (const program of Object.values(programs)) {
             for (const path of program.pendingBitmapPaths || []) issues.push(`bitmap-not-ready:${path}`);
         }
+        for (const program of Object.values(owner?.userData?.muItemMaterialResidencyPrograms || {})) {
+            for (const path of program.pendingBitmapPaths || []) issues.push(`bitmap-not-ready:${path}`);
+        }
         for (const mesh of owner?.meshes || []) {
             if (mesh.userData?.textureReady !== true && !mesh.userData?.pcBitmapHide) {
                 issues.push(`texture-not-ready:${mesh.userData?.textureMissing || mesh.name || 'mesh'}`);
@@ -542,6 +659,68 @@ export function unresolvedClassParts(composed, equipment) {
 
 /** Apply stock +level/excellent/set material passes only to the body families
  * actually replaced by CharSet. Unknown custom RenderModel.lua rules stay out. */
+const PC_MODEL_ITEM = 1095; // _enum.h MODEL_ITEM, same authority used by DisableExcellentLua
+
+async function attachLuaSpritePlans(renderer, plans, ownerKey) {
+    if (!renderer || !Array.isArray(plans) || !plans.length) return { owners: [], unresolved: [] };
+    const owners = [], unresolved = [];
+    for (const plan of plans) {
+        if (plan?.kind !== 'sprite') {
+            unresolved.push(Object.freeze({ ...plan, reason: `${plan?.kind || 'unknown'}-renderer-owner-pending` }));
+            continue;
+        }
+        const bitmap = Number.isFinite(plan.bitmap) ? plan.bitmap : plan.effectId;
+        const map = await pcBitmapTexture(bitmap).catch(() => null);
+        if (!map?.isTexture) {
+            unresolved.push(Object.freeze({ ...plan, reason: 'bitmap-id-unresolved' }));
+            continue;
+        }
+        const offset = Array.isArray(plan.offset) ? new THREE.Vector3(...plan.offset) : null;
+        const owner = renderer.createBoneSprite?.({
+            boneIndex: Number(plan.bone), map, offset, scale: Number(plan.scale) || 0,
+            color: new THREE.Color(Number(plan.r) || 0, Number(plan.g) || 0, Number(plan.b) || 0),
+        });
+        if (!owner) {
+            unresolved.push(Object.freeze({ ...plan, reason: 'bone-or-bitmap-invalid' }));
+            continue;
+        }
+        owners.push(owner);
+    }
+    if (!renderer.userData) renderer.userData = {};
+    const previous = Array.isArray(renderer.userData.muCharacterLuaFX) ? renderer.userData.muCharacterLuaFX : [];
+    renderer.userData.muCharacterLuaFX = [...previous, { ownerKey, owners, unresolved }];
+    return { owners, unresolved };
+}
+
+/** Consume the real CharacterEffectItens.lua / CharacterSetEffect.lua sprite bridges.
+ * PC authority calls CharacterItensEffect for each item MODEL type and invokes
+ * CreateEffectSetPlayer with the BOOTS model type every character render. In this
+ * client CheckFullSet() returns 0 before its legacy body, so EquipmentLevelSet is
+ * exactly 0 for this source. Particle/skill rows remain explicitly unresolved until
+ * the exact PC particle/effect update owner is ported; no generic emitter is used. */
+export async function applyPcCharacterLuaSpritePresentation(renderer, attach) {
+    if (!renderer || !attach) return { owners: [], unresolved: [] };
+    const allOwners = [], allUnresolved = [];
+    const seen = new Set();
+    const applyType = async (extType, key) => {
+        if (!Number.isInteger(extType)) return;
+        const modelType = PC_MODEL_ITEM + extType;
+        const sig = `${key}:${modelType}`;
+        if (seen.has(sig)) return;
+        seen.add(sig);
+        const result = await attachLuaSpritePlans(renderer, characterItemEffectPlan(modelType), `CharacterEffectItens:${sig}`);
+        allOwners.push(...result.owners); allUnresolved.push(...result.unresolved);
+    };
+    for (const [key, spec] of Object.entries(attach.bodySpecs || {})) await applyType(spec?.extType, key);
+    const boots = attach.bodySpecs?.boot;
+    if (Number.isInteger(boots?.extType)) {
+        const bootModelType = PC_MODEL_ITEM + boots.extType;
+        const result = await attachLuaSpritePlans(renderer, characterSetEffectPlan(bootModelType, 0), `CharacterSetEffect:boot:${bootModelType}`);
+        allOwners.push(...result.owners); allUnresolved.push(...result.unresolved);
+    }
+    return { owners: allOwners, unresolved: allUnresolved };
+}
+
 export async function applyBodyEquipmentPresentation(renderer, attach) {
     if (!renderer || !attach?.bodySpecs) return 0;
     let passes = 0;
@@ -552,6 +731,13 @@ export async function applyBodyEquipmentPresentation(renderer, attach) {
             effectType: spec.effectType || 0,
             meshFilter: (mesh) => String(mesh?.name || '').startsWith(`${meshKey}_`),
         });
+        const modelType = PC_MODEL_ITEM + Number(spec.extType);
+        if (Number.isInteger(spec.extType)) await attachLuaSpritePlans(renderer, characterItemEffectPlan(modelType), `CharacterEffectItens:body:${meshKey}:${modelType}`);
+    }
+    const boots = attach.bodySpecs?.boot;
+    if (Number.isInteger(boots?.extType)) {
+        const bootModelType = PC_MODEL_ITEM + boots.extType;
+        await attachLuaSpritePlans(renderer, characterSetEffectPlan(bootModelType, 0), `CharacterSetEffect:boot:${bootModelType}`);
     }
     return passes;
 }
@@ -581,6 +767,10 @@ export async function buildLinkedWeaponRenderer({ scene, camera }, spec) {
         option1: spec.option1 || 0, extOption: spec.extOption || 0,
         customColor: spec.customColor || null, effectType: spec.effectType || 0,
     });
+    if (Number.isInteger(spec.extType)) {
+        const modelType = PC_MODEL_ITEM + spec.extType;
+        await attachLuaSpritePlans(wr, characterItemEffectPlan(modelType), `CharacterEffectItens:weapon:${spec.side}:${modelType}`);
+    }
     // ZzzCharacter::RenderLinkObject explicitly forces b->LightEnable=false
     // for linked weapons/items. This must apply after material overlays exist.
     wr.setLightEnabled?.(false);
@@ -694,6 +884,8 @@ export async function buildAccessoryRenderer({ scene, camera }, spec /* {bufMode
             type: spec.extType, customColor: spec.customColor || null,
             effectType: spec.effectType || 0,
         });
+        const modelType = PC_MODEL_ITEM + spec.extType;
+        await attachLuaSpritePlans(wr, characterItemEffectPlan(modelType), `CharacterEffectItens:${spec.kind || 'accessory'}:${modelType}`);
     }
     // Wings/helpers use the same linked-item LightEnable=false owner.
     wr.setLightEnabled?.(false);
@@ -721,7 +913,8 @@ export function clearComposedCharacterCache() {
 
 export async function composeCharacter(classId, io) {
   const epoch = _characterCacheEpoch;
-  const cacheKey = Number(classId) & 0xff;
+  const authority = characterAuthority(io);
+  const cacheKey = JSON.stringify([authority, Number(classId) & 0xff]);
   if (_composedCharacterCache.has(cacheKey)) return _composedCharacterCache.get(cacheKey);
   if (_composedCharacterInflight.has(cacheKey)) return _composedCharacterInflight.get(cacheKey);
   const job = (async () => {
@@ -739,27 +932,33 @@ export async function composeCharacter(classId, io) {
   const missingParts = [];
   const emptyParts = [];
 
-  for (const prefix of prefixes) {
+  // FIX51: the five class-base parts are independent OpenPlayers owners.
+  // Fetch/parse them concurrently; preserve deterministic Helm->Boot merge order.
+  const basePartResults = await Promise.all(prefixes.map(async (prefix) => {
     const file = partFileName(prefix, skinIndex);
     try {
-      // Parse PURO da peça (extractPartMeshes trabalha sobre o parse bruto;
-      // o skin remapeia Node → índice no esqueleto do Player)
       const buf = await fetchBinary(file);
-      if (!buf) { missingParts.push(file); continue; }
+      if (!buf) return { prefix, file, missing:true };
       const partModel = parseBMD(buf instanceof Uint8Array ? buf : new Uint8Array(buf));
       const partMeshes = extractPartMeshes(partModel, prefix.toLowerCase(), playerBoneCount, player.bones);
-      if (!partMeshes.length) { emptyParts.push(file); usedParts.push(prefix); continue; }
-      for (const m of partMeshes) {
-        meshes.push(m);
-        textures.push({ FileName: m.texFileName, Dir: 'Player' });
-      }
-      usedParts.push(prefix);
+      return { prefix, file, partMeshes };
     } catch (e) {
-      missingParts.push(file);
-      // Peça ausente para a classe (ex.: sem Helm tier) — composição parcial
-      // real, nunca placeholder geométrico.
-      console.warn(`[PlayerComposer] peça ausente ${file}: ${e.message}`);
+      return { prefix, file, missing:true, error:e };
     }
+  }));
+  for (const result of basePartResults) {
+    const { prefix, file, partMeshes = [] } = result;
+    if (result.missing) {
+      missingParts.push(file);
+      if (result.error) console.warn(`[PlayerComposer] peça ausente ${file}: ${result.error.message}`);
+      continue;
+    }
+    if (!partMeshes.length) { emptyParts.push(file); usedParts.push(prefix); continue; }
+    for (const m of partMeshes) {
+      meshes.push(m);
+      textures.push({ FileName: m.texFileName, Dir: 'Player' });
+    }
+    usedParts.push(prefix);
   }
 
   const renderData = {
@@ -774,6 +973,7 @@ export async function composeCharacter(classId, io) {
   _composedCharacterInflight.set(cacheKey, job);
   try {
     const result = await job;
+    assertCharacterAuthority(io, authority, epoch);
     if (epoch === _characterCacheEpoch && !result.missingParts.length) _composedCharacterCache.set(cacheKey, result);
     return result;
   } finally {
@@ -846,7 +1046,12 @@ function hasAnyWeapon(equipment) {
 }
 function equippedBowType(equipment) {
   const left = equipment?.weaponLeftSpec, right = equipment?.weaponRightSpec;
-  // CCharacterManager::GetEquipedBowType, standard-item branch.
+  // CCharacterManager::GetEquipedBowType: current-client CustomBow owner has
+  // parity precedence, then the stock item-family ranges.
+  const customLeft = customBowType(specType(left));
+  const customRight = customBowType(specType(right));
+  if (customLeft === 'bow') return 'bow';
+  if (customRight === 'crossbow') return 'crossbow';
   if (specCategory(left) === 4 && specIndex(left) !== 7) return 'bow';
   if (specCategory(right) === 4 && specIndex(right) >= 8 && specIndex(right) !== 15) return 'crossbow';
   return null;

@@ -2,10 +2,12 @@ import * as THREE from 'three';
 import { RemoteAssets } from '../data/RemoteAssets.js';
 import { MAP_SIZE } from './TerrainWorld.js';
 import { tryAcquirePcParticle, releasePcParticle } from './PcParticleBudget.js';
+import { pcIcarusCloudControllerContract } from './PcIcarusVisualContract.js';
 
 const PATHS=Object.freeze({
   SMOKE:'Effect/smoke01.OZJ',
   RAIN_CIRCLE_1:'World10/rain03.OZT',
+  CLOUD:'Effect/clouds.OZJ',
 });
 const cache=new Map();
 const ri=(n)=>Math.floor(Math.random()*Math.max(1,n));
@@ -26,9 +28,33 @@ export function pcMapParticleContract(worldNum,serial){
   const w=worldNum|0,t=serial|0;
   if(w===10&&t===2)return{kind:'devilSquare2'};
   if(w===9&&(t===60||t===70||t===76||t===83))return{kind:'tarkanSmoke',subtype:t};
+  if(w===11){const ic=pcIcarusCloudControllerContract(t);if(ic)return{kind:'icarusCloudController',...ic};}
   return null;
 }
 export function hasPcMapParticleVisual(worldNum,serial){return !!pcMapParticleContract(worldNum,serial);}
+
+function newIcarusCloud(loaded,subtype,obj,spawnIndex=0){
+  const q=makeSpriteParticle(loaded);if(!q)return null;
+  // ZzzEffectParticle.cpp::CreateParticle(BITMAP_CLOUD) leaves subtypes 0..5
+  // on the constructor defaults in Icarus: LifeTime=2, zero velocity,
+  // OBJECT scale, supplied Light=(.1,.1,.1), no position jitter.
+  const p={...q,kind:'icarusCloud',subtype:subtype|0,life:2,scale:Number(obj?.scale)||1,
+    light:[.1,.1,.1],rotation:0,spawnIndex:spawnIndex|0};
+  pcWorldToThree([Number(obj?.x)||0,Number(obj?.y)||0,Number(obj?.z)||0],p.sprite.position);
+  p.mat.color.setRGB(.1,.1,.1);
+  p.sprite.scale.set(loaded.width*p.scale,loaded.height*p.scale,1);
+  p.sprite.userData.muPcParticle=`cloud:${p.subtype}`;
+  return p;
+}
+function updateIcarusCloud(p,f){
+  p.life-=f;if(p.life<=0)return false;
+  // Subtypes 0 and 3 read legacy TurningForce/StartPosition slots for a
+  // rotation phase in RenderParticles.  CreateParticle does not initialize
+  // those fields for this branch, so no deterministic source value exists;
+  // preserve the defined constructor Rotation=0 instead of inventing motion.
+  p.mat.rotation=rad(p.rotation||0);
+  return true;
+}
 
 function newRain(loaded,worldPos){const q=makeSpriteParticle(loaded);if(!q)return null;const p={...q,kind:'rain',life:20,scale:(ri(6)+8)*.1,light:[1,1,1]};p.sprite.position.copy(worldPos);const dx=ri(10)-5,dy=ri(10)-5,dz=ri(10)-5;/* CreateParticle jitters MU world XYZ, then the Web basis is X,Y,Z -> X,Z,-Y. */p.sprite.position.x+=dx;p.sprite.position.y+=dz;p.sprite.position.z-=dy;p.sprite.scale.set(loaded.width*p.scale,loaded.height*p.scale,1);return p;}
 function updateRain(p,f){p.life-=f;if(p.life<=0)return false;p.scale+=.03*f;p.light[0]-=.05*f;p.light[1]-=.05*f;p.light[2]-=.05*f;p.mat.color.setRGB(Math.max(0,p.light[0]),Math.max(0,p.light[1]),Math.max(0,p.light[2]));p.sprite.scale.set(p.loaded.width*p.scale,p.loaded.height*p.scale,1);return true;}
@@ -66,7 +92,18 @@ export async function createPcMapParticleOwner(worldNum,serial,renderer,obj){
   const group=new THREE.Group();group.name=`PcMapParticles_W${worldNum}_T${serial}`;group.userData.muPcOwner='ZzzObject.cpp::RenderObjectVisual/ZzzEffectParticle.cpp';
   const particles=[];let disposed=false,lastMs=null,tickAcc=0,elapsedMs=0,initialBurstDone=false;
   const tmpA=new THREE.Vector3(),tmpB=new THREE.Vector3();
-  if(c.kind==='devilSquare2'){
+  if(c.kind==='icarusCloudController'){
+    const cloud=await loadBitmap(PATHS.CLOUD);if(!cloud)return null;
+    // ZzzObject.cpp::RenderObjectVisual/WD_10HEAVEN types 0..5: emit once
+    // while HiddenMesh != -2, then the BMD is hidden forever for this object.
+    renderer.addPresentationUpdate?.((worldMs=0)=>{
+      if(disposed)return;
+      const ms=Math.max(0,Number(worldMs)||0);
+      const safe=lastMs==null?0:Math.max(0,Math.min(.25,(ms-lastMs)/1000));lastMs=ms;
+      if(!initialBurstDone){initialBurstDone=true;for(let i=0;i<c.count;i++){const p=newIcarusCloud(cloud,c.subtype,obj,i);if(p){particles.push(p);group.add(p.sprite);}}}
+      const f=Math.min(2.5,safe*25);for(let i=particles.length-1;i>=0;i--){const p=particles[i];if(!updateIcarusCloud(p,f)){destroy(group,p);particles.splice(i,1);}}
+    });
+  }else if(c.kind==='devilSquare2'){
     const rain=await loadBitmap(PATHS.RAIN_CIRCLE_1);if(!rain)return null;
     renderer.addPresentationUpdate?.((worldMs=0)=>{if(disposed)return;const ms=Number(worldMs)||0;const dt=lastMs==null?0:Math.max(0,Math.min(.25,(ms-lastMs)/1000));lastMs=ms;tickAcc+=dt*25;let steps=Math.min(6,Math.floor(tickAcc));tickAcc-=steps;while(steps-->0){const emit=(bone)=>{const w=boneWorldPoint(renderer,bone,[-15,0,0],bone===23?tmpA:tmpB);if(!w)return;const p=newRain(rain,w);if(p){particles.push(p);group.add(p.sprite);}};if(ri(4)===0)emit(23);if(ri(4)===0)emit(31);emit(23);}const f=Math.min(2.5,dt*25);for(let i=particles.length-1;i>=0;i--){const p=particles[i];if(!updateRain(p,f)){destroy(group,p);particles.splice(i,1);}}});
   }else{

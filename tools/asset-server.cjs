@@ -1,10 +1,11 @@
-// Local MU Data asset server with root identity lock.
+// MUWEB R56.2 local Data asset server with root identity lock.
 // Resolves the current client's original source extensions (.tga/.jpg/.bmp)
 // and compiled MU extensions (.ozt/.ozj/.ozb) without inventing assets.
 // Usage: node tools/asset-server.cjs "E:\\...\\Data" 9100
 const http=require('http'), fs=require('fs'), path=require('path');
 const ROOT=path.resolve(process.argv[2]||'');
 const PORT=Number(process.argv[3]||9100);
+const AUTHORITY_REVISION=String(process.argv[4]||'').trim() || require('crypto').createHash('sha256').update(path.resolve(process.argv[2]||'')).digest('hex');
 if(!ROOT || !fs.existsSync(ROOT)){ console.error('[ASSETS] Data root inexistente:',ROOT); process.exitCode=2; return; }
 const TYPES={'.html':'text/html','.js':'text/javascript','.json':'application/json','.png':'image/png','.jpg':'image/jpeg','.jpeg':'image/jpeg','.bmp':'image/bmp','.tga':'application/octet-stream','.ozt':'application/octet-stream','.ozj':'application/octet-stream','.ozb':'application/octet-stream','.bmd':'application/octet-stream','.obj':'application/octet-stream','.att':'application/octet-stream','.map':'application/octet-stream','.wav':'audio/wav','.mp3':'audio/mpeg'};
 function clean(u){try{return decodeURIComponent((u||'/').split('?')[0]);}catch{return '/';}}
@@ -65,12 +66,12 @@ function resolveAsset(rel){
 
 const server=http.createServer((req,res)=>{
   const rel=clean(req.url).replace(/^\/+/, '');
-  if(!rel){res.writeHead(200,{'Access-Control-Allow-Origin':'*','Cache-Control':'no-store','Content-Type':'text/plain; charset=utf-8','X-MU-Asset-Root':ROOT,'X-MU-Asset-Index':String(indexedFiles)});return res.end('MUWEB ASSET SERVER\n');}
-  if(rel==='__muweb_asset_root'){res.writeHead(200,{'Access-Control-Allow-Origin':'*','Cache-Control':'no-store','Content-Type':'application/json; charset=utf-8'});return res.end(JSON.stringify({revision:'live-data-root',root:ROOT,indexedFiles})+'\n');}
+  if(!rel){res.writeHead(200,{'Access-Control-Allow-Origin':'*','Cache-Control':'no-store','Content-Type':'text/plain; charset=utf-8','X-MU-Asset-Root':ROOT,'X-MU-Asset-Index':String(indexedFiles)});return res.end('MUWEB ASSET SERVER R56.2\n');}
+  if(rel==='__muweb_asset_root'){res.writeHead(200,{'Access-Control-Allow-Origin':'*','Cache-Control':'no-store','Content-Type':'application/json; charset=utf-8'});return res.end(JSON.stringify({revision:'FIX44-live-root',root:ROOT,indexedFiles,authorityRevision:AUTHORITY_REVISION})+'\n');}
   if(rel==='__muweb_asset_manifest.json'){
-    // Exact case-preserving inventory of the selected Data root.
+    // Exact case-preserving inventory of the Data root selected by start-r89.
     // No synthesized aliases are published here; resolution remains fail-closed.
-    const body=JSON.stringify({revision:'live-data-root',total:indexedRelativeFiles.length,files:indexedRelativeFiles});
+    const body=JSON.stringify({revision:'FIX44-live-root',authorityRevision:AUTHORITY_REVISION,total:indexedRelativeFiles.length,files:indexedRelativeFiles});
     res.writeHead(200,{'Access-Control-Allow-Origin':'*','Cache-Control':'no-store','Content-Type':'application/json; charset=utf-8','Content-Length':Buffer.byteLength(body)});
     return req.method==='HEAD'?res.end():res.end(body);
   }
@@ -84,6 +85,6 @@ const server=http.createServer((req,res)=>{
   res.writeHead(200,h);fs.createReadStream(full).pipe(res);
 });
 server.on('error',e=>{console.error(`[ASSETS] erro porta ${PORT}:`,e.message);process.exitCode=1;});
-server.listen(PORT,'127.0.0.1',()=>{console.log(`[ASSETS] root: ${ROOT}`);console.log(`[ASSETS] index: ${indexedFiles} files`);console.log(`[ASSETS] http://127.0.0.1:${PORT}/`);});
+server.listen(PORT,'127.0.0.1',()=>{console.log(`[ASSETS R56.2] root: ${ROOT}`);console.log(`[ASSETS R56.2] index: ${indexedFiles} files`);console.log(`[ASSETS R56.2] http://127.0.0.1:${PORT}/`);});
 
 module.exports={ROOT,PORT,resolveAsset,extVariants};

@@ -55,6 +55,17 @@ export class Camera3D {
         this.update();
     }
 
+    // ZzzScene.cpp 1849: TW_CAMERA_UP=0x80, +/-10 per PC tick;
+    // inclusive <=200 condition intentionally reaches 210. Offset uses fixed -45 yaw.
+    updateTerrainFlags(flags,dt) {
+        this._terrainTicks=(this._terrainTicks||0)+Math.max(0,dt||0)*25;
+        const ticks=Math.floor(this._terrainTicks+1e-9);this._terrainTicks-=ticks;
+        let d=this.terrainCameraDistance||0;
+        if(flags&0x80)d=Math.min(210,d+10*ticks);
+        else d=Math.max(0,d-10*ticks);
+        this.terrainCameraDistance=d;
+    }
+
     toggleCamera3D() {
         // Camera3D.cpp::Toggle only flips the owner.  The PC does NOT restore
         // when F11 turns it off; the current orbit is kept frozen until the
@@ -106,9 +117,9 @@ export class Camera3D {
         // supplied by GameApp.  Source final Z is HeroZ+d-150+AngleZ3D.
         const threeY = this.target.y + d - 300 + this.angleZ3D;
         this.camera.position.set(
-            this.target.x + muDx,
+            this.target.x + muDx - (this.terrainCameraDistance||0)*Math.SQRT1_2,
             threeY,
-            this.target.z - muDy,
+            this.target.z - muDy - (this.terrainCameraDistance||0)*Math.SQRT1_2,
         );
 
         // Inverse of PC view rotation Rx(pitch)*Rz(yaw), applied to OpenGL

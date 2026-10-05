@@ -12,12 +12,14 @@
  * registry. This module deliberately does not invent those rules.
  */
 import * as THREE from 'three';
+import {pcPartObjectColor,pcPartObjectColor2} from './PcItemChromeColors.js';
 import { RenderFlags } from '../assets/MUModelRenderer.js';
 import { MUAssets } from '../assets/MUAssetLoader.js';
 import { nativeRenderModelRange, nativeRenderModelPass, nativeRenderTextureOverride, RENDER_MODEL_ORACLE_COUNTS } from '../data/RenderModelNativeOracle.js';
 import { pcBitmapTexture, pcBitmapOwner } from '../data/PcBitmapLuaOwners.js';
 import { isExcellentDisabledForItemType } from '../data/DisableExcellentLua.js';
 import { itemTransparencyForType } from '../data/ItemTransparencyLua.js';
+import { RemoteAssets } from '../data/RemoteAssets.js';
 
 const MAX_ITEM_INDEX = 512;
 const _specialTexturePromises = new Map();
@@ -62,6 +64,10 @@ export async function applyPcNativeRenderModelPresentation(renderer, {
     // original Lua flag: it may be a truncated high flag, or a real zero
     // inheriting prior GL state. Never invent an independent opaque draw.
     if (pass.mode === 0) { skipped++; continue; }
+    // HideSkin selects only the inventory part. Passes for excluded meshes
+    // must not fetch textures or mark this otherwise complete icon pending.
+    const targets = meshAt(pass.mesh);
+    if (!targets.length) { skipped++; continue; }
     const bitmap = nativeRenderTextureOverride(type, rel);
     // Exact numeric bitmap->asset path table is a different PC owner. Never
     // substitute a random texture.
@@ -79,8 +85,6 @@ export async function applyPcNativeRenderModelPresentation(renderer, {
     // Plain TEXTURE|BRIGHT uses a private texture clone; chrome+scroll uses
     // the renderer shader uvOffset. Other scroll combinations remain pending.
     if (scroll && pass.mode !== (RenderFlags.TEXTURE | RenderFlags.BRIGHT) && !chromeScroll) { skipped++; continue; }
-    const targets = meshAt(pass.mesh);
-    if (!targets.length) { skipped++; continue; }
 
     // Every authored call gets its own ordered draw, including opaque TEXTURE,
     // COLOR, DARK and LIGHTMAP. A separate implicit base draw
@@ -90,7 +94,12 @@ export async function applyPcNativeRenderModelPresentation(renderer, {
     // instead of the authored Chrome/Shiny pass.
     const implicitKind = explicitMap || (pass.mode & RenderFlags.COLOR) ? null : pcImplicitMaterialTextureKind(pass.mode);
     const implicitMap = implicitKind ? await pcMaterialTexture(implicitKind) : null;
-    if (implicitKind && !implicitMap) { skipped++; continue; }
+    if (implicitKind && !implicitMap) {
+      const [name, directory] = materialTextureDescriptor(implicitKind);
+      pendingBitmapPaths.push(`${directory}/${name}`);
+      skipped++;
+      continue;
+    }
     let scrollMap = null;
     if (scroll && !chromeScroll) {
       const original = explicitMap || targets[0]?.userData?.originalMap || targets[0]?.material?.map || null;
@@ -155,9 +164,23 @@ export function pcIsStandardEquipment(type) {
  * `rawLevel` is the legacy packed ItemLevel byte; returned value is the
  * presentation level used by mesh/chrome/bright branches (not gameplay level).
  */
-export function pcRenderPartObjectLevel(type, rawLevel = 0) {
+export function pcRenderPartObjectLevel(type, rawLevel = 0, modelFamily = 'item', modelIndex = null) {
   let level = (Number(rawLevel) >> 3) & 0x0f;
   const group = Math.floor(Number(type) / MAX_ITEM_INDEX), index = Number(type) % MAX_ITEM_INDEX;
+
+  // MODEL_EVENT is a distinct enum range after MODEL_BODY_BOOTS. It is not
+  // ITEM_ETC (group 15), despite both historically being represented by the
+  // same pair of group/index numbers in this Web adapter.
+  if (modelFamily === 'event') {
+    const event = Number(modelIndex);
+    if (event === 0 || event === 1 || event === 9 || event === 15) level = 8;
+    else if ([4,5,7,8,12,13,16].includes(event)) level = 0;
+    else if (event === 6) level = level === 13 ? 13 : 9;
+    else if (event === 10) level = (level - 8) * 2 + 1;
+    else if (event === 11) level -= 1;
+    else if (event === 14) level += 7;
+    return level;
+  }
 
   // HELPER
   if (group === 13) {
@@ -178,14 +201,6 @@ export function pcRenderPartObjectLevel(type, rawLevel = 0) {
     else if ([12,22,25,26].includes(index)) level = 8;
     else if ([41,42,43,44,64].includes(index)) level = 0;
     else if (index === 51) level = 13;
-  // EVENT
-  } else if (group === 15) {
-    if (index === 0 || index === 1 || index === 9 || index === 15) level = 8;
-    else if ([4,5,7,8,12,13,16].includes(index)) level = 0;
-    else if (index === 6) level = level === 13 ? 13 : 9;
-    else if (index === 10) level = (level - 8) * 2 + 1;
-    else if (index === 11) level -= 1;
-    else if (index === 14) level += 7;
   }
 
   // BOW+7/+15 remap is part of the same source switch.
@@ -197,9 +212,9 @@ export function pcRenderedItemLevel(type, rawLevel = 0) {
   return pcRenderPartObjectLevel(type, rawLevel);
 }
 
-export function pcEquipmentBaseTint(type, rawLevel = 0, timeMs = performance.now()) {
-  if (!pcIsStandardEquipment(type)) return new THREE.Color(1, 1, 1);
-  const level = pcRenderedItemLevel(type, rawLevel);
+export function pcEquipmentBaseTint(type, rawLevel = 0, timeMs = performance.now(), modelFamily = 'item', modelIndex = null) {
+  if (modelFamily !== 'event' && !pcIsStandardEquipment(type)) return new THREE.Color(1, 1, 1);
+  const level = pcRenderPartObjectLevel(type, rawLevel, modelFamily, modelIndex);
   const lum = Math.sin(Number(timeMs) * 0.004) * 0.15 + 0.6;
   if (level >= 3 && level <= 4) return new THREE.Color(lum, lum * 0.6, lum * 0.6);
   if (level >= 5 && level <= 6) return new THREE.Color(lum * 0.5, lum * 0.7, lum);
@@ -226,16 +241,117 @@ export function pcSetTint(type) {
   return new THREE.Color(0.1, 0.6, 1.0);
 }
 
+/** C++ `(int)-WorldTime % 4000 * .00025f` used by MODEL_EVENT+13. */
+export function pcEvent13StreamV(timeMs = performance.now()) {
+  const t = Number(timeMs);
+  if (!Number.isFinite(t)) return 0;
+  const v=(Math.trunc(-t) % 4000) * 0.00025;
+  return Object.is(v,-0)?0:v;
+}
+
+/** Exact MODEL_POTION+17 OBJECT state from RenderPartObjectEffect. */
+export function pcPotion17BlendState(timeMs = performance.now()) {
+  const t=Number(timeMs);
+  if (!Number.isFinite(t)) return null;
+  const sine=Math.sin(t*.002)*10+15.65;
+  const v=(Math.trunc(t)%2000)*.0005;
+  return {textureIndex:1,scrollMeshIndex:1,blendMeshLight:sine,alpha:2,
+    u:0,v:Object.is(v,-0)?0:v,bodyLight:[sine/5,sine/5,sine/5]};
+}
+
+/** Exact ZzzObject.cpp EVENT12/EVENT13 BITMAP_SPARK+1 owner. */
+export function pcEventBoneSpritePlan(event, timeMs = performance.now()) {
+  const id=Number(event), t=Number(timeMs);
+  if (![12,13].includes(id) || !Number.isFinite(t)) return null;
+  const luminosity=Math.sin(t*.002)*.35+.65;
+  if (id===12) return {boneIndex:0,offset:[0,0,15],scale:luminosity*.8+2,
+    color:[luminosity*.32,luminosity*.32,luminosity*2]};
+  return {boneIndex:0,offset:[0,-5,-15],scale:luminosity*.8+2.5,
+    color:[luminosity*2,luminosity*.32,luminosity*.32]};
+}
+
+/** Bind the one-frame PC sprite owner to the persistent Web model lifecycle. */
+export function applyPcEventBoneSpritePresentation(renderer, {
+  event, map, dynamic=true, timeMs=performance.now(),
+} = {}) {
+  const plan=pcEventBoneSpritePlan(event,timeMs);
+  if (!plan || !map?.isTexture || typeof renderer?.createBoneSprite !== 'function') return null;
+  const owner=renderer.createBoneSprite({boneIndex:plan.boneIndex,map,offset:plan.offset,
+    scale:plan.scale,color:new THREE.Color(...plan.color)});
+  if (!owner) return null;
+  const update=(clock)=>{
+    const next=pcEventBoneSpritePlan(event,clock);
+    if (!next) return;
+    owner.setScale?.(next.scale);
+    owner.setColor?.(new THREE.Color(...next.color));
+  };
+  if (dynamic && typeof renderer.addPresentationUpdate === 'function') renderer.addPresentationUpdate(update);
+  renderer.userData ??= {};
+  renderer.userData.muEventBoneSprite={event:Number(event),bitmap:'BITMAP_SPARK+1',
+    physicalPath:'Effect/Spark03.OZJ',boneIndex:0,offset:[...plan.offset],dynamic:Boolean(dynamic)};
+  return owner;
+}
+
+/** ZzzObject.cpp MODEL_POTION+18/+19/+21 BITMAP_SPARK+1 programs. */
+export function pcPotionSpritePlans(index, timeMs = performance.now()) {
+  const id=Number(index), t=Number(timeMs);
+  if (![18,19,21].includes(id) || !Number.isFinite(t)) return [];
+  if (id===21) {
+    const luminosity=Math.sin(t*.002)*.25+.75;
+    return [{boneIndex:null,offset:[0,0,0],scale:2.5,color:[luminosity,luminosity*.5,0]}];
+  }
+  const luminosity=Math.sin(t*.002)*.35+.65;
+  const bones=id===18?[1,2]:[9,10];
+  return bones.map(boneIndex=>({boneIndex,offset:[0,0,0],scale:luminosity*.8,
+    color:[luminosity*2,luminosity*.32,luminosity*.32]}));
+}
+
+export function applyPcPotionSpritePresentation(renderer, {
+  index, map, dynamic=true, timeMs=performance.now(),
+} = {}) {
+  const plans=pcPotionSpritePlans(index,timeMs);
+  if (!plans.length || !map?.isTexture || typeof renderer?.createBoneSprite !== 'function') return null;
+  const owners=[];
+  for (const plan of plans) {
+    const owner=renderer.createBoneSprite({boneIndex:plan.boneIndex,map,offset:plan.offset,
+      scale:plan.scale,color:new THREE.Color(...plan.color)});
+    if (!owner) {
+      for (const prior of owners) prior.dispose?.();
+      return null;
+    }
+    owners.push(owner);
+  }
+  const update=(clock)=>{
+    const next=pcPotionSpritePlans(index,clock);
+    for (let i=0;i<owners.length&&i<next.length;i++) {
+      owners[i].setScale?.(next[i].scale);
+      owners[i].setColor?.(new THREE.Color(...next[i].color));
+    }
+  };
+  if (dynamic && typeof renderer.addPresentationUpdate === 'function') renderer.addPresentationUpdate(update);
+  renderer.userData ??= {};
+  renderer.userData.muPotionSprites={index:Number(index),bitmap:'BITMAP_SPARK+1',
+    physicalPath:'Effect/Spark03.OZJ',anchors:plans.map(p=>p.boneIndex===null?'OBJECT::Position':`Bone${p.boneIndex}`),dynamic:Boolean(dynamic)};
+  return owners;
+}
+
 function materialTextureDescriptor(kind) {
   switch (kind) {
     case 'chrome': return ['Chrome01.OZJ', 'Effect'];
+    case 'chromePlus1': return ['bab2.OZJ', 'Effect'];
     case 'chrome2':
     case 'chrome3':
     case 'chrome4': return ['Chrome02.OZJ', 'Effect'];
     case 'chrome6': return ['Chrome06.OZJ', 'Effect'];
     case 'metal': return ['Shiny01.OZJ', 'Effect'];
+    case 'sparkPlus1': return ['Spark03.OZJ', 'Effect'];
     default: return null;
   }
+}
+
+function materialTexturePath(kind) {
+  const desc = materialTextureDescriptor(kind);
+  return desc ? `${desc[1]}/${desc[0]}` : null;
 }
 
 export function pcImplicitMaterialTextureKind(flags) {
@@ -250,49 +366,58 @@ export function pcImplicitMaterialTextureKind(flags) {
 }
 
 export async function pcMaterialTexture(kind) {
-  if (_specialTexturePromises.has(kind)) return _specialTexturePromises.get(kind);
+  const authority = RemoteAssets.baseUrl;
+  const key = `${authority}:${kind}`;
+  if (_specialTexturePromises.has(key)) return _specialTexturePromises.get(key);
   const desc = materialTextureDescriptor(kind);
   if (!desc) return null;
   const p = MUAssets.loadModelTexture(desc[0], desc[1]).then(async (loaded) => {
     const tex = loaded?.isTexture ? loaded : loaded?.createThreeTexture?.(THREE, { pcBmd: true });
     if (tex?.userData?.muImageReadyPromise) await tex.userData.muImageReadyPromise;
     if (tex?.isTexture && !Number.isInteger(tex.channel)) tex.channel = 0;
-    if (!tex?.isTexture || (!tex.image && tex.userData?.muImageReady !== true)) return null;
-    // ZzzOpenData: Chrome01 LINEAR/REPEAT, Shiny01 LINEAR/CLAMP,
+    if (authority !== RemoteAssets.baseUrl || !tex?.isTexture || tex.userData?.muImageReady === false ||
+        (!tex.image && tex.userData?.muImageReady !== true)) return null;
+    // ZzzOpenData: Chrome01/bab2 LINEAR/REPEAT, Shiny01/Spark03 LINEAR/CLAMP,
     // Chrome02/06 NEAREST/CLAMP. Keep each owner's sampler independent.
     const view = tex.clone();
-    view.wrapS = view.wrapT = kind === 'chrome' ? THREE.RepeatWrapping : THREE.ClampToEdgeWrapping;
-    view.minFilter = view.magFilter = kind === 'chrome' || kind === 'metal' ? THREE.LinearFilter : THREE.NearestFilter;
+    view.wrapS = view.wrapT = kind === 'chrome' || kind === 'chromePlus1' ? THREE.RepeatWrapping : THREE.ClampToEdgeWrapping;
+    view.minFilter = view.magFilter = ['chrome','chromePlus1','metal','sparkPlus1'].includes(kind) ? THREE.LinearFilter : THREE.NearestFilter;
     view.generateMipmaps = false;
     view.userData = { ...tex.userData, muSharedAsset: true };
     view.needsUpdate = true;
     return view;
   }).catch(() => null);
-  _specialTexturePromises.set(kind, p);
+  _specialTexturePromises.set(key, p);
   p.then(tex => {
-    if (!tex && _specialTexturePromises.get(kind) === p) _specialTexturePromises.delete(kind);
+    if (!tex && _specialTexturePromises.get(key) === p) _specialTexturePromises.delete(key);
   });
   return p;
 }
 
-export function pcStockMaterialPassPlan(type, rawLevel = 0, option1 = 0, extOption = 0, customColor = null) {
+export function pcStockMaterialPassPlan(type, rawLevel = 0, option1 = 0, extOption = 0, customColor = null, modelFamily = 'item', modelIndex = null) {
   const passes = [];
   // Main 5.2 ItemManager::GetItemColor gives LoadItens.lua precedence for
   // custom models. An explicitly authored black color is meaningful: it
   // suppresses the generic +level chrome ladder instead of becoming white.
-  const hasCustomColor = Array.isArray(customColor) && customColor.length >= 3;
+  const hasCustomColor = modelFamily === 'item' && Array.isArray(customColor) && customColor.length >= 3;
   const customVisible = hasCustomColor && customColor.some((v) => Number(v) > 0.0001);
-  if (pcIsStandardEquipment(type) && (!hasCustomColor || customVisible)) {
-    const level = pcRenderedItemLevel(type, rawLevel);
+  if ((modelFamily === 'event' || pcIsStandardEquipment(type)) && (!hasCustomColor || customVisible)) {
+    const level = pcRenderPartObjectLevel(type, rawLevel, modelFamily, modelIndex);
     if (level >= 13) passes.push({ kind: 'chrome4', flags: RenderFlags.CHROME4 | RenderFlags.BRIGHT });
     else if (level >= 11) passes.push({ kind: 'chrome2', flags: RenderFlags.CHROME2 | RenderFlags.BRIGHT });
-    if (level >= 9) passes.push({ kind: 'metal', flags: RenderFlags.METAL | RenderFlags.BRIGHT });
-    if (level >= 7) passes.push({ kind: 'chrome', flags: RenderFlags.CHROME | RenderFlags.BRIGHT });
+    if (level>=9 && level<=10) {
+      passes.push({kind:'chrome',flags:RenderFlags.CHROME|RenderFlags.BRIGHT});
+      passes.push({kind:'metal',flags:RenderFlags.METAL|RenderFlags.BRIGHT});
+    } else {
+      if(level>=9) passes.push({kind:'metal',flags:RenderFlags.METAL|RenderFlags.BRIGHT});
+      if(level>=7) passes.push({kind:'chrome',flags:RenderFlags.CHROME|RenderFlags.BRIGHT});
+    }
   }
   // Current client DisableExcellent.cpp wraps BOTH Excellent and Ancient/Set
   // tails in the same veto. Registry is populated only from the real Lua owner;
   // absent/unreadable owner therefore leaves stock Main 5.2 behavior unchanged.
-  const visualTailDisabled = isExcellentDisabledForItemType(type);
+  // ARMORINVEN is a pre-MODEL_ITEM enum, not the equipped armor's Lua row.
+  const visualTailDisabled = modelFamily === 'item' && isExcellentDisabledForItemType(type);
   const excellent = (Number(option1) & 0x3f) !== 0;
   if (!visualTailDisabled && excellent) passes.push({ kind: 'excellent', flags: RenderFlags.TEXTURE | RenderFlags.BRIGHT });
   else if (!visualTailDisabled && pcIsSetExtOption(extOption)) passes.push({ kind: 'chrome3', flags: RenderFlags.CHROME3 | RenderFlags.BRIGHT });
@@ -319,81 +444,119 @@ function _setMeshVisible(renderer, filter, visible) {
 
 /**
  * ZzzObject.cpp::RenderPartObjectEffect fixed-function branches that are fully
- * representable by the current Web renderer (mesh visibility/tint and solid
- * TEXTURE/BRIGHT/CHROME/METAL passes). Bone sprites/joints are intentionally
- * not approximated here; those remain EffectManager owners.
+ * representable by the current Web renderer (mesh visibility/tint, solid
+ * TEXTURE/BRIGHT/CHROME/METAL passes and source-mapped bone sprites).
  */
 export async function applyPcRenderPartObjectSolidPresentation(renderer, {
-  type, rawLevel = 0, dynamic = true, meshFilter = null, phase = 'exclusive',
+  type, rawLevel = 0, modelFamily = 'item', modelIndex = null, dynamic = true, meshFilter = null, phase = 'exclusive',
 } = {}) {
   if (!renderer || !Number.isInteger(type)) return {handled:false,exclusive:false,added:0};
   const group=Math.floor(type/512), index=type%512;
-  const level=pcRenderPartObjectLevel(type, rawLevel);
+  const level=pcRenderPartObjectLevel(type, rawLevel, modelFamily, modelIndex);
+  const isEvent=modelFamily === 'event', event=Number(modelIndex);
   const all=(m)=>typeof meshFilter !== 'function' || meshFilter(m);
   const mi=(n)=>_meshIndexFilter(meshFilter,n);
+  const hasMeshes=(filter)=> (renderer.meshes||[]).some(filter);
   let added=0;
   const overlay=(flags,opt={})=>{
+    if (!hasMeshes(opt.meshFilter||all)) return null;
+    if (pcImplicitMaterialTextureKind(flags) && !opt.map?.isTexture) return null;
     const o=renderer.createOverlayPass?.(flags,opt);
     if(o) added++;
     return o;
   };
-  const chrome=await pcMaterialTexture('chrome');
-  const chrome2=await pcMaterialTexture('chrome2');
-  const metal=await pcMaterialTexture('metal');
+  // This function used to request Chrome01, Chrome02 and Shiny01 for every
+  // item, including branches which never render a special material. Resolve
+  // only the owners selected by the exact PC branch and report missing pixels
+  // to the caller instead of silently publishing a partial graph/icon.
+  const required = new Set();
+  const requireTexture=(kind,filter=all)=>{if(hasMeshes(filter))required.add(kind)};
+  if (phase === 'exclusive') {
+    if(group===14&&index===27){
+      if(level===2||level===3)requireTexture('chrome',mi(1));
+      if(level===3)requireTexture('chrome',mi(2));
+    }
+    if(group===14&&index===63)requireTexture('chrome',mi(1));
+    if(group===14&&index===52)requireTexture('chrome',mi(0));
+    if(isEvent&&((event===14&&level===9)||(event===6&&level===13)))requireTexture('chrome');
+    if (isEvent && event===11) requireTexture('chromePlus1');
+    if (isEvent && event===5 && [14,15].includes((Number(rawLevel)>>3)&15)) {
+      requireTexture('chrome'); requireTexture('metal');
+    }
+    // Both Helper+15 passes use the explicit BITMAP_CHROME+1 owner in PC.
+    if (group===13 && index===15) requireTexture('chromePlus1');
+  } else if (phase === 'continuation') {
+    if(group===3&&index===9)requireTexture('chrome');
+    if(group===13&&index===17)requireTexture('chrome',mi(0));
+    if(isEvent&&(event===12||event===13))requireTexture('sparkPlus1');
+    if(modelFamily==='item'&&group===14&&[18,19,21].includes(index))requireTexture('sparkPlus1');
+  }
+  const loaded = new Map();
+  for (const kind of required) loaded.set(kind, await pcMaterialTexture(kind));
+  const chrome=loaded.get('chrome')||null;
+  const chromePlus1=loaded.get('chromePlus1')||null;
+  const metal=loaded.get('metal')||null;
+  const sparkPlus1=loaded.get('sparkPlus1')||null;
+  const pendingBitmapPaths=[...required].filter(kind=>!loaded.get(kind)).map(materialTexturePath).filter(Boolean);
+  const result=(handled,exclusive)=>({handled,exclusive,added,pendingBitmapPaths});
 
   if (phase === 'exclusive') {
     // MODEL_POTION+27: authored mesh-count by level plus chrome on the added gems.
     if (group===14 && index===27) {
       _setMeshVisible(renderer, all, false); _setMeshVisible(renderer, mi(0), true);
-      if(level>=2) _setMeshVisible(renderer,mi(1),true);
-      if(level>=3) _setMeshVisible(renderer,mi(2),true);
-      if(level>=2) overlay(RenderFlags.CHROME|RenderFlags.BRIGHT,{map:chrome,color:new THREE.Color(.75,.65,.5),meshFilter:mi(1)});
-      if(level>=3) overlay(RenderFlags.CHROME|RenderFlags.BRIGHT,{map:chrome,color:new THREE.Color(.75,.65,.5),meshFilter:mi(2)});
-      return {handled:true,exclusive:true,added};
+      if(level===2||level===3) _setMeshVisible(renderer,mi(1),true);
+      if(level===3) _setMeshVisible(renderer,mi(2),true);
+      if(level===2||level===3) overlay(RenderFlags.CHROME|RenderFlags.BRIGHT,{map:chrome,color:new THREE.Color(.75,.65,.5),meshFilter:mi(1)});
+      if(level===3) overlay(RenderFlags.CHROME|RenderFlags.BRIGHT,{map:chrome,color:new THREE.Color(.75,.65,.5),meshFilter:mi(2)});
+      return result(true,true);
     }
     // MODEL_POTION+63: mesh1 is red texture plus red chrome, mesh0 remains white.
     if (group===14 && index===63) {
       _setMeshBaseColor(renderer,mi(0),new THREE.Color(1,1,1));
       _setMeshBaseColor(renderer,mi(1),new THREE.Color(1,0,0));
       overlay(RenderFlags.CHROME|RenderFlags.BRIGHT,{map:chrome,color:new THREE.Color(1,0,0),meshFilter:mi(1)});
-      return {handled:true,exclusive:true,added};
+      return result(true,true);
     }
     // MODEL_POTION+52: normal body + half-alpha teal chrome on mesh0.
     if (group===14 && index===52) {
       overlay(RenderFlags.CHROME|RenderFlags.BRIGHT,{map:chrome,color:new THREE.Color(.1,.6,.4),alpha:.5,meshFilter:mi(0)});
-      return {handled:true,exclusive:true,added};
+      return result(true,true);
     }
     // MODEL_EVENT+14 with rendered Level 9: cyan diffuse body + warm chrome.
     // ZzzObject.cpp::RenderPartObjectEffect exact solid branch.
-    if (group===15 && index===14 && level===9) {
+    if (isEvent && event===14 && level===9) {
       _setMeshBaseColor(renderer, all, new THREE.Color(.3,.8,1));
       overlay(RenderFlags.CHROME|RenderFlags.BRIGHT,{map:chrome,color:new THREE.Color(1,.8,.3),meshFilter:all});
-      return {handled:true,exclusive:true,added};
+      return result(true,true);
     }
-    // MODEL_EVENT+11: ordinary texture plus half-alpha Chrome02/bright.
-    if (group===15 && index===11) {
+    // MODEL_EVENT+11: ordinary texture plus half-alpha BITMAP_CHROME+1.
+    if (isEvent && event===11) {
       _setMeshBaseColor(renderer, all, new THREE.Color(.9,.9,.9));
-      overlay(RenderFlags.CHROME|RenderFlags.BRIGHT,{map:chrome2||chrome,color:new THREE.Color(.9,.9,.9),alpha:.5,meshFilter:all});
-      return {handled:true,exclusive:true,added};
+      overlay(RenderFlags.CHROME|RenderFlags.BRIGHT,{map:chromePlus1,color:new THREE.Color(.9,.9,.9),alpha:.5,meshFilter:all});
+      return result(true,true);
     }
     // MODEL_EVENT+5 reads the RAW item level bits in the source, not the
     // remapped render level. +14 and +15 own both chrome and metal bright passes.
-    if (group===15 && index===5) {
+    if (isEvent && event===5) {
       const itemLevel=(Number(rawLevel)>>3)&15;
       if (itemLevel===14 || itemLevel===15) {
         const base=itemLevel===14?new THREE.Color(.2,.3,.5):new THREE.Color(.5,.3,.2);
         const glow=itemLevel===14?new THREE.Color(.1,.3,1):new THREE.Color(1,.3,.1);
         _setMeshBaseColor(renderer,all,base);
         overlay(RenderFlags.CHROME|RenderFlags.BRIGHT,{map:chrome,color:glow,meshFilter:all});
-        overlay(RenderFlags.METAL|RenderFlags.BRIGHT,{map:metal||chrome2||chrome,color:glow,meshFilter:all});
-        return {handled:true,exclusive:true,added};
+        overlay(RenderFlags.METAL|RenderFlags.BRIGHT,{map:metal,color:glow,meshFilter:all});
+        return result(true,true);
       }
     }
-    // MODEL_EVENT+6 rendered Level 13: blue COLOR body + chrome bright.
-    if (group===15 && index===6 && level===13) {
-      _setMeshBaseColor(renderer,all,new THREE.Color(.4,.6,1));
+    // MODEL_EVENT+6 Level 13 replaces the diffuse body with a solid COLOR
+    // draw, then adds Chrome. Recoloring the textured base is not equivalent:
+    // RENDER_COLOR calls DisableTexture in BMD::RenderMesh and therefore must
+    // publish an untextured pass with the original diffuse draw suppressed.
+    if (isEvent && event===6 && level===13) {
+      _setMeshVisible(renderer,all,false);
+      overlay(RenderFlags.COLOR,{color:new THREE.Color(.4,.6,1),meshFilter:all});
       overlay(RenderFlags.CHROME|RenderFlags.BRIGHT,{map:chrome,color:new THREE.Color(.4,.6,1),meshFilter:all});
-      return {handled:true,exclusive:true,added};
+      return result(true,true);
     }
 
     // Wings 21..24 / 35 / 48: two additive authored texture meshes cross-fade.
@@ -406,24 +569,24 @@ export async function applyPcRenderPartObjectSolidPresentation(renderer, {
         const q=Math.sin(Number(t)*.001)*.5+.5;
         a?.setColor?.(new THREE.Color(q,q,q)); b?.setColor?.(new THREE.Color(1-q,1-q,1-q));
       });
-      return {handled:true,exclusive:true,added};
+      return result(true,true);
     }
     // MODEL_HELPER+31: body plus one bright texture pass; level1 is cyan.
     if (group===13 && index===31) {
       const c=level===1?new THREE.Color(.3,.8,1):new THREE.Color(1,1,1);
       overlay(RenderFlags.TEXTURE|RenderFlags.BRIGHT,{color:c,meshFilter:mi(0)});
-      return {handled:true,exclusive:true,added};
+      return result(true,true);
     }
     // MODEL_HELPER+15: source replaces normal body by METAL then additive CHROME.
     if (group===13 && index===15) {
       const colors=[new THREE.Color(0,.5,1),new THREE.Color(1,.2,0),new THREE.Color(1,.8,0),new THREE.Color(.6,.8,.4)];
       const c=colors[level]||new THREE.Color(1,1,1);
       _setMeshVisible(renderer,all,false);
-      const m=overlay(RenderFlags.METAL,{map:metal||chrome2,color:c,meshFilter:all});
-      const ch=overlay(RenderFlags.CHROME|RenderFlags.BRIGHT,{map:chrome2||chrome,color:c,meshFilter:all});
+      const m=overlay(RenderFlags.METAL,{map:chromePlus1,color:c,meshFilter:all});
+      const ch=overlay(RenderFlags.CHROME|RenderFlags.BRIGHT,{map:chromePlus1,color:c,meshFilter:all});
       // Overlay meshes are independent draws; hiding source exactly avoids the
       // extra diffuse pass that produced white helpers in previous builds.
-      return {handled:true,exclusive:true,added};
+      return result(true,true);
     }
     // MODEL_HELPER+18: TEXTURE|BRIGHT body with source sine light.
     if (group===13 && index===18) {
@@ -433,30 +596,80 @@ export async function applyPcRenderPartObjectSolidPresentation(renderer, {
       if(dynamic&&o&&renderer.addPresentationUpdate) renderer.addPresentationUpdate((t)=>{
         const q=Math.sin(Number(t)*.002)*.3+.7;o.setColor?.(new THREE.Color(q,q,q));
       });
-      return {handled:true,exclusive:true,added};
+      return result(true,true);
     }
   }
 
+  if (phase === 'continuation' && isEvent && (event===12 || event===13)) {
+    const sprite=applyPcEventBoneSpritePresentation(renderer,{event,map:sparkPlus1,dynamic});
+    // A decoded bitmap without bone 0 is still an incomplete render graph.
+    // Do not freeze that partial icon in the inventory cache.
+    if (sparkPlus1 && !sprite) pendingBitmapPaths.push('BMD/Bone0');
+    // EVENT13 continues to its authored StreamMesh=0 body state below.
+    if (event===12) return result(true,false);
+  }
+
+  if (phase === 'continuation' && modelFamily==='item' && group===14 && [18,19,21].includes(index)) {
+    const sprites=applyPcPotionSpritePresentation(renderer,{index,map:sparkPlus1,dynamic});
+    if (sparkPlus1 && !sprites) {
+      for (const plan of pcPotionSpritePlans(index,0)) {
+        if (plan.boneIndex!==null && !renderer.bones?.[plan.boneIndex]?.isBone) pendingBitmapPaths.push(`BMD/Bone${plan.boneIndex}`);
+      }
+      if (!pendingBitmapPaths.length) pendingBitmapPaths.push('BMD/SpriteAnchor');
+    }
+    return result(true,false);
+  }
+
   if (phase === 'continuation') {
+    // POTION+17 mutates OBJECT state and falls through to the generic body.
+    // Blend selection is by BMD texture slot, while scroll ownership is mesh 1.
+    if(modelFamily==='item'&&group===14&&index===17) {
+      const update=(t)=>{
+        const state=pcPotion17BlendState(t); if(!state)return;
+        renderer.setBaseBlendTexture?.(state.textureIndex,state.blendMeshLight,{
+          alpha:state.alpha,bodyLight:new THREE.Color(...state.bodyLight),
+          scrollMeshIndex:state.scrollMeshIndex,u:state.u,v:state.v,
+        });
+      };
+      update(performance.now());
+      if(dynamic&&renderer.addPresentationUpdate)renderer.addPresentationUpdate(update);
+      return result(true,false);
+    }
+    // MODEL_EVENT+13 leaves BMD::StreamMesh=0 active for the generic body draw.
+    // Besides the sawtooth V scroll, StreamMesh disables normal lighting only
+    // for mesh 0. Its bone-attached BITMAP_SPARK+1 is a separate pending owner.
+    if(isEvent&&event===13) {
+      const update=(t)=>renderer.setBaseStreamMesh?.(0,0,pcEvent13StreamV(t));
+      update(performance.now());
+      if(dynamic&&renderer.addPresentationUpdate)renderer.addPresentationUpdate(update);
+      return result(true,false);
+    }
+    // MODEL_EVENT+18 sets OBJECT::BlendMesh=1 and then falls through to the
+    // generic body draw. BMD compares m->Texture (not mesh index): every draw
+    // using texture slot 1 becomes textured ONE/ONE with BlendMeshLight=1.
+    if(isEvent&&event===18) {
+      renderer.setBaseBlendTexture?.(1,1);
+      return result(true,false);
+    }
     // Spear+9 streams Chrome over the normal RenderPartObject tail.
     if(group===3&&index===9) {
       overlay(RenderFlags.CHROME,{map:chrome,color:new THREE.Color(.5,.5,1.5),meshFilter:all});
-      return {handled:true,exclusive:false,added};
+      return result(true,false);
     }
     // Helper+17: moving chrome stream mesh0; body texture remains underneath.
     if(group===13&&index===17) {
       const o=overlay(RenderFlags.CHROME,{map:chrome,color:new THREE.Color(.9,.1,.1),meshFilter:mi(0)});
       if(dynamic&&o&&renderer.addPresentationUpdate) renderer.addPresentationUpdate((t)=>o.setUvOffset?.(0,-(Number(t)%2000)*.0005));
-      return {handled:true,exclusive:false,added};
+      return result(true,false);
     }
     // Source HiddenMesh switches.
     if((group===14&&index===7)||(group===13&&index===7)) {
       _setMeshVisible(renderer,mi(level===0?1:0),false);
-      return {handled:true,exclusive:false,added};
+      return result(true,false);
     }
     if(group===13&&index===11) {
       _setMeshVisible(renderer,mi(1),false);
-      return {handled:true,exclusive:false,added};
+      return result(true,false);
     }
     // BlendMeshLight-only branches are represented as a matching additive
     // texture light pass so the original diffuse item is not recolored.
@@ -472,10 +685,18 @@ export async function applyPcRenderPartObjectSolidPresentation(renderer, {
       if(dynamic&&o&&renderer.addPresentationUpdate) renderer.addPresentationUpdate((t)=>{
         const v=Math.max(0,law(Number(t)));o.setColor?.(new THREE.Color(v,v,v));
       });
-      return {handled:true,exclusive:false,added};
+      return result(true,false);
     }
   }
-  return {handled:false,exclusive:false,added};
+  return result(false,false);
+}
+
+function publishItemMaterialResidency(renderer, type, pendingPaths) {
+  renderer.userData ??= {};
+  const pendingBitmapPaths=[...new Set((pendingPaths||[]).filter(Boolean))];
+  const program={itemType:type,complete:pendingBitmapPaths.length===0,pendingBitmapPaths};
+  (renderer.userData.muItemMaterialResidencyPrograms ??= {})[type]=program;
+  return program;
 }
 
 function applyPcItemTransparency(renderer, type, meshFilter = null) {
@@ -503,7 +724,7 @@ function applyPcItemTransparency(renderer, type, meshFilter = null) {
 }
 
 export async function applyPcStockItemPresentation(renderer, {
-  type, rawLevel = 0, option1 = 0, extOption = 0, customColor = null, effectType = 0, dynamic = true, meshFilter = null,
+  type, rawLevel = 0, modelFamily = 'item', modelIndex = null, option1 = 0, extOption = 0, customColor = null, effectType = 0, dynamic = true, meshFilter = null,
 } = {}) {
   if (!renderer || !Number.isInteger(type)) return 0;
 
@@ -513,28 +734,37 @@ export async function applyPcStockItemPresentation(renderer, {
   // blinking items. Any authored RenderModel program suppresses the generic tail
   // for that item, even when colorOwned=0; its ordered passes already describe
   // the intended mesh/mode/light presentation.
-  const native = await applyPcNativeRenderModelPresentation(renderer, { type, dynamic, meshFilter });
+  const native = modelFamily === 'item'
+    ? await applyPcNativeRenderModelPresentation(renderer, { type, dynamic, meshFilter })
+    : {owned:false,colorOwned:false,added:0};
   if (native.owned) {
     renderer.userData ??= {};
     renderer.userData.muItemEffectType = Number(effectType) || 0;
     renderer.userData.muStockTailSuppressedByRenderModel = true;
+    publishItemMaterialResidency(renderer,type,[]);
     applyPcItemTransparency(renderer,type,meshFilter);
     return native.added;
   }
 
+  if (!(renderer.meshes||[]).some(mesh=>typeof meshFilter!=='function'||meshFilter(mesh))) {
+    publishItemMaterialResidency(renderer,type,[]);
+    return 0;
+  }
+
   // RenderPartObjectEffect special branches precede the generic stock ladder.
-  const special = await applyPcRenderPartObjectSolidPresentation(renderer, {type,rawLevel,dynamic,meshFilter,phase:'exclusive'});
+  const special = await applyPcRenderPartObjectSolidPresentation(renderer, {type,rawLevel,modelFamily,modelIndex,dynamic,meshFilter,phase:'exclusive'});
   if (special.exclusive) {
     renderer.userData ??= {};
     renderer.userData.muRenderPartObjectEffect = { type, solid:true, exclusive:true, added:special.added };
     renderer.userData.muItemEffectType = Number(effectType) || 0;
-    applyPcItemTransparency(renderer,type,meshFilter);
+    publishItemMaterialResidency(renderer,type,special.pendingBitmapPaths);
+    if (modelFamily === 'item') applyPcItemTransparency(renderer,type,meshFilter);
     return special.added;
   }
 
   // Base equipment tint is source-authored even before the additive passes.
   const updateBase = (timeMs) => {
-    const c = pcEquipmentBaseTint(type, rawLevel, timeMs);
+    const c = pcEquipmentBaseTint(type, rawLevel, timeMs, modelFamily, modelIndex);
     for (const mesh of renderer.meshes || []) {
       if (typeof meshFilter === 'function' && !meshFilter(mesh)) continue;
       const mat = mesh.material;
@@ -548,8 +778,14 @@ export async function applyPcStockItemPresentation(renderer, {
   updateBase(performance.now());
   if (dynamic && typeof renderer.addPresentationUpdate === 'function') renderer.addPresentationUpdate(updateBase);
 
-  const plan = pcStockMaterialPassPlan(type, rawLevel, option1, extOption, customColor);
+  // EVENT branches without a PC return continue through the same level ladder.
+  // Color helpers must see the EVENT enum's default palette, not the source
+  // inventory item's model ID (which can have an unrelated Lua color owner).
+  const paletteType = modelFamily === 'event' ? -1 : type;
+  const plan = ['item','armorinven','event'].includes(modelFamily)
+    ? pcStockMaterialPassPlan(type, rawLevel, option1, extOption, customColor, modelFamily, modelIndex) : [];
   let added = 0;
+  const pendingBitmapPaths=[];
   for (const pass of plan) {
     let tex = null;
     let tint = new THREE.Color(1, 1, 1);
@@ -558,9 +794,16 @@ export async function applyPcStockItemPresentation(renderer, {
       tint = pcExcellentTint(performance.now());
     } else {
       tex = await pcMaterialTexture(pass.kind);
-      if (!tex) continue; // fail closed: no fake material texture
-      if (pass.kind === 'chrome3') tint = pcSetTint(type);
-      else if (Array.isArray(customColor) && customColor.length >= 3) {
+      if (!tex) {
+        const path=materialTexturePath(pass.kind); if(path) pendingBitmapPaths.push(path);
+        continue; // fail closed: no fake material texture
+      }
+      if (pass.kind === 'chrome3') tint = pcSetTint(paletteType);
+      else if (pass.kind==='chrome2'||pass.kind==='chrome4') {
+        const base=pcEquipmentBaseTint(type,rawLevel,performance.now(),modelFamily,modelIndex).toArray();
+        tint=new THREE.Color(...pcPartObjectColor2(paletteType,base));
+      }
+      else if (modelFamily === 'item' && Array.isArray(customColor) && customColor.length >= 3) {
         // LoadItens.lua color owns generic equipment material tint. Do not
         // apply it to Ancient/Set or Excellent, which have their own PC colors.
         tint = new THREE.Color(
@@ -568,6 +811,8 @@ export async function applyPcStockItemPresentation(renderer, {
           Math.max(0, Math.min(1, Number(customColor[1]) || 0)),
           Math.max(0, Math.min(1, Number(customColor[2]) || 0)),
         );
+      } else {
+        tint=new THREE.Color(...pcPartObjectColor(paletteType));
       }
     }
     const overlay = renderer.createOverlayPass?.(pass.flags, { map: tex, color: tint, alpha: 1, meshFilter });
@@ -580,7 +825,7 @@ export async function applyPcStockItemPresentation(renderer, {
       } else if (pass.kind === 'chrome3') {
         renderer.addPresentationUpdate((timeMs) => {
           const pulse = Math.sin(Number(timeMs) * 0.001) * 0.5 + 0.4;
-          const c = pcSetTint(type).multiplyScalar(Math.max(0, pulse));
+          const c = pcSetTint(paletteType).multiplyScalar(Math.max(0, pulse));
           overlay.setColor?.(c);
         });
       }
@@ -589,10 +834,12 @@ export async function applyPcStockItemPresentation(renderer, {
   // Keep the authored effect selector attached to the renderer for the next
   // source-backed EffectType owner. It is metadata only here: inventing a
   // browser glow for an unknown EffectType would violate the PC data contract.
-  const continuation = await applyPcRenderPartObjectSolidPresentation(renderer, {type,rawLevel,dynamic,meshFilter,phase:'continuation'});
+  const continuation = await applyPcRenderPartObjectSolidPresentation(renderer, {type,rawLevel,modelFamily,modelIndex,dynamic,meshFilter,phase:'continuation'});
   renderer.userData ??= {};
   renderer.userData.muItemEffectType = Number(effectType) || 0;
   renderer.userData.muRenderPartObjectEffect = { type, solid:continuation.handled, exclusive:false, added:continuation.added };
-  applyPcItemTransparency(renderer,type,meshFilter);
+  pendingBitmapPaths.push(...(continuation.pendingBitmapPaths||[]));
+  publishItemMaterialResidency(renderer,type,pendingBitmapPaths);
+  if (modelFamily === 'item') applyPcItemTransparency(renderer,type,meshFilter);
   return added + continuation.added + native.added;
 }

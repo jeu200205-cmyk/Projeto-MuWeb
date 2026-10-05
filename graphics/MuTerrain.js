@@ -73,6 +73,17 @@ export function tileFileCandidates(slot, loginScenes = false, worldIndex = null)
         // those maps do not silently use the normal slot filename when the
         // desktop overwrites the slot with an AlphaTile owner.
         const exact = [];
+        // FIX50: the PC source calls LoadBitmap with the physical .jpg/.tga
+        // filenames (MapManager.cpp:1441-1539). The official Data root may
+        // expose either those source extensions or their encrypted OZJ/OZT
+        // counterparts. These are same-stem representations of the SAME owner,
+        // not cross-world/visually-similar fallbacks. Put the exact physical
+        // spelling next to the encrypted spelling so Icarus/other maps do not
+        // render white just because only the .jpg/.tga form exists.
+        if (primary) {
+            if (/\.OZJ$/i.test(primary)) exact.push(primary.replace(/\.OZJ$/i, '.jpg'));
+            else if (/\.OZT$/i.test(primary)) exact.push(primary.replace(/\.OZT$/i, '.tga'));
+        }
         if (world === 52 && slot === 2) exact.push('AlphaTileGround01.OZT', 'AlphaTileGround01.OZJ');
         if (world === 40 && slot === 3) exact.push('AlphaTileGround02.OZT', 'AlphaTileGround02.OZJ');
         if (world >= 46 && world <= 51 && slot === 4) exact.push('AlphaTileGround03.OZT', 'AlphaTileGround03.OZJ');
@@ -121,12 +132,12 @@ export function terrainGrassFileCandidates(slot, worldIndex) {
     if (s < 0 || s > 2 || world <= 0) return [];
     const active = world - 1;
     if (s === 0 && (active === 63 || active === 66)) {
-        return ['TileGrass01_R.OZJ', 'TileGrass01_R.OZT'];
+        return ['TileGrass01_R.OZJ', 'TileGrass01_R.jpg'];
     }
     const n = String(s + 1).padStart(2, '0');
-    // PC names these .tga; MU current Data commonly stores the encrypted TGA
-    // as .OZT, while some worlds carry a JPEG/OZJ counterpart under same stem.
-    return [`TileGrass${n}.OZT`, `TileGrass${n}.OZJ`];
+    // PC normal grass is TGA/OZT, independently from the same-stem JPEG/OZJ
+    // ground tile. Never substitute ground or grass from a different WorldN.
+    return [`TileGrass${n}.OZT`, `TileGrass${n}.tga`];
 }
 
 /** InitTerrainLight exact default wind law. `eventEnabled` preserves the
@@ -167,6 +178,30 @@ function grassCornerIndex(x, y) {
     return ((y & (G - 1)) * G) + (x & (G - 1));
 }
 
+// Preserve every authored quad and attribute; cull 32x32-cell regions independently.
+// PC RenderTerrain iterates only the frustum region, not the entire 256x256 map.
+export function splitPcGrassGeometry(geo, THREE) {
+    const p=geo.getAttribute('position'),bins=new Map();
+    for(let cell=0;cell<p.count/4;cell++) {
+        const v=cell*4;
+        const key=Math.floor((p.getX(v)+12850)/3200)+8*Math.floor((12800-p.getZ(v))/3200);
+        if(!bins.has(key))bins.set(key,[]);bins.get(key).push(cell);
+    }
+    return [...bins.values()].map(cells=>{
+        const g=new THREE.BufferGeometry();
+        for(const [name,a] of Object.entries(geo.attributes)) {
+            const values=new a.array.constructor(cells.length*4*a.itemSize);
+            cells.forEach((c,i)=>values.set(a.array.subarray(c*4*a.itemSize,(c+1)*4*a.itemSize),i*4*a.itemSize));
+            g.setAttribute(name,new THREE.BufferAttribute(values,a.itemSize,a.normalized));
+        }
+        const index=new Uint32Array(cells.length*6);
+        cells.forEach((c,i)=>{for(let j=0;j<6;j++)index[i*6+j]=geo.index.array[c*6+j]-c*4+i*4;});
+        g.setIndex(new THREE.BufferAttribute(index,1));g.computeBoundingSphere();
+        g.boundingSphere.radius+=60; // greatest authored wind amplitude (world57/58).
+        return g;
+    });
+}
+
 export function pcTerrainGrassQuad(xi, yi, heights, grassHeight) {
     const i1 = grassCornerIndex(xi, yi);
     const i3 = grassCornerIndex(xi + 1, yi + 1);
@@ -182,17 +217,22 @@ export function pcTerrainGrassQuad(xi, yi, heights, grassHeight) {
     ];
 }
 
-async function buildPcTerrainGrassGroup(fetchImageURL, THREE, worldIndex, mapData, heights, lightTex, onStatus = () => {}) {
+// ZzzLodTerrain.cpp only enables blending for PKField/Doppelganger2.
+// Other maps use EnableAlphaTest (GREATER .25), not SRC_ALPHA blending.
+export function pcTerrainGrassUsesAlphaBlend(worldIndex) {
+    return worldIndex === 64 || worldIndex === 67;
+}
+
+async function buildPcTerrainGrassGroup(fetchImageURL, THREE, worldIndex, mapData, heights, lightTex, onStatus = () => {}, walls = null) {
     if (!pcTerrainGrassEnabled(worldIndex)) {
         return { group: null, meshes: [], textures: [], sources: [], cells: 0, enabled: false };
     }
     const base = `World${worldIndex}`;
-    const loaded = [];
-    for (let slot = 0; slot < 3; slot++) {
+    const loaded = await Promise.all(Array.from({ length: 3 }, async (_, slot) => {
         const candidates = terrainGrassFileCandidates(slot, worldIndex);
-        const hit = await fetchFirstImage(fetchImageURL, base, candidates, `World${worldIndex} BITMAP_MAPGRASS+${slot}`, { optional: true });
-        loaded.push(hit);
-    }
+        const hit = await fetchFirstImage(fetchImageURL, base, candidates, `World${worldIndex} BITMAP_MAPGRASS+${slot}`, { optional: true, exactOnly: true });
+        return hit;
+    }));
     if (!loaded.some((x) => x.image)) {
         return { group: null, meshes: [], textures: [], sources: [], cells: 0, enabled: true };
     }
@@ -227,6 +267,7 @@ async function buildPcTerrainGrassGroup(fetchImageURL, THREE, worldIndex, mapDat
         for (let yi = 0; yi < G; yi++) {
             for (let xi = 0; xi < G; xi++) {
                 const i1 = grassCornerIndex(xi, yi);
+                if (walls && (walls[i1] & 0x0008)) continue;
                 if ((layer1[i1] | 0) !== slot) continue;
                 const i2 = grassCornerIndex(xi + 1, yi);
                 const i3 = grassCornerIndex(xi + 1, yi + 1);
@@ -289,7 +330,7 @@ async function buildPcTerrainGrassGroup(fetchImageURL, THREE, worldIndex, mapDat
         const mat = new THREE.ShaderMaterial({
             uniforms,
             fog: true,
-            transparent: true,
+            transparent: pcTerrainGrassUsesAlphaBlend(worldIndex),
             depthTest: true,
             depthWrite: true,
             side: THREE.DoubleSide, // PC EnableAlphaTest -> DisableCullFace.
@@ -341,14 +382,17 @@ async function buildPcTerrainGrassGroup(fetchImageURL, THREE, worldIndex, mapDat
                 }
             `,
         });
-        const grass = new THREE.Mesh(geo, mat);
-        grass.name = `MU_TERRAIN_GRASS_SLOT_${slot}`;
+        const chunks=splitPcGrassGeometry(geo,THREE);geo.dispose();
+        for(const [chunkIndex,chunkGeo] of chunks.entries()) {
+        const grass = new THREE.Mesh(chunkGeo, mat);
+        grass.name = `MU_TERRAIN_GRASS_SLOT_${slot}_CHUNK_${chunkIndex}`;
         grass.frustumCulled = true;
         grass.onBeforeRender = () => {
             mat.uniforms.uWorldTime.value = (typeof performance !== 'undefined' ? performance.now() : Date.now());
         };
         group.add(grass);
         meshes.push(grass);
+        }
         textures.push(tex);
         sources.push(hit.path);
         totalCells += cellCount;
@@ -613,12 +657,12 @@ function terrainCandidatePath(base, rel) {
     return s.startsWith('@/') ? s.slice(2) : `${base}/${s}`;
 }
 
-async function fetchFirstImage(fetchImageURL, base, candidates, label, { optional = false } = {}) {
+async function fetchFirstImage(fetchImageURL, base, candidates, label, { optional = false, exactOnly = false } = {}) {
     const errors = [];
     for (const rel of candidates) {
         const path=terrainCandidatePath(base,rel);
         try {
-            const url = await fetchImageURL(path);
+            const url = await fetchImageURL(path, { exactOnly });
             if (!url) continue;
             return { rel, path, image: await loadImage(url, path), errors };
         } catch (e) {
@@ -682,6 +726,35 @@ async function buildAtlansWaterAtlas(fetchImageURL, THREE, onStatus = () => {}) 
  * @param {Float32Array} heights 256×256 alturas reais
  * @param {object} opts { loginScenes?: boolean, onStatus?: fn }
  */
+// RenderTerrainTile: skip TW_NOGROUND at Index1, override each TW_HEIGHT
+// vertex, and preserve the PC triangle fan diagonal Index1 -> Index3.
+// PlaneGeometry's default diagonal differs on non-planar cells.
+export function applyPcTerrainGeometry(geometry, heights, walls = null, specialHeight = 1200) {
+    const pos = geometry.attributes.position;
+    const size = G * CELL;
+    for (let i = 0; i < pos.count; i++) {
+        const x = Math.round((pos.getX(i) + size / 2) / CELL) & (G - 1);
+        const y = Math.round((size / 2 - pos.getZ(i)) / CELL) & (G - 1);
+        const index = y * G + x;
+        pos.setY(i, walls && (walls[index] & 0x0040) ? specialHeight : heights[index]);
+    }
+    const indices = [];
+    let hiddenCells = 0;
+    for (let y = 0; y < G; y++) {
+        for (let x = 0; x < G; x++) {
+            if (walls && (walls[y * G + x] & 0x0008)) { hiddenCells++; continue; }
+            const a = (G - y) * (G + 1) + x;
+            const east = a + 1, north = a - (G + 1), northeast = north + 1;
+            indices.push(a, east, northeast, a, northeast, north);
+        }
+    }
+    geometry.setIndex(indices);
+    geometry.computeVertexNormals();
+    geometry.computeBoundingBox();
+    geometry.computeBoundingSphere();
+    return { hiddenCells, renderedCells: G * G - hiddenCells };
+}
+
 export async function createMuTerrainMesh(io, worldIndex, mapData, heights, opts = {}) {
     const { fetchImageURL, THREE } = io;
     const onStatus = opts.onStatus || (() => {});
@@ -819,7 +892,8 @@ export async function createMuTerrainMesh(io, worldIndex, mapData, heights, opts
     // Main 5.2 renders BITMAP_MAPGRASS as a second, alpha-tested billboard pass.
     // It is not TileGrass01 used by the ground atlas. Build it from the exact
     // WorldN grass textures and keep it attached to the terrain owner.
-    const terrainGrass = await buildPcTerrainGrassGroup(fetchImageURL, THREE, worldIndex, mapData, heights, lightTex, onStatus);
+    const visualHeights = opts.walls ? Float32Array.from(heights, (h, i) => (opts.walls[i] & 0x0040) ? (opts.specialHeight ?? 1200) : h) : heights;
+    const terrainGrass = await buildPcTerrainGrassGroup(fetchImageURL, THREE, worldIndex, mapData, visualHeights, lightTex, onStatus, opts.walls);
 
     // Dynamic PrimaryTerrainLight frame owner. PC InitTerrainLight restores
     // BackTerrainLight then RenderObjectVisual/MoveObject calls AddTerrainLight.
@@ -892,17 +966,8 @@ export async function createMuTerrainMesh(io, worldIndex, mapData, heights, opts
     // RequestTerrainHeight and making characters sink/float on slopes.
     const geometry = new THREE.PlaneGeometry(size, size, G, G);
     geometry.rotateX(-Math.PI / 2);
-    const pos = geometry.attributes.position;
-    for (let i = 0; i < pos.count; i++) {
-        const px = pos.getX(i);
-        const pz = pos.getZ(i);
-        const gx = Math.round((px + size / 2) / CELL);
-        const gy = Math.round((size / 2 - pz) / CELL);
-        const cx = gx & (G - 1);
-        const cy = gy & (G - 1);
-        pos.setY(i, heights[cy * G + cx]);
-    }
-    geometry.computeVertexNormals();
+    const terrainTopology = applyPcTerrainGeometry(geometry, heights, opts.walls, opts.specialHeight ?? 1200);
+    console.info(`[Terrain FIX27] World${worldIndex}: hidden TW_NOGROUND=${terrainTopology.hiddenCells}, rendered=${terrainTopology.renderedCells}`);
 
     // PC: RenderTerrainFace aplica fog linear (glFog GL_LINEAR). Para
     // ShaderMaterial com fog:true, THREE.WebGLRenderer.refreshFogUniforms

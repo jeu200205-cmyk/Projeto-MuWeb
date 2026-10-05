@@ -15,6 +15,7 @@
 
 import * as THREE from 'three';
 import { MUAssets, AssetType } from './MUAssetLoader.js';
+import {acquireBmdGeometry,isSharedBmdGeometry} from './BmdGeometryPool.js';
 
 // PC Main 5.2 authority: ZzzAI.h REFERENCE_FPS = 25.0.
 // BMD::PlayAnimation advances Speed * FPS_ANIMATION_FACTOR against this base.
@@ -554,6 +555,10 @@ export class MUModelRenderer {
         // They are registered once per item appearance and updated without
         // allocating a second WebGL context or a second animation owner.
         this._overlayMeshes = [];
+        // Main 5.2 CreateSprite owners attached to animated BMD bones.  These
+        // are persistent Web objects (instead of one-frame entries in the PC
+        // Sprites[] pool), so this renderer must own their material lifetime.
+        this._boneSprites = [];
         this._presentationUpdates = [];
         this.meshData = []; // Original mesh data for LOD
         this.currentLOD = 0;
@@ -604,6 +609,7 @@ export class MUModelRenderer {
         this._elapsedTime = 0;
         this._initialized = false;
         this._materialCache = new Map();
+        this._geometryLeases = [];
 
         // PERF R15.19: animation interpolation scratch. These objects are reused
         // across tracks because _applyAnimation consumes each result before the
@@ -740,18 +746,12 @@ export class MUModelRenderer {
     }
 
     _createSkinnedMesh(meshData, index) {
-        const geometry = new THREE.BufferGeometry();
-        geometry.setAttribute('position', new THREE.BufferAttribute(meshData.positions, 3));
-        geometry.setAttribute('normal', new THREE.BufferAttribute(meshData.normals, 3));
-        geometry.setAttribute('uv', new THREE.BufferAttribute(meshData.uvs, 2));
-        geometry.setAttribute('skinIndex', new THREE.BufferAttribute(meshData.skinIndices, 4));
-        const normalNodes = meshData.normalSkinIndices || Float32Array.from(
-            { length: meshData.positions.length / 3 }, (_, i) => meshData.skinIndices[i * 4]);
-        geometry.setAttribute('normalSkinIndex', new THREE.BufferAttribute(normalNodes, 1));
-        geometry.setAttribute('skinWeight', new THREE.BufferAttribute(meshData.skinWeights, 4));
-        geometry.setIndex(new THREE.BufferAttribute(meshData.indices, 1));
-        geometry.computeBoundingBox();
-        geometry.computeBoundingSphere();
+        const lease=acquireBmdGeometry(meshData);
+        this._geometryLeases.push(lease);
+        this.userData ??= {};
+        const metric=lease.reused?'muBmdGeometryReuses':'muBmdGeometryBuilds';
+        this.userData[metric]=(this.userData[metric]||0)+1;
+        const geometry=lease.geometry;
         
         // Store original for LOD
         meshData._geometry = geometry;
@@ -868,14 +868,20 @@ export class MUModelRenderer {
             if (special === 'skin') {
                 loadPath = PC_SKIN_TEXTURE_PATH[this.skinIndex] || null;
                 if (!loadPath) {
-                    mesh.visible = false;
-                    mesh.userData.textureMissing = `BITMAP_SKIN+${this.skinIndex}`;
-                    console.warn(`[MUModelRenderer] BITMAP_SKIN+${this.skinIndex} sem owner OpenPlayerTextures; mesh ocultado`);
-                    return;
+                    // FIX51 recovery for server class encodings whose second+third
+                    // bits produce a BITMAP_SKIN slot not populated by
+                    // OpenPlayerTextures (observed +9 on Lord Emperor lineage).
+                    // Do NOT hide real geometry. Use the exact authored BMD
+                    // FileName as a physical texture owner; this is a real Data
+                    // asset, not a placeholder or a guessed neighbouring skin.
+                    mesh.userData.pcSkinOwnerMissing = `BITMAP_SKIN+${this.skinIndex}`;
+                    mesh.userData.pcTextureOwnerFallback = `${loadDir}/${loadName}`;
+                    console.warn(`[MUModelRenderer] BITMAP_SKIN+${this.skinIndex} sem OpenPlayerTextures; usando textura física autorada ${loadDir}/${loadName}`);
+                } else {
+                    const slash = loadPath.lastIndexOf('/');
+                    loadDir = slash >= 0 ? loadPath.slice(0, slash) : 'Player';
+                    loadName = slash >= 0 ? loadPath.slice(slash + 1) : loadPath;
                 }
-                const slash = loadPath.lastIndexOf('/');
-                loadDir = slash >= 0 ? loadPath.slice(0, slash) : 'Player';
-                loadName = slash >= 0 ? loadPath.slice(slash + 1) : loadPath;
             } else if (special === 'hair') {
                 loadPath = PC_HAIR_TEXTURE_PATH;
                 loadDir = 'Player';
@@ -896,7 +902,7 @@ export class MUModelRenderer {
                     mat.map = texture;
                     mesh.userData.originalMap = texture;
                     mesh.userData.pcTextureOwner = special === 'skin'
-                        ? `BITMAP_SKIN+${this.skinIndex}`
+                        ? (loadPath ? `BITMAP_SKIN+${this.skinIndex}` : `BMD_FILE:${loadDir}/${loadName}`)
                         : special === 'hair' ? 'BITMAP_HAIR' : `${loadDir}/${loadName}`;
                     const hasSourceAlpha = loaded?.format === 'rgba';
                     mesh.userData.muSourceHasAlpha = hasSourceAlpha;
@@ -1329,6 +1335,10 @@ export class MUModelRenderer {
         }
     }
 
+    get hasPresentationUpdates() {
+        return this._presentationUpdates.length > 0;
+    }
+
     /** Register a per-frame presentation callback owned by this model. */
     addPresentationUpdate(fn) {
         if (typeof fn !== 'function') return false;
@@ -1350,6 +1360,73 @@ export class MUModelRenderer {
         this.userData ??= {};
         this.userData.muLightEnable = value;
         return this;
+    }
+
+    /** Apply the persistent BMD::StreamMesh state to one source mesh.
+     * StreamMesh consumes OBJECT::BlendMeshTexCoord U/V on the ordinary body
+     * draw and bypasses transformed-normal lighting for that mesh. Mutating a
+     * shared Texture.offset would leak the scroll into other actors/icons, so
+     * the offset stays in this renderer's per-material shader uniform. */
+    setBaseStreamMesh(meshIndex, u = 0, v = 0) {
+        const target = Number(meshIndex);
+        let updated = 0;
+        for (const mesh of this.meshes || []) {
+            if (Number(mesh?.userData?.muMeshIndex) !== target) continue;
+            const uniforms = mesh.material?.uniforms;
+            if (!uniforms?.uvOffset?.value?.set) continue;
+            uniforms.uvOffset.value.set(Number(u) || 0, Number(v) || 0);
+            if (uniforms.enableLight) uniforms.enableLight.value = false;
+            updated++;
+        }
+        this.userData ??= {};
+        this.userData.muStreamMesh = { index:target, u:Number(u)||0, v:Number(v)||0, updated };
+        return updated;
+    }
+
+    /** Apply OBJECT::BlendMesh to base BMD draws selected by m->Texture.
+     * The PC compares the BMD texture slot, not the local mesh index. Matching
+     * draws become textured ONE/ONE passes with depth writes/culling disabled,
+     * and use BodyLight*BlendMeshLight without transformed-normal lighting. */
+    setBaseBlendTexture(textureIndex, blendMeshLight = 1, options = {}) {
+        const target = Number(textureIndex);
+        const light = Number.isFinite(Number(blendMeshLight)) ? Number(blendMeshLight) : 1;
+        const alpha = Number.isFinite(Number(options.alpha)) ? Number(options.alpha) : 1;
+        const bodyLight = options.bodyLight?.isColor ? options.bodyLight : null;
+        const scrollMeshIndex = Number.isFinite(Number(options.scrollMeshIndex))
+            ? Number(options.scrollMeshIndex) : null;
+        const uvU = Number(options.u) || 0;
+        const uvV = Number(options.v) || 0;
+        let updated = 0;
+        for (const mesh of this.meshes || []) {
+            const material = mesh.material;
+            if (bodyLight && material) {
+                if (material.color?.copy) material.color.copy(bodyLight);
+                if (material.uniforms?.diffuse?.value?.copy) material.uniforms.diffuse.value.copy(bodyLight);
+            }
+            if (scrollMeshIndex !== null && Number(mesh?.userData?.muMeshIndex) === scrollMeshIndex) {
+                material?.uniforms?.uvOffset?.value?.set?.(uvU, uvV);
+            }
+            if (Number(mesh?.userData?.textureIndex) !== target) continue;
+            if (!material) continue;
+            const base = bodyLight || (mesh.userData?.muAuthoredBaseColor?.isColor
+                ? mesh.userData.muAuthoredBaseColor
+                : material.uniforms?.diffuse?.value);
+            const color = base?.isColor ? base.clone().multiplyScalar(light) : new THREE.Color(light,light,light);
+            if (material.color?.copy) material.color.copy(color);
+            if (material.uniforms?.diffuse?.value?.copy) material.uniforms.diffuse.value.copy(color);
+            if (material.uniforms?.enableLight) material.uniforms.enableLight.value = false;
+            applyPcRenderMeshPassState(material, RenderFlags.TEXTURE|RenderFlags.BRIGHT, alpha,
+                mesh.userData?.muSourceHasAlpha === true);
+            mesh.userData ??= {};
+            mesh.userData.muBlendMeshTexture = target;
+            updated++;
+        }
+        this.userData ??= {};
+        this.userData.muBlendMesh = { textureIndex:target, light, updated };
+        if (Object.keys(options).length) Object.assign(this.userData.muBlendMesh, {
+            alpha, bodyLight:bodyLight?.toArray?.() || null, scrollMeshIndex, u:uvU, v:uvV,
+        });
+        return updated;
     }
 
     /**
@@ -1387,7 +1464,7 @@ export class MUModelRenderer {
             material.uniforms.opacity.value = alpha;
             const chromeMode = pcChromeMode(flags);
             material.uniforms.pcScaleAdditiveAlpha.value = chromeMode !== 0 && pcChromeAdditive(flags);
-            material.uniforms.enableLight.value = false;
+            material.uniforms.enableLight.value = options.lightEnabled === true;
             material.map = baseMap;
             const state = applyPcRenderMeshPassState(material, flags, alpha, hasSourceAlpha, true);
             if (state.skip) { material.dispose(); continue; }
@@ -1437,6 +1514,67 @@ export class MUModelRenderer {
                 }
             },
         };
+    }
+
+    /** Create one camera-facing Main sprite in the local frame of a BMD bone.
+     * PC RenderSprite multiplies the bitmap's physical width/height by Scale;
+     * THREE.Sprite is already camera-facing, while parenting it to the bone
+     * reproduces TransformPosition(BoneTransform[n], offset, Position).
+     * The texture remains MUAssets-owned; only this private SpriteMaterial is
+     * disposed with the model. */
+    createBoneSprite({ boneIndex = 0, map = null, offset = null, scale = 1, color = null } = {}) {
+        if (this._disposed || !map?.isTexture) return null;
+        const rootOwned = boneIndex === null;
+        const anchor = rootOwned ? this.group : this.bones?.[Number(boneIndex)];
+        const image = map.image || map.source?.data;
+        const width = Number(image?.width || image?.naturalWidth);
+        const height = Number(image?.height || image?.naturalHeight);
+        if ((!rootOwned && !anchor?.isBone) || (rootOwned && !anchor?.isGroup) || !(width > 0) || !(height > 0)) return null;
+
+        const material = new THREE.SpriteMaterial({
+            map,
+            color: color?.isColor ? color : new THREE.Color(color ?? 0xffffff),
+            transparent: true,
+            depthTest: true,
+            depthWrite: false,
+            blending: THREE.CustomBlending,
+            blendEquation: THREE.AddEquation,
+            blendEquationAlpha: THREE.AddEquation,
+            blendSrc: THREE.OneFactor,
+            blendDst: THREE.OneFactor,
+            blendSrcAlpha: THREE.OneFactor,
+            blendDstAlpha: THREE.OneFactor,
+            toneMapped: false,
+            fog: false,
+        });
+        const sprite = new THREE.Sprite(material);
+        sprite.name = rootOwned ? 'mu_model_root_sprite' : `mu_bone_${Number(boneIndex)}_sprite`;
+        sprite.frustumCulled = false;
+        sprite.position.copy(offset?.isVector3 ? offset : new THREE.Vector3(...(offset || [0, 0, 0])));
+        const setScale = (value) => {
+            const next = Number(value);
+            if (Number.isFinite(next) && next >= 0) sprite.scale.set(width * next, height * next, 1);
+        };
+        setScale(scale);
+        anchor.add(sprite);
+
+        const owner = {
+            sprite,
+            material,
+            boneIndex: rootOwned ? null : Number(boneIndex),
+            bitmapSize: [width, height],
+            setColor: (next) => material.color.copy(next?.isColor ? next : new THREE.Color(next ?? 0xffffff)),
+            setScale,
+            dispose: () => {
+                if (owner.disposed) return;
+                owner.disposed = true;
+                sprite.parent?.remove(sprite);
+                material.dispose();
+            },
+            disposed: false,
+        };
+        this._boneSprites.push(owner);
+        return owner;
     }
 
     _applyChromeEffect(mesh, flags) {
@@ -1675,6 +1813,10 @@ export class MUModelRenderer {
             }
         }
         this._overlayMeshes = [];
+        for (const owner of this._boneSprites) {
+            try { owner.dispose?.(); } catch {}
+        }
+        this._boneSprites = [];
         this._presentationUpdates = [];
         // RenderModel UV-scroll passes clone only their own texture state so
         // shared BMD textures are never mutated. Dispose those private clones
@@ -1686,7 +1828,7 @@ export class MUModelRenderer {
 
         // Dispose geometries
         for (const mesh of this.meshes) {
-            mesh.geometry.dispose();
+            if(!isSharedBmdGeometry(mesh.geometry))mesh.geometry.dispose();
             if (mesh.material) {
                 if (Array.isArray(mesh.material)) {
                     mesh.material.forEach(m => m.dispose());
@@ -1695,6 +1837,8 @@ export class MUModelRenderer {
                 }
             }
         }
+        for(const lease of this._geometryLeases)lease.release();
+        this._geometryLeases=[];
         
         // Dispose textures
         for (const mat of this._materialCache.values()) {
@@ -1715,6 +1859,7 @@ export class MUModelRenderer {
         // They are registered once per item appearance and updated without
         // allocating a second WebGL context or a second animation owner.
         this._overlayMeshes = [];
+        this._boneSprites = [];
         this._presentationUpdates = [];
         this.skeleton?.dispose?.();
         this.bones = [];

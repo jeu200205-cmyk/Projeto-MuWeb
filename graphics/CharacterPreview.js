@@ -6,8 +6,8 @@
  *   + peças base/tier da classe (PlayerComposer.composeCharacter)
  *   → MUModelRenderer (SkinnedMesh + skeleton + actions)
  *   → GameScene atrás da UI transparente do CharSelectScene.
- * O equipamento EXATO codificado no CharSet (armas/wings/helper/options) ainda
- * exige decoder dedicado; não é fingido por este preview.
+ * Equipamento real do CharSet e texturas são preparados antes da publicação.
+ * Candidatos incompletos/obsoletos são descartados; o owner anterior é preservado.
  *
  * Contrato PC extraído de CharacterList.lua (S13 real —
  * MOBILE_PROJECT/DeviceData/Data/Configs/Lua/CharacterSystem/, conf. com
@@ -36,7 +36,7 @@
  */
 
 import * as THREE from 'three';
-import { composeCharacter, buildEquipmentAttach, buildAccessoryRenderer, buildLinkedWeaponRenderer, buildAnimationControl, playerActionPlaySpeed, mergeEquipmentBodyRenderData, applyBodyEquipmentPresentation, pcCharacterScale, getPcTextureSkinIndex } from './PlayerComposer.js';
+import { composeCharacter, buildEquipmentAttach, buildAccessoryRenderer, buildLinkedWeaponRenderer, buildAnimationControl, playerActionPlaySpeed, mergeEquipmentBodyRenderData, applyBodyEquipmentPresentation, pcCharacterScale, getPcTextureSkinIndex, playerVisualLoadIssues, unresolvedClassParts } from './PlayerComposer.js';
 import { applyMuUpAxis, bmdToRenderData } from './BmdAdapter.js';
 import { MUModelRenderer } from '../assets/MUModelRenderer.js';
 import { MUAssets } from '../assets/MUAssetLoader.js';
@@ -69,21 +69,6 @@ const composerIO = {
     fetchBinary: (p) => RemoteAssets.fetchBinary(p),
 };
 
-// Cache do render-data composto por classId (parse único por classe; MUAssets
-// já cacheia Player.bmd; peças são partilhadas entre chars da mesma classe)
-const composedCache = new Map();
-const composedInflight = new Map();
-
-async function composedRenderData(classId) {
-    if (composedCache.has(classId)) return composedCache.get(classId);
-    if (composedInflight.has(classId)) return composedInflight.get(classId);
-    const p = composeCharacter(classId, composerIO)
-        .then((r) => { composedCache.set(classId, r.renderData); composedInflight.delete(classId); return r.renderData; })
-        .catch((e) => { composedInflight.delete(classId); throw e; });
-    composedInflight.set(classId, p);
-    return p;
-}
-
 async function mapLimit(items, limit, fn) {
     const out = new Array(items.length);
     let next = 0;
@@ -103,7 +88,7 @@ async function mapLimit(items, limit, fn) {
 
 function previewEquipmentSignature(c) {
     const charset = Array.isArray(c?.charset) ? c.charset.join(',') : '';
-    return `${String(c?.name || '')}|slot=${Number(c?.slot)}|class=${Number(c?.classId)}|charset=${charset}`;
+    return `${String(RemoteAssets.baseUrl || '')}|${String(c?.name || '')}|slot=${Number(c?.slot)}|class=${Number(c?.classId)}|charset=${charset}|previewWing=${Number(c?.customPreview?.wingIndex || 0)}|previewPet=${Number(c?.customPreview?.petIndex || 0)}`;
 }
 
 export class CharacterPreview {
@@ -137,21 +122,19 @@ export class CharacterPreview {
             .sort((a, b) => a.slot - b.slot);
         const wanted = new Map(list.map((c) => [c.name, previewEquipmentSignature(c)]));
 
-        // Remove characters that left the server list AND rebuild an existing
-        // name when its authoritative class/slot/CharSet changed. R72 keyed the
-        // preview only by name, so returning to Character Select after changing
-        // equipment could keep the old set/weapon/wing renderer indefinitely.
+        // Retire departed characters immediately. Changed CharSets keep their live
+        // owner until the replacement has completed every awaited dependency.
         for (const s of this.slots) {
             const expected = wanted.get(s.char.name);
-            const current = s.previewSignature || previewEquipmentSignature(s.char);
-            if (!expected || expected !== current) this._removeSlot(s);
+            if (!expected) this._removeSlot(s);
         }
         this.slots = this.slots.filter((s) => {
             const expected = wanted.get(s.char.name);
-            const current = s.previewSignature || previewEquipmentSignature(s.char);
-            return Boolean(expected && expected === current);
+            return Boolean(expected);
         });
-        if (this._selectedSlot >= 0 && !list.some((c) => c.slot === this._selectedSlot)) {
+        const selectedOwner = this.slots.find(s => s.char.slot === this._selectedSlot);
+        if (this._selectedSlot >= 0 && !list.some((c) => c.slot === this._selectedSlot)
+            && !(selectedOwner && wanted.has(selectedOwner.char.name))) {
             this._selectedSlot = -1;
             this._clicked = false;
         }
@@ -160,10 +143,15 @@ export class CharacterPreview {
         // cargas independentes em paralelo evita que o último slot espere a
         // cadeia BMD/textura/equipamento dos anteriores. Continua zero-placeholder
         // e cada slot só aparece quando seu owner real ficou pronto.
-        const missingChars = list.filter((c) => !this.slots.some((s) => s.char.name === c.name));
+        const missingChars = list.filter((c) => !this.slots.some((s) => s.char.name === c.name && s.previewSignature === previewEquipmentSignature(c)));
         await mapLimit(missingChars, Math.min(PC_CHARACTER_SCENE_PREVIEW_SLOTS, missingChars.length || 1), async (c) => {
+            let candidate = null;
+            let candidateRenderer = null;
+            const loadIssues = [];
+            const dataAuthority = RemoteAssets.baseUrl;
             try {
-                const renderData = await composedRenderData(c.classId);
+                const composed = await composeCharacter(c.classId, composerIO);
+                const renderData = composed.renderData;
 
                 // R12.5 (P3 CharSet): equipamento REAL do wire — armas/escudo
                 // viram meshes extras no esqueleto (LinkBone 33/42 PC); wing/
@@ -172,7 +160,7 @@ export class CharacterPreview {
                 let attach = null;
                 if (c.charset) {
                     try {
-                        attach = await buildEquipmentAttach(c.charset, composerIO, renderData.bones, renderData.bones.length);
+                        attach = await buildEquipmentAttach(c.charset, composerIO, renderData.bones, renderData.bones.length, { customPreview: c.customPreview || null });
                         finalData = mergeEquipmentBodyRenderData(renderData, attach);
                         if (attach.weaponRenderMode !== 'render-link-object' && attach.meshes.length) {
                             finalData = {
@@ -189,6 +177,7 @@ export class CharacterPreview {
                             console.info(`[CharPreview] ${c.name} equipamento ausente (fail-closed, nada inventado): ${JSON.stringify({ attachments:attach.missing, body:attach.bodyMissing || [] })}`);
                         }
                     } catch (e) {
+                        loadIssues.push(`charset-attach:${e.message}`);
                         console.warn(`[CharPreview] ${c.name} charset attach falhou (fail-closed): ${e.message}`);
                     }
                 }
@@ -198,9 +187,13 @@ export class CharacterPreview {
                     camera: this.gameScene.camera?.threeCamera,
                     skinIndex: getPcTextureSkinIndex(c.classId),
                 });
+                candidateRenderer = renderer;
                 await renderer.initFromBMD(finalData);
-                await applyBodyEquipmentPresentation(renderer, attach).catch((e) =>
-                    console.warn(`[CharPreview] ${c.name} body presentation incompleta: ${e?.message || e}`));
+                renderer.userData = { ...(renderer.userData || {}),
+                    muCompositionMissing: unresolvedClassParts(composed, attach) };
+                await applyBodyEquipmentPresentation(renderer, attach).catch((e) => {
+                    loadIssues.push(`body-presentation:${e?.message || e}`);
+                });
 
                 // externo: posição+yaw (Y-up) | interno: up-axis MU→three
                 const inner = renderer.group;
@@ -226,7 +219,6 @@ export class CharacterPreview {
                     try { renderer.dispose(); } catch (_) {}
                     return null;
                 }
-                this.gameScene.scene.add(outer);
 
                 const slot = {
                     char: c, previewSignature: previewEquipmentSignature(c), renderer, outer, yawDeg: ANGLE_Z, t: 0, extras: [],
@@ -239,12 +231,21 @@ export class CharacterPreview {
                         if (bodyLight) {
                             renderer.setBodyLight(bodyLight);
                             for (const wr of slot.extras) wr?.setBodyLight?.(bodyLight);
+                            slot.mount?.renderer?.setBodyLight?.(bodyLight);
                         }
                         slot.t += dt;
                         renderer.update(dt, slot.t);
                         for (const wr of slot.extras) wr.update(dt, slot.t);
+                        slot.mount?.update?.(dt, renderer);
                     },
                 };
+
+                candidate = slot;
+                slot.sceneExtras = [];
+                const selectedName = this.slots.find(s => s.char.slot === this._selectedSlot)?.char.name;
+                slot._pos = (c.slot === (this._selectedSlot >= 0 ? this._selectedSlot : 0) || c.name === selectedName)
+                    ? SEL_POS : (this._clicked ? POSTCLICK_REST_POS : REST_POS);
+                this._applyPose(slot);
 
                 // Wing/helper REAIS: skeleton+actions próprios (ex.: Wing42.bmd
                 // = 17 bones/1 action). Attach bone-parented nos bones do PC
@@ -261,11 +262,12 @@ export class CharacterPreview {
                     try {
                         const wr = await buildAccessoryRenderer({ scene: this.gameScene.scene, camera: this.gameScene.camera?.threeCamera }, model);
                         const bone = renderer.bones?.[wr.userData.bone];
-                        if (!bone) throw new Error(`bone ${wr.userData.bone} inexistente (${renderer.bones?.length ?? 0} bones)`);
+                        if (!bone) { wr.dispose(); throw new Error(`bone ${wr.userData.bone} inexistente (${renderer.bones?.length ?? 0} bones)`); }
                         bone.add(wr.group); // bone-parented (PC BoneTransform[LinkBone])
                         slot.extras.push(wr);
                         console.info(`[CharPreview] ${c.name} ${tag} REAL anexado: ${model.path} @bone${wr.userData.bone}`);
                     } catch (e) {
+                        loadIssues.push(`accessory:${tag}:${e.message}`);
                         console.warn(`[CharPreview] ${c.name} ${tag} falhou (fail-closed): ${e.message}`);
                     }
                 }
@@ -278,9 +280,9 @@ export class CharacterPreview {
                     try {
                         const wr = await buildLinkedWeaponRenderer({ scene: this.gameScene.scene, camera: this.gameScene.camera?.threeCamera }, spec);
                         const bone = renderer.bones?.[spec.linkBone];
-                        if (!wr || !bone) throw new Error(`bone ${spec.linkBone} inexistente`);
+                        if (!wr || !bone) { wr?.dispose(); throw new Error(`bone ${spec.linkBone} inexistente`); }
                         bone.add(wr.group); slot.extras.push(wr);
-                    } catch (e) { console.warn(`[CharPreview] ${c.name} arma ${spec.side} falhou: ${e.message}`); }
+                    } catch (e) { loadIssues.push(`weapon:${spec.side}:${e.message}`); console.warn(`[CharPreview] ${c.name} arma ${spec.side} falhou: ${e.message}`); }
                 }
 
                 // Preserve the proven class idle timing before the equipment-aware
@@ -290,33 +292,67 @@ export class CharacterPreview {
                 outer.userData.animationControl = buildAnimationControl(renderer, c.classId, attach, { safeZone: false });
                 outer.userData.animationControl.play('idle');
 
+                // Mount/rider REAL no Character Select. A FIX40 já decodificava
+                // fenrir/unicon/pegasus/dark-horse em buildEquipmentAttach, porém o
+                // preview nunca materializava o CreateBug/MoveBug correspondente;
+                // resultado: personagem equipado aparecia a pé/invisível na tela.
+                // O owner abaixo reutiliza exatamente MountCompanion (mesmo BMD e
+                // actions do mundo), com safe-zone=false porque CHARACTER_SCENE não
+                // aplica o hide de TW_SAFEZONE. Nada é inferido se petModelPath faltar.
+                const previewMount = attach?.rider?.petModelPath ? attach.rider : attach?.fenrir?.petModelPath ? attach.fenrir : null;
+                if (previewMount?.petModelPath) {
+                    try {
+                        const { MountCompanion } = await import('../game/PetSystem.js');
+                        const previewOwner = { position: outer.position, mesh: outer, isAlive: () => true };
+                        const mount = new MountCompanion(
+                            previewOwner, this.gameScene.scene, previewMount.petModelPath, previewMount.option,
+                            { safeZone: () => false },
+                        );
+                        await mount.init();
+                        slot.mount = mount;
+                        slot.sceneExtras.push(mount.root);
+                        console.info(`[CharPreview] ${c.name} mount REAL anexado: ${previewMount.petModelPath} species=${mount.species}`);
+                    } catch (e) {
+                        loadIssues.push(`mount:${e.message}`);
+                        console.warn(`[CharPreview] ${c.name} mount falhou (fail-closed): ${e.message}`);
+                    }
+                }
+
                 // Helper companion (HELPER:0 — fairy/Angel/Dino...): PC
                 // CreateBug(MODEL_HELPER) no ChangeCharacterExt do preview
                 // (ZzzCharacter.cpp:12646) e RenderBug Scale 1.2 no
                 // CHARACTER_SCENE (GOBoid.cpp:690-692). Helper01.bmd real com
                 // sparks Spark02 — fail-closed (BMD ausente = sem fake).
-                if (attach?.helperKind === 'helper') {
+                if (attach?.helperKind === 'helper' || attach?.customHelper?.petModelPath) {
                     try {
                         const { HelperCompanion } = await import('../game/PetSystem.js');
                         const previewOwner = {
                             position: outer.position, // referência viva (slot anda → bug segue)
                             isAlive: () => true,
                         };
-                        const hc = new HelperCompanion(previewOwner, this.gameScene.scene, 1.2);
-                        await hc.init();
-                        hc._previewChar = c.name;
+                        const helperInfo = attach?.customHelper || null;
+                        const hc = new HelperCompanion(previewOwner, this.gameScene.scene, 1.2, helperInfo);
                         slot.extras.push({
-                            update: (dt) => hc.update(dt),
-                            dispose: () => hc.dispose(),
+                            update: (dt) => hc.update(dt), dispose: () => hc.dispose(),
+                            get meshes() { return hc.renderer?.meshes; },
+                            get userData() { return hc.renderer?.userData; },
                         });
-                        console.info(`[CharPreview] ${c.name} helper companion REAL (Helper01.bmd, Scale 1.2 — CreateBug CHARACTER_SCENE)`);
+                        await hc.init();
+                        slot.sceneExtras.push(hc.root);
+                        hc._previewChar = c.name;
+
+                        console.info(`[CharPreview] ${c.name} helper companion REAL (${helperInfo?.petModelPath || 'Player/Helper01.bmd'}, CharacterHelper/stock owner)`);
                     } catch (e) {
+                        loadIssues.push(`helper-companion:${e.message}`);
                         console.warn(`[CharPreview] ${c.name} helper companion falhou (fail-closed): ${e.message}`);
                     }
                 }
 
-                this._regUpdate(slot);
-                this.slots.push(slot);
+                loadIssues.push(...playerVisualLoadIssues(renderer, slot.extras, attach));
+                if (!renderer.meshes?.length) loadIssues.push("empty-player-model");
+                if (dataAuthority !== RemoteAssets.baseUrl) loadIssues.push("stale-data-authority");
+                if (!this._publishSlot(slot, syncGeneration, loadIssues)) return null;
+                candidate = null;
                 console.info('[CharPreview] real BMD ready', {
                     slot: c.slot, name: c.name, classId: c.classId,
                     meshes: renderer.meshes?.length ?? 0,
@@ -329,6 +365,8 @@ export class CharacterPreview {
                 });
                 return slot;
             } catch (e) {
+                if (candidate) this._removeSlot(candidate);
+                else candidateRenderer?.dispose();
                 console.warn(`[CharPreview] ${c.name} (class ${c.classId}): ${e.message} — sem modelo placeholder`);
                 return null;
             }
@@ -387,6 +425,31 @@ export class CharacterPreview {
         this.gameScene.objects.push(slot.outer);
     }
 
+    // Publish only a complete, current candidate; replacement is synchronous.
+    _publishSlot(slot, generation, issues = []) {
+        if (this._disposed || generation !== this._syncGeneration || issues.length) {
+            slot.outer.userData.muPreviewLoadIssues = [...issues];
+            this.lastLoadIssues = [...issues];
+            this._removeSlot(slot);
+            if (issues.length) console.warn(`[CharPreview] ${slot.char.name}: candidate incomplete; prior owner retained`, issues);
+            return false;
+        }
+        const prior = this.slots.find(s => s.char.name === slot.char.name);
+        if (prior) {
+            slot.yawDeg = prior.yawDeg;
+            if (this._selectedSlot === prior.char.slot) this._selectedSlot = slot.char.slot;
+            this._removeSlot(prior);
+            this.slots = this.slots.filter(s => s !== prior);
+        }
+        this.slots.push(slot);
+        this._layout(this._selectedSlot >= 0 ? this._selectedSlot : 0);
+        this._regUpdate(slot);
+        this.gameScene.scene.add(slot.outer);
+        for (const extra of slot.sceneExtras || []) this.gameScene.scene.add(extra);
+        this.lastLoadIssues = [];
+        return true;
+    }
+
     _removeSlot(slot) {
         const objs = this.gameScene.objects;
         const i = objs.indexOf(slot.outer);
@@ -394,6 +457,7 @@ export class CharacterPreview {
         slot.outer.userData.update = null;
         try { slot.renderer.dispose(); } catch (e) { /* noop */ }
         for (const wr of slot.extras || []) { try { wr.dispose(); } catch (e) { /* noop */ } }
+        try { slot.mount?.dispose?.(); } catch (e) { /* noop */ }
         this.gameScene.scene.remove(slot.outer);
     }
 
@@ -461,6 +525,7 @@ export class CharacterPreview {
         if (bodyLight) {
             slot.renderer?.setBodyLight?.(bodyLight);
             for (const wr of slot.extras || []) wr?.setBodyLight?.(bodyLight);
+            slot.mount?.renderer?.setBodyLight?.(bodyLight);
         }
     }
 

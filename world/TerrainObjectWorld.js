@@ -1,3 +1,4 @@
+import { createCooperativeLoadBudget } from './CooperativeLoadBudget.js';
 /**
  * TerrainObjectWorld.js — EncTerrain*.obj -> ObjectXX/ObjectNN.bmd.
  *
@@ -10,6 +11,8 @@
  * O arquivo EncTerrain*.obj usa a mesma família MapFileDecrypt dos mapas.
  */
 import * as THREE from 'three';
+import {WORLD75_LIGHT_SPRITE_PATH,loadWorld75LightTexture} from './PcWorld75LightTexture.js';
+import {hasPcLoginObjectPresentation,installPcLoginObjectPresentation} from './PcLoginObjectPresentation.js';
 import { RemoteAssets } from '../data/RemoteAssets.js';
 import { MUAssets } from '../assets/MUAssetLoader.js';
 import { MUModelRenderer, RenderFlags } from '../assets/MUModelRenderer.js';
@@ -17,8 +20,13 @@ import { applyMuUpAxis } from '../graphics/BmdAdapter.js';
 import { mapFileDecrypt, MAP_SIZE, TERRAIN_SCALE } from './TerrainWorld.js';
 import { createPcWorld75ParticleOwner, PC_WORLD75_PARTICLE_SERIALS } from './PcWorld75Particles.js';
 import { createPcLorenciaVisualOwner, createPcLorenciaBoneVisualOwner, PC_LORENCIA_RUNTIME_VISUAL_SERIALS, PC_LORENCIA_HIDDEN_EMITTER_SERIALS } from './PcLorenciaVisuals.js';
-import { createPcMapBoneVisualOwner, createPcMapDynamicTerrainLightOwner, createPcMapWorldVisualOwner, hasPcMapBoneVisual, hasPcMapRuntimePresentation, installPcMapRuntimePresentation, pcMapHideBaseBmd } from './PcMapObjectVisuals.js';
+import { createPcMapBoneVisualOwner, createPcMapDynamicTerrainLightOwner, createPcMapWorldVisualOwner, hasPcMapBoneVisual, hasPcMapRuntimePresentation, installPcMapRuntimePresentation, pcMapHideBaseBmd, pcMapObjectPlaySpeed } from './PcMapObjectVisuals.js';
+import {pcIndoorObject,pcIndoorAlphaTarget,pcTerrainTileAt,stepPcIndoorAlpha} from './PcIndoorVisibility.js';
 import { createPcMapParticleOwner, hasPcMapParticleVisual } from './PcMapParticles.js';
+import { createPcIcarusEnvironmentOwner } from './PcIcarusEnvironment.js';
+import { createPcLorenciaFaunaOwner } from './PcLorenciaFauna.js';
+import { createPcLorenciaEnvironmentOwner } from './PcLorenciaEnvironment.js';
+import { createPcLorenciaFishOwner } from './PcLorenciaFish.js';
 
 const ENTRY_SIZE = 30;
 const HEADER_SIZE = 4;
@@ -61,26 +69,6 @@ const STRUCTURAL_FULL_FIDELITY_SERIALS = new Set([80, 85]); // Object81 Bridge01
 // placement (same rendered result as the PC's create->render->retire cycle) and
 // update only the authored time-varying light for type 80. R74 also wires the
 // exact B101 World75 particle/effect-child owners from PcWorld75Particles.js.
-const WORLD75_LIGHT_SPRITE_PATH = 'Effect/flare01.OZJ';
-let _world75LightTexturePromise = null;
-async function loadWorld75LightTexture() {
-  if (_world75LightTexturePromise) return _world75LightTexturePromise;
-  _world75LightTexturePromise = (async () => {
-    const decoded = await RemoteAssets.fetchDecodedImage(WORLD75_LIGHT_SPRITE_PATH);
-    if (!decoded?.image || !(decoded.w > 0) || !(decoded.h > 0)) return null;
-    const texture = new THREE.Texture(decoded.image);
-    texture.needsUpdate = true;
-    texture.colorSpace = THREE.SRGBColorSpace;
-    texture.wrapS = THREE.ClampToEdgeWrapping;
-    texture.wrapT = THREE.ClampToEdgeWrapping;
-    texture.minFilter = THREE.LinearFilter;
-    texture.magFilter = THREE.LinearFilter;
-    texture.generateMipmaps = true;
-    texture.userData.muPcBitmapPath = WORLD75_LIGHT_SPRITE_PATH;
-    return Object.freeze({ texture, width: decoded.w, height: decoded.h });
-  })().catch(() => null);
-  return _world75LightTexturePromise;
-}
 
 export function pcWorld75VisualSpriteSpec(serial, scale = 1, worldMs = 0) {
   const type = Number(serial) | 0;
@@ -1018,7 +1006,10 @@ function applyWorld75UvScroll(renderer, v) {
   renderer.userData.muBlendMeshTexCoordV = v;
 }
 
-function rendererHasDynamicWorldAnimation(renderer) {
+export function rendererNeedsPerPlacementAnimation(renderer) {
+  // A constant bone clip does not make a pulse/scroll material static.
+  // World75 types41/115/117 install those owners during the model probe.
+  if (renderer?.hasPresentationUpdates) return true;
   const clips = renderer?.mixer?.clips;
   if (!clips?.size) return false;
   // Conservative R57 fast path: only a single constant-pose action is frozen.
@@ -1026,6 +1017,16 @@ function rendererHasDynamicWorldAnimation(renderer) {
   if (clips.size !== 1) return true;
   const clip = clips.values().next().value;
   return !clipIsConstantPose(clip);
+}
+
+// A single authored local AABB per serial encloses every placement's initial
+// pose. Transforming its eight corners is conservative under rotation/scale;
+// unlike Box3.setFromObject per placement it never sweeps skinned vertices.
+export function placementCullSphere(localBounds, worldMatrix) {
+  if (!localBounds || localBounds.isEmpty()) return null;
+  const sphere = localBounds.clone().applyMatrix4(worldMatrix).getBoundingSphere(new THREE.Sphere());
+  sphere.radius = Math.max(220, sphere.radius + 120);
+  return sphere;
 }
 
 export class TerrainObjectLayer {
@@ -1048,15 +1049,24 @@ export class TerrainObjectLayer {
     this._totalAnimated = 0;
     this._dynamicTerrainLightOwner = null;
     this._mapWorldVisualOwner = null;
+    this._icarusEnvironmentOwner = null;
+    this._lorenciaEnvironmentOwner = null;
+    this._lorenciaFishOwner = null;
+    this._lorenciaFaunaOwner = null;
     this._staged = false;
     this._pendingUpdateOwners = [];
+    this._pendingUpdateOwnerSet = new Set();
+    this._ownedUpdateOwners = new Set();
     this._terrainLightMesh = null;
   }
 
   _registerUpdateOwner(owner) {
     if (!owner || this._disposed) return;
+    if (this._ownedUpdateOwners.has(owner)) return;
+    this._ownedUpdateOwners.add(owner);
     if (this._staged) {
-      if (!this._pendingUpdateOwners.includes(owner)) this._pendingUpdateOwners.push(owner);
+      this._pendingUpdateOwnerSet.add(owner);
+      this._pendingUpdateOwners.push(owner);
       return;
     }
     if (!this.gameScene.objects.includes(owner)) this.gameScene.objects.push(owner);
@@ -1078,9 +1088,15 @@ export class TerrainObjectLayer {
     if (this._disposed) return false;
     this._staged = false;
     this.root.visible = true;
+    const liveOwners = new Set(this.gameScene.objects);
     for (const owner of this._pendingUpdateOwners.splice(0)) {
-      if (owner && !this.gameScene.objects.includes(owner)) this.gameScene.objects.push(owner);
+      if (owner && !liveOwners.has(owner)) { this.gameScene.objects.push(owner); liveOwners.add(owner); }
     }
+    this._pendingUpdateOwnerSet.clear();
+    // Staged World11 must not publish ambient audio until the atomic world
+    // commit activates this layer. The environment owner uses a private
+    // playback id, so disposal of the previous Icarus generation is harmless.
+    this._icarusEnvironmentOwner?.activate?.();
     return true;
   }
 
@@ -1090,18 +1106,14 @@ export class TerrainObjectLayer {
     this._terrainLightMesh = terrainLightMesh || null;
     this.root.visible = !this._staged;
     const cooperativeSliceMs = Math.max(0, Number(sliceMs) || 0);
-    let lastCooperativeYield = performance.now();
+    const checkpoint = createCooperativeLoadBudget({ budgetMs: cooperativeSliceMs || 8 });
     const cooperate = async () => {
       if (!cooperative) return;
-      // FIX8: the old cadence yielded after each model/probe and every eight
-      // placements. World4 has 9399 placements, so MoveCustom paid hundreds of
-      // idle waits even when each tiny batch took microseconds. Main's loader
-      // does not insert those sleeps. A positive sliceMs keeps the browser
-      // responsive by yielding only after a real CPU time slice was consumed.
-      // sliceMs=0 preserves the historical Login/CharacterScene cadence.
-      if (cooperativeSliceMs > 0 && performance.now() - lastCooperativeYield < cooperativeSliceMs) return;
-      await yieldToBrowserIdle(idleMs === 16 ? 16 : idleMs);
-      lastCooperativeYield = performance.now();
+      // Active game loading shares one elapsed budget between workers, then
+      // yields a browser task without waiting for an idle deadline. Preserve
+      // the historical Login/CharacterScene cadence when sliceMs is zero.
+      if (cooperativeSliceMs > 0) await checkpoint();
+      else await yieldToBrowserIdle(idleMs === 16 ? 16 : idleMs);
     };
     const assertContinue = () => {
       if (typeof shouldContinue === 'function' && shouldContinue() !== true) {
@@ -1122,13 +1134,42 @@ export class TerrainObjectLayer {
         .map(([serial, count]) => `Object${String(serial + 1).padStart(2, '0')}=${count}`).join(' '));
 
     this.gameScene.scene.add(this.root);
-    if (worldNum === 1) this._dynamicTerrainLightOwner = createLorenciaStaticDynamicLightOwner(this.gameScene, parsed.objects);
+    if (worldNum === 1) {
+      this._dynamicTerrainLightOwner = createLorenciaStaticDynamicLightOwner(this.gameScene, parsed.objects);
+      this._lorenciaEnvironmentOwner = createPcLorenciaEnvironmentOwner(this.gameScene);
+      if (this._lorenciaEnvironmentOwner?.group) {
+        this.root.add(this._lorenciaEnvironmentOwner.group);
+        if (typeof this._lorenciaEnvironmentOwner.group.userData.update === 'function') this._registerUpdateOwner(this._lorenciaEnvironmentOwner.group);
+        console.info('[WorldObjects FIX43] World1 Lorencia: source BITMAP_LEAF1 owner installed (80 leaves, World1/leaf01.OZJ).');
+      }
+      this._lorenciaFishOwner = createPcLorenciaFishOwner(this.gameScene);
+      if (this._lorenciaFishOwner?.group) {
+        this.root.add(this._lorenciaFishOwner.group);
+        if (typeof this._lorenciaFishOwner.group.userData.update === 'function') this._registerUpdateOwner(this._lorenciaFishOwner.group);
+        console.info('[WorldObjects FIX43] World1 Lorencia: source Fish01 owner installed (3 slots, TerrainMappingLayer1==5).');
+      }
+      this._lorenciaFaunaOwner = createPcLorenciaFaunaOwner(this.gameScene);
+      if (this._lorenciaFaunaOwner?.group) {
+        this.root.add(this._lorenciaFaunaOwner.group);
+        if (typeof this._lorenciaFaunaOwner.group.userData.update === 'function') this._registerUpdateOwner(this._lorenciaFaunaOwner.group);
+        console.info('[WorldObjects FIX43] World1 Lorencia: source GOBoid Bird01 owner installed (5 birds, real Object1/Bird01.bmd).');
+      }
+    }
     else this._dynamicTerrainLightOwner = createPcMapDynamicTerrainLightOwner(this.gameScene, worldNum, parsed.objects);
     if (this._dynamicTerrainLightOwner) this._registerUpdateOwner(this._dynamicTerrainLightOwner);
     this._mapWorldVisualOwner = await createPcMapWorldVisualOwner(worldNum, parsed.objects);
     if (this._mapWorldVisualOwner?.group) {
       this.root.add(this._mapWorldVisualOwner.group);
       if (typeof this._mapWorldVisualOwner.group.userData.update === 'function') this._registerUpdateOwner(this._mapWorldVisualOwner.group);
+    }
+    if (worldNum === 11) {
+      this._icarusEnvironmentOwner = await createPcIcarusEnvironmentOwner(this.gameScene);
+      if (this._icarusEnvironmentOwner?.group) {
+        this.root.add(this._icarusEnvironmentOwner.group);
+        if (typeof this._icarusEnvironmentOwner.group.userData.update === 'function') this._registerUpdateOwner(this._icarusEnvironmentOwner.group);
+        if (!this._staged) this._icarusEnvironmentOwner.activate?.();
+        console.info('[WorldObjects FIX43] World11 Icarus: terrain mesh suppressed by Scene owner; rain01 + aHeaven environment owner installed (ambient activates only on publication).');
+      }
     }
     const unique = [...new Set(parsed.objects.map((o) => o.serial))];
     // Main 5.2 creates several ObjectN entries only as invisible controllers /
@@ -1168,6 +1209,7 @@ export class TerrainObjectLayer {
     // serial estático usa 1 template e clones que compartilham
     // geometry/material/skeleton — visualmente idêntico, sem upload duplicado.
     const templates = new Map();   // serial -> renderer (somente estáticos)
+    const localBoundsBySerial = new Map();
     const animatedSerials = new Set();
     const constantPoseSerials = new Set();
     await mapLimit(unique, 3, async (serial) => {
@@ -1183,8 +1225,16 @@ export class TerrainObjectLayer {
       try {
         await probe.initFromBMD(data);
         if (worldNum === 75) applyPcWorld75ObjectMaterialPresentation(probe, serial);
+        // Same initial pose as each placement, before the MU-up conversion.
+        // Cache only within this load: never reuse bounds across Data authorities.
+        probe.group.updateMatrixWorld(true);
+        probe.skeleton?.update?.();
+        try {
+          const localBounds = new THREE.Box3().setFromObject(probe.group);
+          if (!localBounds.isEmpty()) localBoundsBySerial.set(serial, localBounds);
+        } catch (_) { /* use exact per-placement fallback if no model bound */ }
         const world75Rule = worldNum === 75 ? pcWorld75ObjectRule(serial) : null;
-        if (rendererHasDynamicWorldAnimation(probe) || world75Rule?.forcePerPlacement ||
+        if (rendererNeedsPerPlacementAnimation(probe) || world75Rule?.forcePerPlacement || hasPcLoginObjectPresentation(worldNum,serial) || pcIndoorObject(worldNum,serial) ||
             (worldNum === 1 && PC_LORENCIA_RUNTIME_VISUAL_SERIALS.includes(serial)) ||
             hasPcMapBoneVisual(worldNum, serial) || hasPcMapRuntimePresentation(worldNum, serial) || hasPcMapParticleVisual(worldNum, serial)) {
           animatedSerials.add(serial);
@@ -1230,10 +1280,14 @@ export class TerrainObjectLayer {
 
     let rendered = 0;
     let missing = 0;
+    const missingBySerial = new Map();
+    const bumpMissingSerial = (serial) => missingBySerial.set(serial, (missingBySerial.get(serial) || 0) + 1);
     let shared = 0;
     let instancedDraws = 0;
     let staticSubmeshesBeforeFusion = 0;
     let staticSubmeshesAfterFusion = 0;
+    let boundReusePlacements = 0;
+    let boundFallbackPlacements = 0;
     const instancedSerials = new Set();
 
     // Agrupa placements para batching real. O caminho antigo compartilhava
@@ -1410,15 +1464,16 @@ export class TerrainObjectLayer {
     // Somente animados + static serials cujo batching falhou/foi desativado.
     await mapLimit(parsed.objects, 4, async (obj, index) => {
       assertContinue();
+      if (this._disposed || instancedSerials.has(obj.serial) || sourceHiddenNoRendererSerials.has(obj.serial)) return;
       if ((index & 7) === 0) await cooperate();
       assertContinue();
-      if (this._disposed || instancedSerials.has(obj.serial) || sourceHiddenNoRendererSerials.has(obj.serial)) return;
+      if (this._disposed) return;
       const data = modelCache.get(obj.serial);
-      if (!data) { missing++; return; }
+      if (!data) { missing++; bumpMissingSerial(obj.serial); return; }
+      let renderer = null;
       try {
         const template = templates.get(obj.serial);
         let inner;
-        let renderer = null;
         if (template) {
           // Fallback diagnóstico: clone raso com skeleton compartilhado.
           inner = new THREE.Group();
@@ -1514,6 +1569,7 @@ export class TerrainObjectLayer {
           const objectBodyLight = this._terrainLightAt(outer.position.x, outer.position.z, new THREE.Color());
           if (objectBodyLight) renderer.setBodyLight(objectBodyLight);
         }
+        if (renderer && hasPcLoginObjectPresentation(worldNum,obj.serial)) await installPcLoginObjectPresentation(worldNum,obj.serial,renderer);
         const pcMapRuntimePresentation = renderer ? installPcMapRuntimePresentation(worldNum, obj.serial, renderer, obj) : false;
         if (!renderer) {
           outer.updateMatrix();
@@ -1528,10 +1584,12 @@ export class TerrainObjectLayer {
           // Inflate it so animation/wind never pops at the screen edge.
           try {
             outer.updateMatrixWorld(true);
-            const box = new THREE.Box3().setFromObject(outer);
-            if (!box.isEmpty()) {
-              cullSphere = box.getBoundingSphere(new THREE.Sphere());
-              cullSphere.radius = Math.max(220, cullSphere.radius + 120);
+            const localBounds = localBoundsBySerial.get(obj.serial);
+            if (localBounds) { cullSphere = placementCullSphere(localBounds, inner.matrixWorld); boundReusePlacements++; }
+            else {
+              boundFallbackPlacements++;
+              const box = new THREE.Box3().setFromObject(outer);
+              if (!box.isEmpty()) { cullSphere = box.getBoundingSphere(new THREE.Sphere()); cullSphere.radius = Math.max(220, cullSphere.radius + 120); }
             }
           } catch (_) { cullSphere = null; }
         }
@@ -1570,13 +1628,32 @@ export class TerrainObjectLayer {
           outer.userData.muPcHiddenMeshMinus2 = true;
           outer.userData.muPcMapVisualReplacement = true;
         }
-        if (renderer && (renderer.mixer?.clips?.size > 0 || pcLorenciaBoneVisualOwner || pcMapBoneVisualOwner || pcMapParticleOwner?.usesRendererTick || pcMapRuntimePresentation)) {
+        if (renderer && (renderer.hasPresentationUpdates || renderer.mixer?.clips?.size > 0 || hasPcLoginObjectPresentation(worldNum,obj.serial) || pcIndoorObject(worldNum,obj.serial) || pcLorenciaBoneVisualOwner || pcMapBoneVisualOwner || pcMapParticleOwner?.usesRendererTick || pcMapRuntimePresentation)) {
           // Bone-space visual owners also need one presentation update per frame
           // even when the BMD itself has no animated clip. Animated models retain
-          // the normal action_0 owner and authored velocity.
-          renderer.playSpeed = world75Rule?.playSpeed ?? 0.16;
+          // the exact CreateObject OBJECT::Velocity rather than a Web-global 0.16.
+          renderer.playSpeed = world75Rule?.playSpeed ?? pcMapObjectPlaySpeed(worldNum,obj.serial,obj.scale);
           if (renderer.mixer?.clips?.has?.('action_0')) renderer.playAction('action_0');
+          if(pcIndoorObject(worldNum,obj.serial)){
+            // Preserve each mesh's authored/source visibility (texture readiness,
+            // HiddenMesh, bitmap-hide, etc). Indoor alpha may hide the whole BMD,
+            // but leaving the indoor tile must restore this exact base state.
+            slot.indoorBaseVisibility=(renderer.meshes||[]).map(m=>m.visible!==false);
+          }
           outer.userData.update = (dt) => {
+            if(pcIndoorObject(worldNum,obj.serial)) {
+              const hero=this.gameScene.mainObject?.position;
+              const tile=hero?pcTerrainTileAt(this.gameScene.terrainMapping,hero.x,hero.z):null;
+              slot.indoorTime=(slot.indoorTime||0)+Math.max(0,dt)*25;
+              const ticks=Math.floor(slot.indoorTime+1e-9);slot.indoorTime-=ticks;
+              slot.indoorAlpha=stepPcIndoorAlpha(slot.indoorAlpha??1,pcIndoorAlphaTarget(worldNum,obj.serial,tile),ticks);
+              renderer.setRenderFlags(renderer.renderFlags??2,{alpha:slot.indoorAlpha});
+              const indoorVisible=slot.indoorAlpha>=.01;
+              for(let i=0;i<(renderer.meshes||[]).length;i++){
+                const m=renderer.meshes[i];
+                m.visible=indoorVisible && (slot.indoorBaseVisibility?.[i]!==false);
+              }
+            }
             slot.elapsed += dt;
             slot.deferredDt += dt;
             if (world75Rule?.delayedStart && slot.pcDelayTicks > 0) {
@@ -1616,7 +1693,8 @@ export class TerrainObjectLayer {
         this.instances.push(slot);
         rendered++;
       } catch (e) {
-        missing++;
+        try { renderer?.dispose?.(); } catch (_) { /* release partial geometry leases */ }
+        missing++; bumpMissingSerial(obj.serial);
         console.warn(`[WorldObjects] placement ${index} Object${obj.serial + 1}: ${e.message}`);
       }
     });
@@ -1634,9 +1712,35 @@ export class TerrainObjectLayer {
     }
 
     const missingSerials = [...modelCache.entries()].filter(([, v]) => !v).map(([serial]) => serial + 1);
+    const geometryOwners=[...templates.values(),...this.instances.map(slot=>slot.renderer).filter(Boolean)];
+    this._loadGeometryStats=geometryOwners.reduce((stats,owner)=>({builds:stats.builds+(owner.userData.muBmdGeometryBuilds||0),reuses:stats.reuses+(owner.userData.muBmdGeometryReuses||0)}),{builds:0,reuses:0});
+    console.info(`[WorldObjects FIX23] geometry World${worldNum}: builds=${this._loadGeometryStats.builds} reused=${this._loadGeometryStats.reuses}`);
+    this._loadBoundStats = { models: localBoundsBySerial.size, reusedPlacements: boundReusePlacements, fallbackPlacements: boundFallbackPlacements };
+    console.info(`[WorldObjects FIX21] bounds World${worldNum}: modelSweeps=${localBoundsBySerial.size} transformedPlacements=${boundReusePlacements} fallbackSweeps=${boundFallbackPlacements}; updateOwners=${this._ownedUpdateOwners.size}`);
+    // FIX42 physical map audit: one stable line per ObjectXX in Lorencia/Icarus.
+    // This distinguishes "model absent" from "source-hidden controller" and
+    // "owner installed but visually wrong", which the old aggregate PASS could not.
+    const serialAudit={};
+    if (worldNum===1 || worldNum===11) {
+      for (const [serial, placements] of [...placementsBySerial.entries()].sort((a,b)=>a[0]-b[0])) {
+        const slots=this.instances.filter(slot=>slot?.obj?.serial===serial);
+        const counts={
+          renderer:slots.filter(x=>!!x.renderer).length,
+          lorenciaVisual:slots.filter(x=>!!x.pcLorenciaVisualOwner).length,
+          lorenciaBone:slots.filter(x=>!!x.pcLorenciaBoneVisualOwner).length,
+          mapBone:slots.filter(x=>!!x.pcMapBoneVisualOwner).length,
+          mapParticle:slots.filter(x=>!!x.pcMapParticleOwner).length,
+          runtime:slots.filter(x=>!!x.pcMapRuntimePresentation).length,
+        };
+        const path=sourceHiddenNoRendererSerials.has(serial)?'source-hidden-no-renderer':instancedSerials.has(serial)?'instanced':animatedSerials.has(serial)?'animated':'clone/static';
+        const rec={object:serial+1,placements:placements.length,model:modelCache.get(serial)?'ok':'missing',path,sourceHidden:pcMapHideBaseBmd(worldNum,serial),missing:missingBySerial.get(serial)||0,owners:counts};
+        serialAudit[serial+1]=rec;
+        console.info(`[WorldObjects AUDIT FIX42] W${worldNum} Object${serial+1} placements=${rec.placements} model=${rec.model} path=${path} hidden=${rec.sourceHidden?1:0} missing=${rec.missing} owners=renderer:${counts.renderer},lorencia:${counts.lorenciaVisual},lorenciaBone:${counts.lorenciaBone},mapBone:${counts.mapBone},particle:${counts.mapParticle},runtime:${counts.runtime}`);
+      }
+    }
     console.info(`[WorldObjects] World${worldNum}: rendered=${rendered} missing=${missing}` +
       (missingSerials.length ? ` missingModels=${missingSerials.join(',')}` : ''));
-    return { ...parsed, rendered, missing, histogram: Object.fromEntries(histogram), missingSerials };
+    return { ...parsed, rendered, missing, histogram: Object.fromEntries(histogram), missingSerials, serialAudit };
   }
 
   updateVisibility(camera) {
@@ -1674,6 +1778,16 @@ export class TerrainObjectLayer {
   dispose() {
     this._disposed = true;
     this._pendingUpdateOwners.length = 0;
+    this._pendingUpdateOwnerSet.clear();
+    // Retire thousands of map callbacks in one pass, preserving the shared
+    // array identity and every non-map owner (hero, pets, UI, effects).
+    const owners = this.gameScene.objects;
+    let write = 0;
+    for (let read = 0; read < owners.length; read++) {
+      if (!this._ownedUpdateOwners.has(owners[read])) owners[write++] = owners[read];
+    }
+    owners.length = write;
+    this._ownedUpdateOwners.clear();
     for (const s of this.instances) {
       const i = this.gameScene.objects.indexOf(s.outer);
       if (i >= 0) this.gameScene.objects.splice(i, 1);
@@ -1707,6 +1821,30 @@ export class TerrainObjectLayer {
       // slot.renderer é null nos placements estáticos (compartilham o
       // template); apenas os animados têm renderer próprio.
       if (s.renderer) { try { s.renderer.dispose(); } catch (_) { /* best effort */ } }
+    }
+    if (this._lorenciaEnvironmentOwner?.group) {
+      const lei = this.gameScene.objects.indexOf(this._lorenciaEnvironmentOwner.group);
+      if (lei >= 0) this.gameScene.objects.splice(lei, 1);
+      try { this.root.remove(this._lorenciaEnvironmentOwner.group); this._lorenciaEnvironmentOwner.dispose?.(); } catch (_) { /* best effort */ }
+      this._lorenciaEnvironmentOwner = null;
+    }
+    if (this._lorenciaFishOwner?.group) {
+      const fi = this.gameScene.objects.indexOf(this._lorenciaFishOwner.group);
+      if (fi >= 0) this.gameScene.objects.splice(fi, 1);
+      try { this.root.remove(this._lorenciaFishOwner.group); this._lorenciaFishOwner.dispose?.(); } catch (_) { /* best effort */ }
+      this._lorenciaFishOwner = null;
+    }
+    if (this._lorenciaFaunaOwner?.group) {
+      const li = this.gameScene.objects.indexOf(this._lorenciaFaunaOwner.group);
+      if (li >= 0) this.gameScene.objects.splice(li, 1);
+      try { this.root.remove(this._lorenciaFaunaOwner.group); this._lorenciaFaunaOwner.dispose?.(); } catch (_) { /* best effort */ }
+      this._lorenciaFaunaOwner = null;
+    }
+    if (this._icarusEnvironmentOwner?.group) {
+      const ii = this.gameScene.objects.indexOf(this._icarusEnvironmentOwner.group);
+      if (ii >= 0) this.gameScene.objects.splice(ii, 1);
+      try { this.root.remove(this._icarusEnvironmentOwner.group); this._icarusEnvironmentOwner.dispose?.(); } catch (_) { /* best effort */ }
+      this._icarusEnvironmentOwner = null;
     }
     if (this._mapWorldVisualOwner?.group) {
       const wi = this.gameScene.objects.indexOf(this._mapWorldVisualOwner.group);

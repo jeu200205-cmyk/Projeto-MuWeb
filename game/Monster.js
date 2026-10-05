@@ -197,6 +197,7 @@ export class Monster extends Character {
     else this._visual?.setBodyLight?.(this._pendingBodyLight);
   }
 
+  get renderer() { return this._visual?.renderer || null; }
   isNpc() { return this.semanticKind === VIEWPORT_KIND.NPC; }
   isAttackable() { return isCombatViewportKind(this.semanticKind); }
 

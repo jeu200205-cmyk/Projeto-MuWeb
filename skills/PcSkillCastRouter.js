@@ -25,6 +25,7 @@ const WARRIOR_TARGET_MAGIC = new Set([
   AT_SKILL.SWORD5,
   AT_SKILL.ONETOONE, // Death Stab — UseSkillWarrior -> SendRequestMagic(target)
   AT_SKILL.SPEAR,    // Impale — UseSkillWarrior -> SendRequestMagic(target)
+  AT_SKILL.RIDER,    // Raid — SkillWarrior includes RIDER -> CastWarriorSkill target owner
 ]);
 
 // B101 ZzzInterface.cpp::UseSkillWizard target-magic subset. These all use

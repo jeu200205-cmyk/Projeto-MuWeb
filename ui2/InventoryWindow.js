@@ -87,9 +87,12 @@ export const PC_EQUIPMENT_SLOTS = Object.freeze([
     { key:'boots',   serverIndex:6,  x:135, y:150, w:46, h:46, asset:'Interface/newui_item_boots.OZT', types:[ITEM_TYPES.BOOTS] },
     { key:'wings',   serverIndex:7,  x:120, y:44,  w:61, h:46, asset:'Interface/newui_item_wing.OZT', types:[ITEM_TYPES.WINGS] },
     { key:'helper',  serverIndex:8,  x:15,  y:44,  w:46, h:46, asset:'Interface/newui_item_fairy.OZT', types:[] },
-    { key:'amulet',  serverIndex:9,  x:54,  y:87,  w:28, h:28, asset:'Interface/newui_item_necklace.OZT', types:[] },
-    { key:'ring1',   serverIndex:10, x:54,  y:150, w:28, h:28, asset:'Interface/newui_item_ring.OZT', types:[ITEM_TYPES.RING] },
-    { key:'ring2',   serverIndex:11, x:114, y:150, w:28, h:28, asset:'Interface/newui_item_ring.OZT', types:[ITEM_TYPES.RING] },
+    // CNewUIMyInventory::SetEquipmentSlotInfo uses the authored 20x20
+    // accessory rectangles.  The former 28x28 values came from the older
+    // ZzzInventory layout and made the NewUI previews oversized/offset.
+    { key:'amulet',  serverIndex:9,  x:59,  y:88,  w:20, h:20, asset:'Interface/newui_item_necklace.OZT', types:[] },
+    { key:'ring1',   serverIndex:10, x:59,  y:151, w:20, h:20, asset:'Interface/newui_item_ring.OZT', types:[ITEM_TYPES.RING] },
+    { key:'ring2',   serverIndex:11, x:119, y:151, w:20, h:20, asset:'Interface/newui_item_ring.OZT', types:[ITEM_TYPES.RING] },
 ]);
 
 // Exact current-client ElementSlots.cpp extension. The Lua owner may activate
@@ -103,8 +106,20 @@ export const PC_ELEMENT_EQUIPMENT_SLOTS = Object.freeze([
 
 export function pcEquipmentIconRect(def) {
     return {
-        x: 1, y: def.key === 'armor' && !def.extended ? -10 : 0,
+        // The slot host is already created at SetEquipmentSlotInfo.x + 1.
+        // Adding another local +1 shifted every rendered item two pixels from
+        // the source viewport.  Only armor owns the PC's authored y-10.
+        x: 0, y: def.key === 'armor' && !def.extended ? -10 : 0,
         w: Math.max(8, Number(def.w) - 4), h: Math.max(8, Number(def.h) - 4),
+    };
+}
+
+export function pcEquipmentSlotHostRect(def) {
+    return {
+        x: Number(def.x) + 1,
+        y: Number(def.y),
+        w: Math.max(8, Number(def.w) - 4),
+        h: Math.max(8, Number(def.h) - 4),
     };
 }
 
@@ -192,9 +207,10 @@ export class InventoryWindow extends MUWindow {
         this.equipSlots = {};
         for (const def of this._equipDefs) {
             // PC mouse hitbox is x+1/y/(w-4)/(h-4); artwork remains the full rect.
+            const host = pcEquipmentSlotHostRect(def);
             const cell = this._createSlot(
                 { kind:'equip', key:def.key },
-                { x:def.x + 1, y:def.y, w:def.w - 4, h:def.h - 4, iconSize:Math.max(18, Math.min(def.w, def.h)) }
+                { ...host, iconSize:Math.max(18, Math.min(def.w, def.h)) }
             );
             cell.dataset.pcFullRect = `${def.x},${def.y},${def.w},${def.h}`;
             if (def.extended) {
@@ -1107,7 +1123,7 @@ export class InventoryWindow extends MUWindow {
                     if (this._destroyed || this.visible || generation !== this._prewarmGeneration) return;
                     const { item, size } = job;
                     try {
-                        await renderIcon3D(io, Number(item.itemType ?? item.type), Number.isInteger(item.rawLevel) ? item.rawLevel : ((item.level || 0) << 3), size, item);
+                        await renderIcon3D(io, Number(item.itemType ?? item.type), Number.isInteger(item.rawLevel) ? item.rawLevel : ((item.level || 0) << 3), size, {...item, iconPadding:32});
                     } catch (_) { /* fail-closed: visible render will report the same missing owner */ }
                 }
             };
@@ -1199,12 +1215,25 @@ export class InventoryWindow extends MUWindow {
             const cvHost = document.createElement('span');
             cvHost.style.cssText = 'position:absolute;inset:0;display:flex;align-items:center;justify-content:center;';
             span.appendChild(cvHost);
-            this._itemIO().then((io) => io && renderIcon3D(io, Number(item.itemType ?? item.type), Number.isInteger(item.rawLevel) ? item.rawLevel : ((item.level || 0) << 3), {w:iconW,h:iconH}, item)).then((cv) => {
+            const load=async()=>{
+                const io=await this._itemIO();if(!io)return null;
+                for(let attempt=0;attempt<3;attempt++){
+                    if(this._destroyed||!cvHost.isConnected)return null;
+                    const cv=await renderIcon3D(io, Number(item.itemType ?? item.type), Number.isInteger(item.rawLevel) ? item.rawLevel : ((item.level || 0) << 3), {w:iconW,h:iconH}, {...item,iconPadding:32});
+                    if(cv)return cv;
+                    if(attempt<2)await new Promise(r=>setTimeout(r,150*(attempt+1)));
+                }
+                return null;
+            };
+            load().then((cv) => {
                 if (cv && cvHost.isConnected) {
-                    cv.style.cssText = `width:${iconW}px;height:${iconH}px;max-width:100%;max-height:100%;image-rendering:auto;`;
+                    // PC renders items in the whole item-view viewport. Keep
+                    // pixels extending past the slot without scaling the icon.
+                    const pad=Number(cv.dataset.muIconPadding)||0;
+                    cv.style.cssText = `position:absolute;left:${-pad}px;top:${-pad}px;width:${cv.width}px;height:${cv.height}px;max-width:none;max-height:none;pointer-events:none;image-rendering:auto;`;
                     cvHost.appendChild(cv);
                 }
-            });
+            }).catch(e=>console.warn('[Inventory] ícone indisponível:',e.message));
         }
         // Main 5.2 does not draw a generic +level label or generic Excellent
         // text glow over every inventory icon. RenderNumberOfItem is selective.

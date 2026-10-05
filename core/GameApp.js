@@ -16,6 +16,7 @@ import { GameTimer } from './Timer.js';
 import { Input } from './Input.js';
 import { Sound } from '../audio/SoundManager.js';
 import { RemoteAssets } from '../data/RemoteAssets.js';
+import { MUAssets } from '../assets/MUAssetLoader.js';
 import { RealMUProtocol } from '../protocol/RealMUProtocol.js';
 import { DIR_TABLE } from '../protocol/MUOpCodes.js';
 import { muDirectionToThreeYaw, pcDegreesToThreeYaw } from '../game/MUDirection.js';
@@ -37,7 +38,7 @@ import { MonsterManager } from '../game/MonsterManager.js';
 import { BuffContainer } from '../game/BuffSystem.js';
 import { PetSystem } from '../game/PetSystem.js';
 import { PlayerViewportManager } from '../game/PlayerViewportManager.js';
-import { StatusBars } from '../ui2/StatusBars.js';
+import { StatusBars, PC_MAINFRAME_FPS_RECT } from '../ui2/StatusBars.js';
 import { SkillBar } from '../ui2/SkillBar.js';
 import { attachMuVirtualBoard } from '../ui/MUVirtualViewport.js';
 import { ChatSystem } from './ChatSystem.js';
@@ -48,12 +49,14 @@ import { DropManager } from '../game/DropSystem.js';
 import { ServerGroundItems } from '../game/ServerGroundItems.js';
 import { ServerInventoryMirror } from '../game/ServerInventoryMirror.js';
 import { ServerStorageMirror } from '../game/ServerStorageMirror.js';
+import { ServerNpcShopMirror } from '../game/ServerNpcShopMirror.js';
 import { ServerCustomPreviewMirror } from '../game/ServerCustomPreviewMirror.js';
 import { GroundItemLayer } from '../graphics/GroundItemLayer.js';
 import { QuestManager, QuestWindow } from '../game/QuestSystem.js';
 import { FloatingText } from '../game/FloatingText.js';
 import { SkillEffects } from '../game/SkillEffects.js';
 import { StorageWindow } from '../ui2/StorageWindow.js';
+import { NpcShop } from '../ui2/NpcShop.js';
 import { CharacterPreview } from '../graphics/CharacterPreview.js';
 import { serverClassToClientClass, serverClassToName, clientClassToLocalBase } from '../data/CharacterClassMap.js';
 import { AT_SKILL, skillTypeName } from '../data/SkillNames.js';
@@ -88,6 +91,11 @@ import { loadDisableExcellentLua } from '../data/DisableExcellentLua.js';
 import { loadItemTransparencyLua } from '../data/ItemTransparencyLua.js';
 import { loadCustomItemForceLua } from '../data/CustomItemForceLua.js';
 import { loadCurrentClientMonsterOwners } from '../data/CurrentClientMonsterOwners.js';
+import { loadCharacterHelperLua, characterHelperRule } from '../data/CharacterHelperLua.js';
+import { loadDarkSpiritLua } from '../data/DarkSpiritLua.js';
+import { loadCustomBowLua, customBowType } from '../data/CustomBowLua.js';
+import { loadCurrentClientLuaAuthority } from '../data/CurrentClientLuaAuthority.js';
+import { loadPcCharacterLuaEffects } from '../data/PcCharacterLuaEffects.js';
 import { PLAYER_ACTIONS } from '../graphics/PlayerComposer.js';
 import { MUSprites } from '../ui/MUSprites.js';
 
@@ -104,7 +112,10 @@ export const MUWEB_R25_REVISION = 'MUWEB_R25_DEATH_STAB_FORCE4_2026-09-27_A';
 export const MUWEB_R26_REVISION = 'MUWEB_R26_VITALITY_SPIRIT2_2026-09-27_A';
 export const MUWEB_PARENT_REVISION = 'MUWEB_R27_BLOW232_IMPACT_BMD_2026-09-27_A';
 export const MUWEB_SOURCE_PARENT_REVISION = 'MUWEB_R28_FURY_CORE_BMD_2026-09-27_A';
-export const MUWEB_SOURCE_REVISION = 'MUWEB_R90_FIX9_PC_HIDDEN_OBJECT_ITEM_PRESENTATION_PERF_2026-10-02_A';
+export const MUWEB_R90_FIX15_REVISION = 'MUWEB_R90_FIX15_BMD_INFLIGHT_MAP_CANCEL_2026-10-03_A';
+export const MUWEB_R90_FIX46_REVISION = 'MUWEB_R90_FIX46_DARKSPIRIT_MONSTER_LUA_CONTRACTS_2026-10-04_A';
+export const MUWEB_R90_FIX47_REVISION = 'MUWEB_R90_FIX47_CHARACTER_LUA_MONSTER_PRESENTATION_2026-10-04_A';
+export const MUWEB_SOURCE_REVISION = 'MUWEB_R90_FIX53_ELEMENT_PETS_HELPER_MOVEMENT_SUMMONER_SKILLS_2026-10-05';
 export const MUWEB_PREVIOUS_SOURCE_REVISION = 'MUWEB_R78_ITEMVIEW_WORLDENTRY_ANIMATION_CHARSELECT_RECOVERY_2026-09-30_A';
 export const MUWEB_R77_BASE_REVISION = 'MUWEB_R77_CANONICAL_WORLD_ROUTING_CUSTOMMOVE_PREFETCH_UTF8_2026-09-30_A';
 
@@ -152,6 +163,7 @@ export class GameApp {
         this.groundItems = new ServerGroundItems();
         this.serverInventory = new ServerInventoryMirror();
         this.serverStorage = new ServerStorageMirror();
+        this.serverNpcShop = new ServerNpcShopMirror();
         this.serverCustomPreview = new ServerCustomPreviewMirror();
         this.groundItemLayer = null;
         this._teleportGeneration = 0;
@@ -271,6 +283,13 @@ export class GameApp {
         // only fallback. Historical/commented LoadItens rows are never mounted.
         if (this.assetsOnline) {
             try {
+                const luaMeta = await loadCurrentClientLuaAuthority((p) => RemoteAssets.fetchBinary(p));
+                loadPcCharacterLuaEffects((p)=>RemoteAssets.fetchBinary(p)).catch((e)=>console.warn('[CharacterLuaFX] indisponível:', e.message));
+                console.info(`[GameApp] Lua authority READY ${luaMeta.present}/${luaMeta.total} scripts`);
+            } catch (e) {
+                console.warn('[GameApp] Lua authority inventory unavailable:', e?.message || e);
+            }
+            try {
                 const ownerMeta = await loadCurrentClientItemOwners((p) => RemoteAssets.fetchBinary(p));
                 console.info(`[GameApp] Current-client item owners READY count=${ownerMeta.count} LoadItens=${ownerMeta.loadItens} wings=${ownerMeta.wings} capes=${ownerMeta.capes}`);
             } catch (e) {
@@ -321,6 +340,24 @@ export class GameApp {
                 console.info(`[GameApp] CustomMonster READY models=${monsterMeta.count} glows=${monsterMeta.glows} effects=${monsterMeta.effects}`);
             } catch (e) {
                 console.warn('[GameApp] CustomMonster owners unavailable — stock viewport model lane remains owner:', e?.message || e);
+            }
+            try {
+                const helperMeta = await loadCharacterHelperLua((p) => RemoteAssets.fetchBinary(p));
+                console.info(`[GameApp] CharacterHelper READY rows=${helperMeta.count} path=${helperMeta.path}`);
+            } catch (e) {
+                console.warn('[GameApp] CharacterHelper unavailable — stock helper lane remains owner:', e?.message || e);
+            }
+            try {
+                const spiritMeta = await loadDarkSpiritLua((p) => RemoteAssets.fetchBinary(p));
+                console.info(`[GameApp] DarkSpiritLua READY rows=${spiritMeta.count} path=${spiritMeta.path}`);
+            } catch (e) {
+                console.warn('[GameApp] DarkSpiritLua unavailable — stock Skill/darkspirit.bmd remains owner:', e?.message || e);
+            }
+            try {
+                const bowMeta = await loadCustomBowLua((p) => RemoteAssets.fetchBinary(p));
+                console.info(`[GameApp] CustomBowCross READY rows=${bowMeta.count} path=${bowMeta.path}`);
+            } catch (e) {
+                console.warn('[GameApp] CustomBowCross unavailable — stock bow families remain owner:', e?.message || e);
             }
         }
 
@@ -716,7 +753,7 @@ export class GameApp {
                 if (this.charPreview && (this.scenes?.currentName === 'char-select' || this._preparingCharSelect)) {
                     const previewChars = mapped
                         .filter((c) => c.classId >= 0)
-                        .map((c) => ({ name: c.name, classId: c.classId, slot: c.slot, charset: c.charset, equipment: c.equipment }));
+                        .map((c) => ({ name: c.name, classId: c.classId, slot: c.slot, charset: c.charset, equipment: c.equipment, customPreview: this.serverCustomPreview?.getByName?.(c.name) || null }));
                     this.charPreview.setChars(previewChars).catch((e) =>
                         console.warn('[CharPreview] setChars:', e));
                 }
@@ -899,14 +936,80 @@ export class GameApp {
                     this.chatInfo(`Servidor recusou descarte do slot ${slot}.`);
                 }
             },
-            // 0x30 ReceiveTalk — clean PC opens storage ONLY for server Value=2.
-            // There is deliberately no B-hotkey/offline vault substitute.
+            // 0x30 ReceiveTalk — exact Main 5.2 service dispatch. Value=2 is
+            // storage; default and 0x22 are NPC shop. Explicit special-service
+            // cases stay fail-closed until their dedicated NewUI owner is ported.
             onTalk: ({ value }) => {
-                if (value !== 2) return;
-                console.info('[MU] 0x30 talk Value=2: storage server owner');
-                this.serverStorage.beginSession();
-                if (this._ui?.storageWin && this._ui?.inventoryWin) this._openServerStorageUI();
-                else this._pendingStorageOpen = true;
+                const v=value&0xff;
+                this._ui?.npcShop?.hide?.();
+                if (v === 2) {
+                    console.info('[MU] 0x30 talk Value=2: storage server owner');
+                    this.serverNpcShop.endSession();
+                    this.serverStorage.beginSession();
+                    if (this._ui?.storageWin && this._ui?.inventoryWin) this._openServerStorageUI();
+                    else this._pendingStorageOpen = true;
+                    return;
+                }
+                const special = new Set([3,4,5,6,7,0x0C,0x0D,0x11,0x12,0x13,0x14,0x15,0x16,0x17,0x18,0x19,0x20,0x21,0x23,0x24,0x25,0x26]);
+                if (special.has(v)) {
+                    console.info(`[MU] 0x30 talk Value=0x${v.toString(16)}: serviço PC especial ainda sem owner Web; não abrir loja falsa.`);
+                    return;
+                }
+                this.serverStorage.open && this.serverStorage.endSession();
+                this.serverNpcShop.beginSession();
+                const repairIds=new Set([243,246,251,416,578]);
+                this._ui?.npcShop?.setRepairShop?.(repairIds.has(Number(this._lastTalkNpc?.typeId)));
+                this._ui?.npcShop?.show?.();
+                this._ui?.inventoryWin?.show?.();
+                console.info(`[MU] 0x30 talk Value=0x${v.toString(16)}: INTERFACE_NPCSHOP server owner${v===0x22?' gamble':''}`);
+            },
+            onTradeInventory: ({subCode,count,items}) => {
+                // ReceiveTradeInventory routes the same 0x31 list to the visible
+                // PC container. Sub 3/5 belong to mix/trainer and are not shop.
+                if (subCode===3 || subCode===5) {
+                    console.info(`[MU] 0x31 mix container sub=${subCode} count=${count} — dedicated mix owner pending`);
+                    return;
+                }
+                if (this.serverStorage.open) {
+                    if (this.serverStorage.applySnapshot({items,count})) this._ui?.storageWin?.refresh?.();
+                    console.info(`[MU] 0x31 storage snapshot ${items.length}/${count}`);
+                    return;
+                }
+                if (this.serverNpcShop.open || this._ui?.npcShop?.visible) {
+                    if (this.serverNpcShop.applySnapshot({items,count})) this._ui?.npcShop?.refresh?.();
+                    console.info(`[MU] 0x31 NPC shop snapshot ${items.length}/${count}`);
+                    return;
+                }
+                console.info(`[MU] 0x31 snapshot sem container visível sub=${subCode} count=${count} — fail-closed`);
+            },
+            onBuy: ({index,item}) => {
+                this._ui?.npcShop?.setPending?.(false);
+                if (index===0xFE) { this._ui?.npcShop?.hide?.(); this.chatInfo('Compra recusada pelo servidor.'); return; }
+                if (index===0xFF) { this.chatInfo('Compra não concluída pelo servidor.'); return; }
+                if (index>=12 && index<76 && this.serverInventory.setItem(index,item,{source:'0x32'})) {
+                    this._syncInventoryCacheFromMirror(); this._ui?.inventoryWin?.refresh?.();
+                    console.info(`[MU] 0x32 buy success slot=${index}`);
+                } else console.warn(`[MU] 0x32 buy index fora do inventário pessoal: ${index}`);
+            },
+            onSell: ({flag,gold}) => {
+                const slot=this._npcShopPendingSellSlot; this._npcShopPendingSellSlot=null;
+                this._ui?.npcShop?.setPending?.(false);
+                if (flag!==0 && flag!==0xFE && flag!==0xFF && Number.isInteger(slot)) {
+                    this.serverInventory.clearItem(slot,{source:'0x33'});
+                    this.serverInventory.setZen(gold,{source:'0x33'});
+                    if(this.playerChar)this.playerChar.gold=gold>>>0;
+                    this._syncInventoryCacheFromMirror();
+                    console.info(`[MU] 0x33 sell success slot=${slot} zen=${gold}`);
+                } else {
+                    console.info(`[MU] 0x33 sell reject flag=0x${flag.toString(16)} slot=${slot ?? -1}`);
+                    if(flag===0xFE)this._ui?.npcShop?.hide?.();
+                }
+            },
+            onRepair: ({gold}) => {
+                this._ui?.npcShop?.setPending?.(false);
+                if(gold!==0){this.serverInventory.setZen(gold,{source:'0x34'});if(this.playerChar)this.playerChar.gold=gold>>>0;}
+                this._ui?.inventoryWin?.refresh?.();
+                console.info(`[MU] 0x34 repair result zen=${gold}`);
             },
             onStorageGold: (msg) => {
                 this.serverStorage.applyGold(msg);
@@ -956,6 +1059,12 @@ export class GameApp {
             // (data/SkillNames.js). ListType=0 substitui a lista inteira (WSclient
             // zera tudo antes no caso base); value=0xFF remove skill[Index];
             // 0xFE seta UM (bits dos 8 hotkeys — ignora, é máscara de slot).
+            // F3:20 ReceiveSummonLife exact PC global owner. The byte is
+            // server-authoritative and is retained even before UI/world consumers exist.
+            onSummonLife: ({ value }) => {
+                this._summonLife = value & 0xff;
+                console.info(`[MU] F3:20 SummonLife=${this._summonLife}`);
+            },
             onMagicList: ({ value, listType, entries }) => {
                 console.info(`[MU] F3:11 magicList real: ${entries.length} skills (listType=${listType}, value=${value})`);
                 this._serverSkillEntries = entries;
@@ -991,7 +1100,25 @@ export class GameApp {
             onCustomPreview: (msg) => {
                 const count = this.serverCustomPreview.applySnapshot(msg, this._heroServerKey);
                 this.playerViewport?.applyCustomPreviewState?.(this.serverCustomPreview);
-                console.info(`[MU] F3:72 custom preview: ${count}/${msg.count} retained, viewport=${msg.viewport ? 1 : 0}`);
+                // PC applies WingIndex after ChangeCharacterExt. If the hero is
+                // already published, queue the same transactional visual refresh
+                // used by F3:13 instead of waiting for another equipment packet.
+                const heroPreview = this.serverCustomPreview?.get?.(this._heroServerKey) || this.serverCustomPreview?.getByName?.(this.playerChar?.name);
+                if (Array.isArray(this._heroEquipCharset) && this._heroEquipCharset.length >= 18) {
+                    // Always re-key from the authoritative preview snapshot so a
+                    // WingIndex/PetIndex transition back to zero removes the old
+                    // custom owner instead of leaving it latched.
+                    this._syncWings?.();
+                }
+                // Character Scene receives the same post-ChangeCharacterExt wing
+                // override. Re-stage only when F3:72 changes; CharacterPreview's
+                // signature includes the preview wing so unaffected slots retain
+                // their already-resident renderer.
+                if (this.charPreview && (this.scenes?.currentName === 'char-select' || this._preparingCharSelect)) {
+                    this.charPreview.setChars(this._characterPreviewRows()).catch((err) =>
+                        console.warn(`[CharPreview] F3:72 refresh falhou: ${err?.message || err}`));
+                }
+                console.info(`[MU] F3:${(msg.opcode ?? 0x72).toString(16)} custom preview: ${count}/${msg.count} retained, viewport=${msg.viewport ? 1 : 0}`);
             },
             // 0x25 ReceiveChangePlayer: incremental visual update sent to
             // viewport observers after equip/unequip. The remote manager patches
@@ -1142,6 +1269,17 @@ export class GameApp {
                     const actor = this._findActorByServerKey?.(rec.key);
                     if (actor) { actor.serverPatent = rec.patent; actor.serverPatentType = rec.type; }
                 }
+            },
+            onPkChange: ({ key, pk }) => {
+                // WSclient.cpp::ReceivePK mutates exactly the actor already in
+                // CharactersClient; never create a viewport placeholder.
+                if (key === this._heroServerKey && this.playerChar) {
+                    this.playerChar.pk = pk;
+                } else {
+                    const rp = this.playerViewport?.getByServerKey?.(key);
+                    if (rp) { rp.pk = pk; if (rp.outer?.userData) rp.outer.userData.pk = pk; }
+                }
+                this.pkSystem?.setPkLevel?.(key, pk);
             },
             onDamageTaken: ({ damage, shieldDamage }) => {
                 this.hud?.damage?.(damage);
@@ -1377,7 +1515,7 @@ export class GameApp {
                 ? [hero.classByte, ...eq]
                 : (Array.isArray(this.playerChar.charset) && this.playerChar.charset.length >= 18
                     ? this.playerChar.charset : null);
-            this.scene.attachPlayerCharacter(this.playerChar.visualClassId ?? serverClassToClientClass(this.playerChar.classByte ?? 0), [tx, groundY, tz], { charset })
+            this.scene.attachPlayerCharacter(this.playerChar.visualClassId ?? serverClassToClientClass(this.playerChar.classByte ?? 0), [tx, groundY, tz], { charset, customPreview: this.serverCustomPreview?.get?.(hero.key) || this.serverCustomPreview?.getByName?.(hero.id) || null })
                 .then(async (published) => {
                     if (!published) return;
                     this.playerChar.mesh = this.scene.mainObject;
@@ -1583,7 +1721,7 @@ export class GameApp {
     // ---------------------------------------------------------------
     async _initAssets() {
         this._reportProgress(35, 'Conectando ao servidor de assets...');
-        RemoteAssets.configure(Config.ASSETS_URL);
+        RemoteAssets.configure(Config.ASSETS_URL, Config.ASSET_AUTHORITY || null);
         this._reportProgress(40, 'Verificando servidor de assets...');
         // R56.1: startup validates only the scene-critical owners. Visual/UI/item
         // resources are resolved by the asset server through original-PC source
@@ -1859,6 +1997,7 @@ export class GameApp {
             .map((c) => ({
                 name: c.name, classId: c.classId, slot: c.slot,
                 charset: c.charset, equipment: c.equipment,
+                customPreview: this.serverCustomPreview?.getByName?.(c.name) || null,
             }));
     }
 
@@ -2136,7 +2275,9 @@ export class GameApp {
     _startWorldPrefetch(serverMap, { allowLoading = false, priority = 'idle' } = {}) {
         const d=getPcWorldDescriptor(serverMap);
         if(!d)return;
-        const target=`${d.serverMap}:${d.assetWorld}`;
+        const target=JSON.stringify([RemoteAssets.baseUrl,MUAssets._bmdEpoch,d.assetWorld]);
+        const completed=this._worldPrefetchCompleted ??= new Set();
+        if(completed.has(target))return;
         const movePriority=priority==='move';
         const priorityRank=movePriority?2:1;
         if(this._worldPrefetchTarget===target && (this._worldPrefetchPriorityRank||0)>=priorityRank)return;
@@ -2151,15 +2292,27 @@ export class GameApp {
         setTimeout(()=>{
             if(ctrl.signal.aborted)return;
             const sceneName=this.scenes?.currentName;
-            if(sceneName!=='char-select' && sceneName!=='world' && !(allowLoading && sceneName==='loading'))return;
-            Promise.all([
+            if(sceneName!=='char-select' && sceneName!=='world' && !(allowLoading && sceneName==='loading')){
+                if(this._worldPrefetchAbort===ctrl)this._worldPrefetchTarget=null;
+                return;
+            }
+            this._worldPrefetchJob=Promise.all([
                 prefetchWorldTerrainCore(d.assetWorld,{signal:ctrl.signal}),
                 prefetchWorldTerrainObjects(d.assetWorld,{
                     concurrency:movePriority?3:1, signal:ctrl.signal, yieldBetween:true,
                     idleTimeout:movePriority?4:80, warmTextures:false,
                 }),
-            ]).then(([terrain,objects])=>console.info(`[PERF] prefetch[${movePriority?'move':'idle'}] map=${d.serverMap} ${d.name} -> World${d.assetWorld}: terrain=${terrain.warmed}/${terrain.total}, BMD=${objects.warmed}/${objects.total}${objects.aborted?' [ABORTED]':''}`))
-              .catch(()=>{});
+            ]).then(([terrain,objects])=>{
+                const current=JSON.stringify([RemoteAssets.baseUrl,MUAssets._bmdEpoch,d.assetWorld]);
+                if(!ctrl.signal.aborted && current===target && !terrain.aborted && !objects.aborted && terrain.warmed===terrain.total && terrain.total>0 && objects.warmed===objects.total && objects.total>0){
+                    completed.add(target);
+                    if(completed.size>16)completed.delete(completed.values().next().value);
+                }
+                console.info(`[PERF] prefetch[${movePriority?'move':'idle'}] map=${d.serverMap} ${d.name} -> World${d.assetWorld}: terrain=${terrain.warmed}/${terrain.total}, BMD=${objects.warmed}/${objects.total}${objects.aborted?' [ABORTED]':''}`);
+            }).catch(()=>{}).finally(()=>{
+                // Partial/aborted attempts are retryable; only complete owners memoize.
+                if(this._worldPrefetchAbort===ctrl)this._worldPrefetchTarget=null;
+            });
         },movePriority?0:80);
     }
 
@@ -2452,7 +2605,8 @@ export class GameApp {
         this._syncWings = () => {
             const cs = this.playerChar?.charset;
             if (!this.scene?.mainObject || !Array.isArray(cs) || cs.length < 18) return Promise.resolve(false);
-            const key = cs.join(',');
+            const preview = this.serverCustomPreview?.get?.(this._heroServerKey) || this.serverCustomPreview?.getByName?.(this.playerChar?.name) || null;
+            const key = `${cs.join(',')}|previewWing=${Number(preview?.wingIndex || 0)}|previewPet=${Number(preview?.petIndex || 0)}|previewSecondPet=${Number(preview?.secondPetIndex || 0)}|previewElement=${Number(preview?.element?.[0] || 0)}:${Number(preview?.element?.[1] || 0)}`;
             if (this._heroEquipKey === undefined) {
                 this._heroEquipKey = key;
                 this._heroEquipCharset = cs.slice();
@@ -2504,6 +2658,7 @@ export class GameApp {
                             // This avoids rebuilding Player.bmd for a simple inventory
                             // move and reuses unchanged linked renderers.
                             const fast = await this.scene.replacePlayerEquipmentAccessories?.(job.visualClassId, job.charset, {
+                                customPreview: this.serverCustomPreview?.get?.(this._heroServerKey) || this.serverCustomPreview?.getByName?.(this.playerChar?.name) || null,
                                 acceptPublish: () => job.generation === this._heroEquipVisualGeneration,
                             });
                             if (fast?.status === 'stale') continue;
@@ -2511,6 +2666,7 @@ export class GameApp {
                             if (!next) {
                                 next = await this.scene.replacePlayerCharacter(job.visualClassId, [pos.x, pos.y, pos.z], {
                                     charset: job.charset,
+                                    customPreview: this.serverCustomPreview?.get?.(this._heroServerKey) || this.serverCustomPreview?.getByName?.(this.playerChar?.name) || null,
                                     acceptPublish: () => job.generation === this._heroEquipVisualGeneration,
                                 });
                             }
@@ -2570,15 +2726,7 @@ export class GameApp {
                 this.scene.heights ? this.scene.terrainHeightAt(x, z) : 0);
             Movement.setWalkableFn((x, z) => this.scene?.isWalkable?.(x, z) !== false);
             Movement.setCollisionWorld(this.collisionWorld);
-            this._ctm?.detach?.();
-            this._ctm = ClickToMove.attach(this.scene.scene, this.scene.mainObject, this.scene.camera.threeCamera, {
-                terrain: this.scene.terrain,
-                domElement: this.scene.renderer?.domElement || window,
-                autoBind: false,
-                // O antigo RingGeometry verde era um placeholder Web sem owner
-                // PC comprovado. R79 deixa o click-position VFX fail-closed.
-                phantomDuration: 0,
-            });
+            this._attachClickMovement();
         } catch (e) { console.warn('[move]', e); }
 
         // QuickHotkeys (teclas de UI)
@@ -2733,12 +2881,13 @@ export class GameApp {
         this._ui?.inventoryWin?.destroy?.();
         this._ui?.charWindow?.destroy?.();
         this._ui?.storageWin?.destroy?.();
+        this._ui?.npcShop?.destroy?.();
         this._ui?.mailWin?.destroy?.();
         this._ui?.moveCustomWin?.destroy?.();
         this._moveCustomInputLocked = false;
         if (this._ui) {
             this._ui.inventoryWin = null; this._ui.charWindow = null;
-            this._ui.storageWin = null; this._ui.mailWin = null; this._ui.moveCustomWin = null;
+            this._ui.storageWin = null; this._ui.npcShop = null; this._ui.mailWin = null; this._ui.moveCustomWin = null;
         }
         this.hud = null;
         this.skillBar = null;
@@ -2960,6 +3109,36 @@ export class GameApp {
             }
         }
 
+        // CNewUINPCShop: state is exclusively 0x30/0x31/0x32/0x33/0x34.
+        if (uiBuildGeneration === this._gameUIBuildGeneration && uiBoard === this._gameUIViewport?.board) {
+            this._ui.npcShop = new NpcShop({
+                parent: uiBoard,
+                mirror: this.serverNpcShop,
+                serverInventory: this.serverInventory,
+                x: 0, y: 0,
+                onBuy: (slot) => {
+                    if (!this.muProtocol?.requestBuy || this._ui?.npcShop?.pending) return false;
+                    this._ui.npcShop.setPending(true);
+                    this.muProtocol.requestBuy(slot).catch((e)=>{this._ui?.npcShop?.setPending?.(false);console.warn('[NPCShop] 0x32 send falhou:',e?.message||e);});
+                    return true;
+                },
+                onSell: (slot) => {
+                    if (!this.muProtocol?.requestSell || this._ui?.npcShop?.pending || this._npcShopPendingSellSlot!=null) return false;
+                    this._npcShopPendingSellSlot=slot; this._ui.npcShop.setPending(true);
+                    this.muProtocol.requestSell(slot).catch((e)=>{this._npcShopPendingSellSlot=null;this._ui?.npcShop?.setPending?.(false);console.warn('[NPCShop] 0x33 send falhou:',e?.message||e);});
+                    return true;
+                },
+                onRepair: (slot,addGold=0) => {
+                    if (!this.muProtocol?.requestRepair || this._ui?.npcShop?.pending) return false;
+                    this._ui.npcShop.setPending(true);
+                    this.muProtocol.requestRepair(slot,addGold).catch((e)=>{this._ui?.npcShop?.setPending?.(false);console.warn('[NPCShop] 0x34 send falhou:',e?.message||e);});
+                    return true;
+                },
+                onClose: () => { this.serverNpcShop.endSession(); },
+            });
+            this._ui.npcShop.hide();
+        }
+
         // Mailbox/MailWindow localStorage simulation removed in R68. Main 5.2
         // mail may only return when its actual server packet/UI owner is ported.
         // No fake hotkey/window is registered in production.
@@ -3056,25 +3235,40 @@ export class GameApp {
 
     _installFpsControl() {
         if (this._fpsControl?.isConnected) { this._refreshFpsControl(); return; }
-        const root = this._gameUIViewport?.board || document.body;
+        const root = this.hud?.pcLayer;
+        if (!root) return;
         const box = document.createElement('div');
         box.dataset.muRole = 'fps-control';
-        box.style.cssText = 'position:absolute;right:8px;top:8px;z-index:80;display:flex;gap:4px;align-items:center;padding:3px 5px;background:rgba(0,0,0,.58);border:1px solid rgba(218,189,160,.55);font:10px Tahoma;color:#eee;user-select:none;';
-        const value = document.createElement('span');
+        const r = PC_MAINFRAME_FPS_RECT;
+        box.style.cssText = `position:absolute;left:${r.x}px;top:${r.y}px;width:${r.w}px;height:${r.h}px;z-index:605;font:10px Tahoma;color:white;user-select:none;pointer-events:auto;`;
+        const value = document.createElement('button');
+        value.type = 'button';
+        value.title = 'FPS — limite 30 / 60 / 120';
+        value.setAttribute('aria-expanded', 'false');
         value.dataset.muRole = 'fps-value';
-        value.style.cssText = 'min-width:48px;text-align:right;color:#8cff8c;';
+        value.style.cssText = 'display:block;width:100%;height:100%;padding:0;border:0;background:transparent;font:inherit;color:inherit;text-align:center;white-space:nowrap;cursor:pointer;';
         box.appendChild(value);
+        const menu = document.createElement('div');
+        menu.style.cssText = 'position:absolute;right:0;bottom:14px;display:none;gap:4px;padding:4px;background:rgba(0,0,0,.85);border:1px solid #6f604d;';
+        const setOpen = open => { menu.style.display = open ? 'flex' : 'none'; value.setAttribute('aria-expanded', String(open)); };
+        value.addEventListener('click', e => { e.stopPropagation(); setOpen(menu.style.display === 'none'); });
+        box.addEventListener('keydown', e => { if(e.key==='Escape'){setOpen(false);value.focus();e.stopPropagation();} });
+        box.addEventListener('focusout', e => { if(!box.contains(e.relatedTarget))setOpen(false); });
         for (const cap of [30,60,120]) {
             const b=document.createElement('button'); b.type='button'; b.textContent=String(cap);
             b.style.cssText='padding:1px 4px;border:1px solid #6f604d;background:#17130f;color:#e8d7b5;font:10px Tahoma;cursor:pointer;';
-            b.addEventListener('click',(e)=>{e.stopPropagation();this._setFrameLimit(cap);});
-            b.dataset.fpsCap=String(cap); box.appendChild(b);
+            b.addEventListener('click',(e)=>{e.stopPropagation();this._setFrameLimit(cap);setOpen(false);value.focus();});
+            b.dataset.fpsCap=String(cap); menu.appendChild(b);
         }
+        box.appendChild(menu);
         this._fpsControl = box; root.appendChild(box);
         this._refreshFpsControl = () => {
             if (!this._fpsControl?.isConnected) return;
             const v=this._fpsControl.querySelector('[data-mu-role="fps-value"]');
-            if (v) v.textContent=`FPS ${GameTimer.fps || 0}`;
+            const text = `FPS: ${Number(GameTimer.fps || 0).toFixed(1)}`;
+            if (v && v.textContent !== text) v.textContent=text;
+            const p=this.playerChar?.position;
+            if(p)this.hud?.setPosition(Math.floor((p.x+12800)/100),Math.floor((12800-p.z)/100));
             for (const b of this._fpsControl.querySelectorAll('button[data-fps-cap]')) {
                 const on=Number(b.dataset.fpsCap)===this._frameLimit;
                 b.style.opacity=on?'1':'.55'; b.style.outline=on?'1px solid #daba72':'none';
@@ -3128,6 +3322,17 @@ export class GameApp {
         };
     }
 
+    _attachClickMovement() {
+        this._ctm?.detach?.();
+        // _updateAuthoritativeMovement consumes playerChar.targetPos.
+        // mainObject is only a render group and cannot own this intent.
+        this._ctm=ClickToMove.attach(this.scene.scene,this.playerChar,this.scene.camera.threeCamera,{
+            terrain:this.scene.terrain,domElement:this.scene.renderer?.domElement||window,
+            autoBind:false,phantomDuration:0,
+        });
+        return this._ctm;
+    }
+
     _bindWorldInput() {
         // R79: um único owner para o mouse do mundo. A versão anterior tinha
         // dois listeners independentes: ClickToMove consumia mousedown e depois
@@ -3171,6 +3376,7 @@ export class GameApp {
                     e.preventDefault();
                     this.playerChar.targetPos = null;
                     if (actor.isNpc?.()) {
+                        this._lastTalkNpc = { key: actor.serverKey, typeId: actor.typeId };
                         if (!Number.isInteger(actor.serverKey) || !this.muProtocol?.requestTalk) {
                             console.info('[NPC] talk fail-closed: key/protocolo indisponível.');
                             return;
@@ -3210,6 +3416,57 @@ export class GameApp {
             }
         };
         window.addEventListener('mousedown', this._worldPointerDownHandler);
+
+        // PC RenderCursor owner. CursorTalk is a 2x2 animated atlas:
+        // Frame=(WorldTime*.01)%6 and exact quadrant sequence from ZzzInterface.
+        // Normal/Get/Attack use their authored full 24x24 bitmap. Mouse-down on
+        // empty terrain uses CursorPush, exactly the desktop default branch.
+        if (this._worldPointerMoveHandler) window.removeEventListener('mousemove', this._worldPointerMoveHandler);
+        if (this._worldPointerUpCursorHandler) window.removeEventListener('mouseup', this._worldPointerUpCursorHandler);
+        this._worldCursorOverlay?.remove?.();
+        const cursorOverlay=document.createElement('div');
+        cursorOverlay.dataset.muPcOwner='ZzzInterface::RenderCursor';
+        cursorOverlay.style.cssText='position:fixed;left:0;top:0;width:24px;height:24px;z-index:2147483000;pointer-events:none;display:none;background-repeat:no-repeat;image-rendering:auto;';
+        document.body.appendChild(cursorOverlay); this._worldCursorOverlay=cursorOverlay;
+        const cursorCache = this._worldCursorUrls || (this._worldCursorUrls = new Map());
+        const cursorPath={default:'Interface/Cursor.ozt',push:'Interface/CursorPush.ozt',talk:'Interface/CursorTalk.ozt',attack:'Interface/CursorAttack.ozt',get:'Interface/CursorGet.ozt'};
+        const cursorUrl=async(kind)=>{if(cursorCache.has(kind))return cursorCache.get(kind);const owner=await RemoteAssets.fetchDecodedImage(cursorPath[kind]||cursorPath.default).catch(()=>null);const rec=owner?.url?{url:owner.url,width:Number(owner.image?.width)||24,height:Number(owner.image?.height)||24}:null;cursorCache.set(kind,rec);return rec;};
+        for(const kind of Object.keys(cursorPath))void cursorUrl(kind);
+        const applyCursor=(kind,e)=>{
+            const rec=cursorCache.get(kind); const canvas=this.scene?.renderer?.domElement;
+            if(!canvas)return; canvas.style.cursor='none'; cursorOverlay.style.display='block';
+            cursorOverlay.style.left=`${e.clientX-2}px`;cursorOverlay.style.top=`${e.clientY-2}px`;
+            if(!rec){cursorOverlay.style.backgroundImage='none';return;}
+            cursorOverlay.style.backgroundImage=`url("${rec.url}")`;
+            if(kind==='talk'){
+                const frame=Math.floor(performance.now()*0.01)%6; const u=(frame===1||frame===3||frame===5)?1:0; const v=(frame===2||frame===3||frame===4)?1:0;
+                cursorOverlay.style.backgroundSize='48px 48px';cursorOverlay.style.backgroundPosition=`${-u*24}px ${-v*24}px`;
+            }else{cursorOverlay.style.backgroundSize='24px 24px';cursorOverlay.style.backgroundPosition='0 0';}
+            canvas.dataset.muCursorOwner=kind;
+        };
+        this._worldPointerMoveHandler=(e)=>{
+            const canvas=this.scene?.renderer?.domElement;
+            if(!canvas||!this.playerChar){if(this._worldCursorOverlay)this._worldCursorOverlay.style.display='none';return;}
+            // RenderCursor is a game-client owner, not a canvas owner. Keep the
+            // authored MU hand over inventory/UI DOM and hide the browser cursor
+            // for every element in the active game root. World-only cursor kinds
+            // (Talk/Attack/Get/Push) are selected only when the event targets the
+            // actual 3D canvas; UI falls back to the normal MU hand.
+            let node=e.target;let gameOwned=false;
+            while(node&&node!==document.body){if(node===canvas||node?.dataset?.muPcOwner||node?.closest?.('#mu-ui-root, #mu-overlay-root, .mu-window, [data-mu-ui]')){gameOwned=true;break;}node=node.parentElement;}
+            if(!gameOwned && e.target!==canvas){cursorOverlay.style.display='none';return;}
+            if(e.target?.style)e.target.style.cursor='none';
+            let kind='default';
+            if(e.target===canvas){
+                if(e.buttons&1) kind='push';
+                else { const groundKey=this.groundItemLayer?.pickFromPointer?.(e.clientX,e.clientY,this.playerChar.position,3.5*TERRAIN_CELL);
+                    if(Number.isInteger(groundKey))kind='get'; else {const actor=this.monsters?.pickFromPointer?.(e.clientX,e.clientY,this.scene.camera.threeCamera,canvas,this.playerChar.position,3.5*TERRAIN_CELL);if(actor?.serverDriven&&actor.isAlive?.())kind=actor.isNpc?.()?'talk':actor.isAttackable?.()?'attack':'default';}}
+            }
+            applyCursor(kind,e);
+        };
+        this._worldPointerUpCursorHandler=(e)=>this._worldPointerMoveHandler?.(e);
+        window.addEventListener('mousemove',this._worldPointerMoveHandler);
+        window.addEventListener('mouseup',this._worldPointerUpCursorHandler);
     }
 
     _pickSkillTargetFromPointer(clientX, clientY, canvas) {
@@ -3595,10 +3852,18 @@ export class GameApp {
      */
     _pcPlayerActionForSkill(wireType, actor) {
         const inFamily = (type, base) => Number.isInteger(type) && Number.isInteger(base) && type >= base && type <= base + 4;
-        if (wireType >= AT_SKILL.SWORD1 && wireType <= AT_SKILL.SWORD5) {
+        if (wireType >= AT_SKILL.SWORD1 && wireType <= AT_SKILL.SWORD4) {
             return PLAYER_ACTIONS.ATTACK_SKILL_SWORD1 + (wireType - AT_SKILL.SWORD1);
         }
+        if (wireType === AT_SKILL.SWORD5) {
+            // ReceiveMagic exact: even SwordCount -> SKILL_SWORD5, odd ->
+            // PLAYER_ATTACK_TWO_HAND_SWORD1+2, then SwordCount++.
+            const state=actor?.root?.userData || actor || {};
+            const count=Number(state.muPcSwordCount)||0; state.muPcSwordCount=count+1;
+            return (count % 2 === 0) ? PLAYER_ACTIONS.ATTACK_SKILL_SWORD5 : PLAYER_ACTIONS.ATTACK_TWO_HAND_SWORD3;
+        }
         if (wireType === AT_SKILL.SPEAR) return actor?.fenrir ? PLAYER_ACTIONS.FENRIR_ATTACK_SPEAR : PLAYER_ACTIONS.ATTACK_SKILL_SPEAR;
+        if (wireType === AT_SKILL.RIDER) return (this.scene?._terrainWorldNumber === 9 || this.scene?._terrainWorldNumber === 11) ? PLAYER_ACTIONS.SKILL_RIDER_FLY : PLAYER_ACTIONS.SKILL_RIDER;
         if (wireType === AT_SKILL.ONETOONE || inFamily(wireType, AT_SKILL.BLOW_UP)) return PLAYER_ACTIONS.ATTACK_ONETOONE;
         if (wireType === AT_SKILL.WHEEL
             || inFamily(wireType, AT_SKILL.TORNADO_SWORDA_UP)
@@ -3614,6 +3879,52 @@ export class GameApp {
         if (wireType === AT_SKILL.FLASH) return PLAYER_ACTIONS.SKILL_FLASH;
         if (wireType === AT_SKILL.LIGHTNING_SHOCK || inFamily(wireType, AT_SKILL.LIGHTNING_SHOCK_UP)) return PLAYER_ACTIONS.SKILL_LIGHTNING_SHOCK;
         if (wireType === AT_SKILL.RECOVER) return PLAYER_ACTIONS.RECOVER_SKILL;
+        // FIX47 — ReceiveMagic branches ported directly from WSclient.cpp.
+        if ([AT_SKILL.STRONG_PIER, AT_SKILL.LONGPIER_ATTACK, AT_SKILL.SPACE_SPLIT, AT_SKILL.DARK_SCREAM].includes(wireType)) {
+            return actor?.fenrir ? PLAYER_ACTIONS.FENRIR_ATTACK_DARKLORD_STRIKE : PLAYER_ACTIONS.ATTACK_STRIKE;
+        }
+        if (wireType === AT_SKILL.PARTY_TELEPORT) {
+            return actor?.fenrir ? PLAYER_ACTIONS.FENRIR_ATTACK_DARKLORD_TELEPORT : PLAYER_ACTIONS.ATTACK_TELEPORT;
+        }
+        if (wireType === AT_SKILL.ADD_CRITICAL || wireType === AT_SKILL.BRAND_OF_SKILL) return PLAYER_ACTIONS.SKILL_HAND1;
+        if (wireType === AT_SKILL.ONEFLASH) return PLAYER_ACTIONS.ATTACK_ONE_FLASH;
+        if ([AT_SKILL.STUN, AT_SKILL.INVISIBLE, AT_SKILL.MANA, AT_SKILL.REMOVAL_BUFF].includes(wireType)) return PLAYER_ACTIONS.SKILL_VITALITY;
+        if ([AT_SKILL.REMOVAL_STUN, AT_SKILL.REMOVAL_INVISIBLE].includes(wireType)) return PLAYER_ACTIONS.ATTACK_REMOVAL;
+        if (wireType === AT_SKILL.DARK_HORSE) return PLAYER_ACTIONS.ATTACK_DARKHORSE;
+        if (wireType === AT_SKILL.SWELL_OF_MAGICPOWER) return PLAYER_ACTIONS.SKILL_SWELL_OF_MP;
+
+        // FIX53 — Summoner/MG ReceiveMagic action ownership from WSclient.cpp.
+        // The PC switches only on stock Helper.Type MODEL_HELPER+2/+3/+37 for
+        // these Alice animations; unknown/custom helpers deliberately use the
+        // unmounted/default action instead of inventing an equivalence.
+        const eq = actor?.root?.userData?.muMovementContext?.equipment || actor?.equipment || null;
+        const helperAnimKind = actor?.fenrir || eq?.fenrir ? 'fenrir'
+            : eq?.rider?.species === 'unicon' ? 'uni'
+            : eq?.rider?.species === 'pegasus' ? 'dino' : 'default';
+        const aliceAction = (base, uni, dino, fenrir) => helperAnimKind === 'uni' ? uni
+            : helperAnimKind === 'dino' ? dino : helperAnimKind === 'fenrir' ? fenrir : base;
+        if (wireType === AT_SKILL.ALICE_LIGHTNINGORB) {
+            return aliceAction(PLAYER_ACTIONS.SKILL_LIGHTNING_ORB, PLAYER_ACTIONS.SKILL_LIGHTNING_ORB_UNI,
+                PLAYER_ACTIONS.SKILL_LIGHTNING_ORB_DINO, PLAYER_ACTIONS.SKILL_LIGHTNING_ORB_FENRIR);
+        }
+        if (wireType === AT_SKILL.ALICE_DRAINLIFE || inFamily(wireType, AT_SKILL.ALICE_DRAINLIFE_UP)) {
+            return aliceAction(PLAYER_ACTIONS.SKILL_DRAIN_LIFE, PLAYER_ACTIONS.SKILL_DRAIN_LIFE_UNI,
+                PLAYER_ACTIONS.SKILL_DRAIN_LIFE_DINO, PLAYER_ACTIONS.SKILL_DRAIN_LIFE_FENRIR);
+        }
+        if ([AT_SKILL.ALICE_SLEEP, AT_SKILL.ALICE_BLIND, AT_SKILL.ALICE_THORNS, AT_SKILL.ALICE_BERSERKER,
+             AT_SKILL.ALICE_WEAKNESS, AT_SKILL.ALICE_ENERVATION].includes(wireType)
+             || inFamily(wireType, AT_SKILL.ALICE_SLEEP_UP)) {
+            return aliceAction(PLAYER_ACTIONS.SKILL_SLEEP, PLAYER_ACTIONS.SKILL_SLEEP_UNI,
+                PLAYER_ACTIONS.SKILL_SLEEP_DINO, PLAYER_ACTIONS.SKILL_SLEEP_FENRIR);
+        }
+        if (wireType === AT_SKILL.FLAME_STRIKE) return PLAYER_ACTIONS.SKILL_FLAMESTRIKE;
+        if (wireType === AT_SKILL.GIGANTIC_STORM) return PLAYER_ACTIONS.SKILL_GIGANTICSTORM;
+        if (wireType === AT_SKILL.THUNDER_STRIKE) {
+            return helperAnimKind === 'fenrir' ? PLAYER_ACTIONS.FENRIR_ATTACK_DARKLORD_FLASH : PLAYER_ACTIONS.SKILL_FLASH;
+        }
+        if (wireType === AT_SKILL.ICE_BLADE || inFamily(wireType, AT_SKILL.POWER_SLASH_UP)) {
+            return PLAYER_ACTIONS.ATTACK_TWO_HAND_SWORD2;
+        }
 
         // WSclient.cpp ReceiveMagic -> SetPlayerMagic para a família básica
         // (THUNDER/FIREBALL/METEO/SLOW/ENERGYBALL/POWERWAVE/POISON/FLAME).
@@ -3696,6 +4007,23 @@ export class GameApp {
         // stages PC 1:1, o comportamento correto aqui é fail-closed, não mascarar
         // o gap com um efeito que apenas parece semelhante.
 
+        // Main 5.2 ReceiveMagic SWORD1..5 owns action+sound here; no separate
+        // CreateEffect/CreateParticle call exists in that switch. Their visual
+        // presentation is therefore animation-owned (action_60..64, with SWORD5
+        // odd casts using two-hand action_45) rather than a fabricated generic VFX.
+        if (wireType >= AT_SKILL.SWORD1 && wireType <= AT_SKILL.SWORD5) {
+            this.skillFx.playPcSwordReceiveSound?.(wireType);
+            return;
+        }
+        if (wireType === AT_SKILL.COMBO && this.skillFx.createComboEffect) {
+            this.skillFx.createComboEffect(from, { serverAuthoritative:true, success });
+            return;
+        }
+        if (wireType === AT_SKILL.RIDER) {
+            this.skillFx.createRiderAuthoring?.(from, { serverAuthoritative:true, success });
+            return;
+        }
+
         // Junction para o Pack A paralelo: quando o módulo PC-parity for
         // incorporado, estes métodos passam a ser chamados sem tocar no router.
         const inMasterFamily = (type, base) => Number.isInteger(type) && Number.isInteger(base) && type >= base && type <= base + 4;
@@ -3703,7 +4031,7 @@ export class GameApp {
             || inMasterFamily(wireType, AT_SKILL.TORNADO_SWORDA_UP)
             || inMasterFamily(wireType, AT_SKILL.TORNADO_SWORDB_UP))
             && this.skillFx.createTwistingSlashEffect) {
-            this.skillFx.createTwistingSlashEffect(from, facing, { target: to, ownerWeaponSpec: source.weaponRightSpec || null, serverAuthoritative: true, success });
+            this.skillFx.createTwistingSlashEffect(from, facing, { target: to, ownerPosition: source.position, ownerWeaponSpec: source.weaponRightSpec || null, serverAuthoritative: true, success });
             return;
         }
         if ((wireType === AT_SKILL.FURY_STRIKE || inMasterFamily(wireType, AT_SKILL.ANGER_SWORD_UP)) && this.skillFx.createFuryStrikeEffect) {
@@ -3910,7 +4238,11 @@ export class GameApp {
         };
         const r = split(right), l = split(left);
         let bowType = null;
-        if (l?.group === 4 && l.index !== 7) bowType = 'bow';
+        const leftCustom = customBowType(Number(left?.itemType));
+        const rightCustom = customBowType(Number(right?.itemType));
+        if (leftCustom === 'bow') bowType = 'bow';
+        else if (rightCustom === 'crossbow') bowType = 'crossbow';
+        else if (l?.group === 4 && l.index !== 7) bowType = 'bow';
         else if (r?.group === 4 && r.index >= 8 && r.index !== 15) bowType = 'crossbow';
         const arrowOk = bowType === 'crossbow'
             ? Boolean(l?.group === 4 && l.index === 7 && l.durability > 0)
@@ -4204,6 +4536,11 @@ export class GameApp {
         }
 
         this._lastMagicTick = now;
+        // Main 5.2 UseSkillWarrior/Wizard/Elf sets the caster action locally
+        // before SendRequestMagic/Continue; the Hero RX echo intentionally does
+        // not replay it. FIX43 restores that missing local presentation owner.
+        const localCaster = this._resolveServerActor(this._heroServerKey);
+        if (localCaster) this._playServerSkillAnimation(localCaster, wireType);
         if (request.kind === 'magic') {
             this.muProtocol.requestMagic(request.type, request.key)
                 .then(() => console.info(`[Skill] 0x19 ${request.owner} type=${request.type} key=${request.key} → GS`))
@@ -4249,8 +4586,8 @@ export class GameApp {
         // Dark Spirit: DL + STAFF:5 -> CSPetSystem MODEL_DARK_SPIRIT.
         const darkSpirit = this.scene._playerDarkSpirit;
         if (darkSpirit?.petModelPath && this.pets.summon) {
-            const pet = await this.pets.summon(this.playerChar, 'dark_raven');
-            if (announce && pet) this.chatInfo?.('Dark Spirit invocado (modelo real Skill/darkspirit.bmd).');
+            const pet = await this.pets.summon(this.playerChar, 'dark_raven', darkSpirit);
+            if (announce && pet) this.chatInfo?.(`Dark Spirit invocado (modelo real ${darkSpirit.petModelPath}).`);
         } else {
             this.pets.dismiss?.(this.playerChar);
         }
@@ -4258,8 +4595,9 @@ export class GameApp {
         // HELPER:0 companion voador. IMP continua bone-attached, portanto não
         // entra neste owner.
         if (this.scene._playerHelper && this.pets?.summonHelper) {
-            const helper = await this.pets.summonHelper(this.playerChar);
-            if (announce && helper) this.chatInfo?.('Helper companion invocado (modelo real Helper01).');
+            const helperInfo = this.scene._playerHelper;
+            const helper = await this.pets.summonHelper(this.playerChar, 1.0, helperInfo);
+            if (announce && helper) this.chatInfo?.(`Helper companion invocado (${helperInfo?.petModelPath || 'Player/Helper01.bmd'}).`);
         } else {
             this.pets.dismissHelper?.(this.playerChar);
         }
@@ -4268,17 +4606,28 @@ export class GameApp {
         // autoritativo decide qual spec existe; nenhuma preferência local.
         const rider = this.scene._playerRider;
         const fenrir = this.scene._playerFenrir;
+        const safeZone = this.scene.mainObject?.userData?.muMovementContext?.safeZone;
         if (rider?.petModelPath && this.pets?.summonMount) {
-            const mount = await this.pets.summonMount(this.playerChar, rider);
+            const mount = await this.pets.summonMount(this.playerChar, { ...rider, safeZone });
             if (announce && mount) this.chatInfo?.(`${rider.species} invocado (modelo real ${rider.petModelPath}).`);
         } else if (fenrir?.petModelPath && this.pets?.summonMount) {
-            const mount = await this.pets.summonMount(this.playerChar, fenrir);
+            const mount = await this.pets.summonMount(this.playerChar, { ...fenrir, safeZone });
             if (announce && mount) {
                 const opt = fenrir.option ?? 0;
                 this.chatInfo?.('Fenrir ' + (opt === 1 ? 'Black' : opt === 2 ? 'Blue' : opt === 4 ? 'Gold' : 'Red') + ' invocado (modelo real).');
             }
         } else {
             this.pets.dismissMount?.(this.playerChar);
+        }
+
+        // F3:72 Element[0]/Element[1] are independent PC pet lanes
+        // (gDarkSpirit/gElementPetFirst/gElementPetSecond). They are not the
+        // same owner as PetIndex/helper and therefore must survive alongside it.
+        const preview = this.serverCustomPreview?.get?.(this._heroServerKey) || this.serverCustomPreview?.getByName?.(this.playerChar?.name) || null;
+        if (preview && ((preview.element?.[0] || 0) > 0 || (preview.element?.[1] || 0) > 0)) {
+            await this.pets.syncPreviewElements?.(this.playerChar, preview);
+        } else {
+            this.pets.dismissPreviewElements?.(this.playerChar);
         }
         return true;
     }

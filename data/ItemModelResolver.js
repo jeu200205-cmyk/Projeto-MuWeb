@@ -18,6 +18,8 @@
 
 import { ITEM_MODEL_MAP } from './ItemModelMap.js';
 import { customItemModelForType } from './CustomItemModelMap.js';
+import { characterHelperRule } from './CharacterHelperLua.js';
+import { darkSpiritRule } from './DarkSpiritLua.js';
 import { resolvePcPlayerBodyModel } from './PcPlayerBodyModelMap.js';
 import { NO_EQUIPMENT_12BIT } from './CharacterEquipmentCodec.js';
 import { serverClassToClientClass, CLASS } from './CharacterClassMap.js';
@@ -88,7 +90,11 @@ export function resolveAccessoryModel(entry) {
     return {
       path: null,
       key: `FENRIR:${opt}`,
-      missing: `fenrir: lane PetSystem (marker; path em PlayerComposer.out.fenrir)`,
+      // A marker owned by PetSystem is a resolved visual owner, not a missing
+      // accessory. Reporting it in missing[] made the staged equipment
+      // transaction reject the complete graph before GameApp could summon the
+      // real Fenrir BMD.
+      missing: null,
       kind: 'fenrir',                       // contrato original (PlayerComposer L206)
       colorKind: FENRIR_KIND_BY_OPTION[opt], // cor discriminada (fenrir-red/black/blue/gold)
       option: opt,
@@ -98,9 +104,11 @@ export function resolveAccessoryModel(entry) {
   const key = `${fam}:${entry.offset}`;
   const itemType = (entry.family === 'helper' ? 13 : 12) * 512 + Number(entry.offset || 0);
   const custom = customItemModelForType(itemType);
-  const path = custom?.path || ITEM_MODEL_MAP[key] || null;
+  const helper = entry.family === 'helper' ? characterHelperRule(itemType) : null;
+  const darkSpirit = entry.family === 'helper' ? darkSpiritRule(itemType) : null;
+  const path = custom?.path || darkSpirit?.modelPath || helper?.modelPath || ITEM_MODEL_MAP[key] || null;
   return {
-    path, key, custom: custom || null, color: custom?.color || null,
+    path, key, custom: custom || null, helper: helper || null, darkSpirit: darkSpirit || null, color: custom?.color || null,
     effectType: custom?.effectType ?? 0,
     missing: path ? null : `sem-registro-PC/Lua:${key}`,
     kind: entry.kind || null, option: entry.option, itemType,

@@ -14,6 +14,7 @@
 export class ServerCustomPreviewMirror {
   constructor() {
     this.byKey = new Map();
+    this.byName = new Map();
     this.revision = 0;
     this.viewport = false;
     this._listeners = new Set();
@@ -33,6 +34,10 @@ export class ServerCustomPreviewMirror {
   }
 
   get(key) { return this.byKey.get((Number(key) || 0) & 0x7FFF) || null; }
+  getByName(name) {
+    const normalized = String(name || '').trim().toLowerCase();
+    return normalized ? (this.byName.get(normalized) || null) : null;
+  }
 
   applySnapshot({ viewport = false, records = [] } = {}, heroKey = null) {
     const normalizedHero = Number.isInteger(heroKey) ? (heroKey & 0x7FFF) : null;
@@ -53,6 +58,12 @@ export class ServerCustomPreviewMirror {
       }));
     }
     this.byKey = next;
+    const byName = new Map();
+    for (const record of next.values()) {
+      const normalized = String(record?.name || '').trim().toLowerCase();
+      if (normalized) byName.set(normalized, record);
+    }
+    this.byName = byName;
     this.viewport = !!viewport;
     this._emit({ type: 'snapshot', viewport: this.viewport, count: next.size });
     return next.size;
@@ -61,6 +72,7 @@ export class ServerCustomPreviewMirror {
   clear() {
     if (!this.byKey.size) return;
     this.byKey.clear();
+    this.byName.clear();
     this._emit({ type: 'clear' });
   }
 }

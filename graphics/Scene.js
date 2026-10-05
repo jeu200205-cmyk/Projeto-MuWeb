@@ -27,7 +27,7 @@ import { applyMuUpAxis, bmdToRenderData } from './BmdAdapter.js';
 import { MUModelRenderer } from '../assets/MUModelRenderer.js';
 import { MUAssets } from '../assets/MUAssetLoader.js';
 import { RemoteAssets } from '../data/RemoteAssets.js';
-import { TerrainObjectLayer } from '../world/TerrainObjectWorld.js';
+import { TerrainObjectLayer, prefetchWorldTerrainObjects } from '../world/TerrainObjectWorld.js';
 import { pcWorldActiveFromAssetWorld, pcInBloodCastle, pcInChaosCastle, pcInSwimLocomotionWorld } from '../game/PcMapContext.js';
 import { loadItemEffectsLuaConfig, resolveRuneAuraForEquipment } from '../data/ItemEffectsLuaConfig.js';
 import { PcRuneAura } from './PcRuneAura.js';
@@ -145,14 +145,55 @@ export class GameScene {
             return { target, geometry, material, scene, camera: new THREE.Camera() };
         } catch (e) {
             target?.dispose?.(); geometry?.dispose?.(); material?.dispose?.();
-            console.warn('[World FIX2] snapshot de transição indisponível:', e?.message || e);
-            return null;
+            // copyFramebufferToTexture can be unavailable/rejected on some
+            // browser/driver combinations even while the current WebGL canvas
+            // is valid. Leaving frozenFrame=null relies on preserveDrawingBuffer
+            // (disabled) and the compositor may expose black on the next frame.
+            // Copy the already presented pixels into a 2D canvas instead. This
+            // is still the exact previous real frame, not a loading placeholder.
+            const fallback = this._captureTransitionCanvasFrame();
+            console.warn(`[World FIX11] snapshot WebGL indisponível; fallback 2D ${fallback ? 'ativo' : 'falhou'}:`, e?.message || e);
+            return fallback;
         } finally {
             renderer.setRenderTarget(savedTarget);
             renderer.setViewport(savedViewport);
             renderer.setScissor(savedScissor);
             renderer.setScissorTest(savedScissorTest);
             renderer.autoClear = savedAutoClear;
+        }
+    }
+
+    _captureTransitionCanvasFrame() {
+        const renderer = this.renderer;
+        const source = renderer?.domElement;
+        if (!source) return null;
+        let texture, material, geometry;
+        try {
+            const size = renderer.getDrawingBufferSize(new THREE.Vector2());
+            const canvas = document.createElement('canvas');
+            canvas.width = Math.max(1, Math.round(size.x));
+            canvas.height = Math.max(1, Math.round(size.y));
+            const context = canvas.getContext('2d', { alpha: false });
+            if (!context) return null;
+            context.drawImage(source, 0, 0, canvas.width, canvas.height);
+            texture = new THREE.CanvasTexture(canvas);
+            texture.colorSpace = THREE.NoColorSpace;
+            texture.minFilter = texture.magFilter = THREE.NearestFilter;
+            texture.generateMipmaps = false;
+            geometry = new THREE.PlaneGeometry(2, 2);
+            material = new THREE.ShaderMaterial({
+                uniforms: { map: { value: texture } },
+                vertexShader: 'varying vec2 vUv; void main(){vUv=uv;gl_Position=vec4(position.xy,0.0,1.0);}',
+                fragmentShader: 'uniform sampler2D map; varying vec2 vUv; void main(){gl_FragColor=texture2D(map,vUv);}',
+                depthTest: false, depthWrite: false, toneMapped: false,
+            });
+            const scene = new THREE.Scene();
+            scene.add(new THREE.Mesh(geometry, material));
+            return { target: texture, geometry, material, scene, camera: new THREE.Camera(), mode: 'canvas2d' };
+        } catch (e) {
+            texture?.dispose?.(); geometry?.dispose?.(); material?.dispose?.();
+            console.warn('[World FIX11] fallback 2D de transição indisponível:', e?.message || e);
+            return null;
         }
     }
 
@@ -168,7 +209,7 @@ export class GameScene {
         const t = this._realMapTransition;
         if (!t) return false;
         if (commit) {
-            if (this.terrain) this.terrain.visible = true;
+            if (this.terrain) this.terrain.visible = (this._terrainWorldNumber !== 11);
             if (this.worldObjectLayer?.root) this.worldObjectLayer.root.visible = true;
             if (this.mainObject) this.mainObject.visible = (this.cameraMode === 'game');
         } else {
@@ -371,6 +412,8 @@ export class GameScene {
                 const objects = await stagedLayer.load(75, {
                     cooperative: true,
                     idleMs: 16,
+                    sliceMs: 12,
+                    shouldContinue: () => epoch === this._charWorldEpoch && this.cameraMode === 'char',
                     staged: true,
                     terrainLightMesh: built.mesh,
                 });
@@ -500,7 +543,7 @@ export class GameScene {
         let heroAttach = null;
         if (Array.isArray(opts.charset) && opts.charset.length >= 18) {
             try {
-                heroAttach = await buildEquipmentAttach(opts.charset, { fetchBinary: (p) => RemoteAssets.fetchBinary(p) }, renderDataBase.bones, renderDataBase.bones.length);
+                heroAttach = await buildEquipmentAttach(opts.charset, { fetchBinary: (p) => RemoteAssets.fetchBinary(p) }, renderDataBase.bones, renderDataBase.bones.length, { customPreview: opts.customPreview || null });
                 renderData = mergeEquipmentBodyRenderData(renderDataBase, heroAttach);
                 if (heroAttach.weaponRenderMode !== 'render-link-object' && heroAttach.meshes.length) {
                     renderData = {
@@ -653,7 +696,7 @@ export class GameScene {
             darkSpirit: heroAttach?.darkSpirit || null,
             fenrir: heroAttach?.fenrir || null,
             rider: heroAttach?.rider || null,
-            helper: heroAttach?.helperKind === 'helper' ? { kind: 'helper' } : null,
+            helper: heroAttach?.customHelper || (heroAttach?.helperKind === 'helper' ? { kind: 'helper', petModelPath: 'Player/Helper01.bmd', owner: 'stock-PC' } : null),
             runeAura: null,
             t: 0,
         };
@@ -828,6 +871,7 @@ export class GameScene {
             { fetchBinary: (p) => RemoteAssets.fetchBinary(p) },
             renderer.bones,
             renderer.bones?.length || 0,
+            { customPreview: opts.customPreview || null },
         );
         if (!accepts()) return { status:'stale' };
         if (nextAttach.missing.length || nextAttach.bodyMissing.length || bodySig(currentAttach) !== bodySig(nextAttach)) return { status:'requires-full', attach:nextAttach };
@@ -875,10 +919,16 @@ export class GameScene {
         };
 
         try {
-            await retainOrBuildAccessory(nextAttach.wing, currentAttach.wing, 'wing');
-            await retainOrBuildAccessory(nextAttach.helper, currentAttach.helper, 'helper');
-            await retainOrBuildWeapon(nextAttach.weaponRightSpec, currentAttach.weaponRightSpec);
-            await retainOrBuildWeapon(nextAttach.weaponLeftSpec, currentAttach.weaponLeftSpec);
+            // FIX50: these four linked owners are independent. Building them
+            // serially turned one equipment packet into 150–400ms of main-thread
+            // waiting. Start all unchanged/changed owner fetch+parse jobs together;
+            // publication remains atomic below, so no partial equipment leaks.
+            await Promise.all([
+                retainOrBuildAccessory(nextAttach.wing, currentAttach.wing, 'wing'),
+                retainOrBuildAccessory(nextAttach.helper, currentAttach.helper, 'helper'),
+                retainOrBuildWeapon(nextAttach.weaponRightSpec, currentAttach.weaponRightSpec),
+                retainOrBuildWeapon(nextAttach.weaponLeftSpec, currentAttach.weaponLeftSpec),
+            ]);
 
             const itemFx = await loadItemEffectsLuaConfig((path) => RemoteAssets.fetchBinary(path)).catch(() => null);
             const runeInfo = itemFx ? resolveRuneAuraForEquipment(nextAttach, itemFx) : null;
@@ -929,7 +979,7 @@ export class GameScene {
             this._playerDarkSpirit = nextAttach.darkSpirit || null;
             this._playerFenrir = nextAttach.fenrir || null;
             this._playerRider = nextAttach.rider || null;
-            this._playerHelper = nextAttach.helperKind === 'helper' ? {kind:'helper'} : null;
+            this._playerHelper = nextAttach.customHelper || (nextAttach.helperKind === 'helper' ? {kind:'helper',petModelPath:'Player/Helper01.bmd',owner:'stock-PC'} : null);
             outer.userData.muEquipmentDiagnostics = {
                 missing:[...(nextAttach.missing || [])], bodyMissing:[...(nextAttach.bodyMissing || [])],
             };
@@ -1000,9 +1050,30 @@ export class GameScene {
         let builtCommitted = false;
         let stagedLayer = null;
         const atomic = options?.atomic === true;
+        const objectWarmupController = new AbortController();
         try {
+            const assertContinue = () => {
+                if (typeof options?.acceptContinue === 'function' && options.acceptContinue() !== true) {
+                    const error = new Error(`World${worldNumber} terrain stage superseded`);
+                    error.code = 'MUWEB_STALE_WORLD_LOAD';
+                    throw error;
+                }
+            };
+            assertContinue();
             this._reportWorldStatus?.(`Carregando World${worldNumber} real (OZB alturas + tiles decrypt)...`);
+            // FIX27: terrain and BMD reads are independent. Start BMD I/O now,
+            // instead of waiting for all tiles/grass/terrain geometry. The
+            // existing MUAssets inflight cache coalesces the real layer load.
+            // Do not decode extra textures or construct a second object graph.
+            const warmup = prefetchWorldTerrainObjects(worldNumber, {
+                concurrency: 4, signal: objectWarmupController.signal,
+                yieldBetween: false, warmTextures: false,
+            }).catch(() => null);
             built = await buildWorldTerrain(worldNumber);
+            // Warmup is optional and never delays publication. Its rejection
+            // is handled above; the authoritative layer still reports failures.
+            void warmup;
+            assertContinue();
             const worldState = built;
             _phase('terrain(OZB+att+tiles)');
 
@@ -1118,6 +1189,8 @@ export class GameScene {
             }
             this._reportWorldStatus?.(`Mapa real indisponível: ${e.message} (sem fallback procedural — política 0 simulação)`);
             return false;
+        } finally {
+            objectWarmupController.abort();
         }
     }
 
@@ -1204,8 +1277,13 @@ export class GameScene {
         if (this.terrain && this.terrain !== built?.mesh) this._disposeTerrainMesh(this.terrain);
         this.scene.add(built.mesh);
         this.terrain = built.mesh;
-        if (this._realMapTransition) this.terrain.visible = false;
+        this.terrainMapping = built.mapping || null;
         this._terrainWorldNumber = Number.isInteger(worldNumber) ? worldNumber : null;
+        // Main 5.2 Winmain skips RenderTerrain(false) in WD_10HEAVEN. Keep
+        // Terrain11 height/wall/light data resident for physics/weather, but do
+        // not draw the normal ground mesh beneath the authored Icarus sky.
+        this.terrain.visible = !this._realMapTransition && this._terrainWorldNumber !== 11;
+        if (this._terrainWorldNumber === 11) this.terrain.userData.muPcTerrainMeshSuppressed = 'WD_10HEAVEN:no-RenderTerrain';
         if (built.heights) this.heights = built.heights;
         if (built.walls) this.walls = built.walls;
         // personagem de demo não aparece nas cenas cinematográficas
@@ -1310,8 +1388,13 @@ export class GameScene {
             // EVERY CHARACTER_SCENE frame immediately before BuildMVP.
             applyMuCamera(this.camera.threeCamera, CHAR_CAMERA);
         } else if (this.cameraMode === 'login') {
-            // World95 camera is installed on scene entry.
+            // Widescreen.cpp::SceneLogin reapplies this owner before every login draw.
+            applyMuCamera(this.camera.threeCamera,LOGIN_CAMERA);
         } else if (this.cameraMode === 'game') {
+            const p=this.mainObject?.position;
+            const xi=p?(Math.floor((p.x+12800)/100)&255):0;
+            const yi=p?(Math.floor((12800-p.z)/100)&255):0;
+            this.camera.updateTerrainFlags?.(this.walls?.[yi*256+xi]||0,dt);
             this.camera.processInput();
             // Position must be authoritative before terrain-light prepass and
             // BodyLight sampling, but renderer animation is advanced after the

@@ -1,16 +1,9 @@
 {
-  "name": "muweb-main52-web-base",
-  "private": false,
+  "name": "mu-web-port",
+  "private": true,
   "type": "module",
   "dependencies": {
     "three": "^0.160.0",
     "ws": "^8.21.3"
-  },
-  "description": "Experimental MU Online Main 5.2 to Web engine base. Early-stage and incomplete.",
-  "scripts": {
-    "serve": "node tools/dev-web-server.cjs 8080",
-    "gateway": "node gateway-server.cjs",
-    "assets": "node tools/asset-server.cjs",
-    "check": "node --check gateway-server.cjs"
   }
 }

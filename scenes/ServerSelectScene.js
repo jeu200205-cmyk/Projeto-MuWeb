@@ -38,6 +38,7 @@
 
 import { ServerListData } from '../data/ServerListData.js';
 import { MUSprites } from '../ui/MUSprites.js';
+import { RemoteAssets } from '../data/RemoteAssets.js';
 import { attachMuVirtualBoard } from '../ui/MUVirtualViewport.js';
 
 // ---- Geometria do contrato C++ (ServerSelWin.cpp/.h) ----
@@ -89,7 +90,12 @@ const BTN_TEXT = [
 const GB_TEXT = [C.brGray, C.brGray, C.white, null];
 
 // Cache de módulo (cena recriada a cada switch — assets/estado preservados)
-const cache = { loaded: false, loading: null, frames: null };
+let cache;
+function sceneAssetCache() {
+  const authority = String(RemoteAssets.baseUrl || '');
+  if (!cache || cache.authority !== authority) cache = {authority, loaded:false, loading:null, frames:null};
+  return cache;
+}
 
 export default class ServerSelectScene {
   constructor() {
@@ -183,8 +189,9 @@ export default class ServerSelectScene {
   // Assets reais (uma vez por sessão)
   // ------------------------------------------------------------------
   async _loadAssets() {
+    const cache = sceneAssetCache();
     if (cache.loaded) { this._applyFrames(); return this._ownersReady(); }
-    if (cache.loading) { await cache.loading; this._applyFrames(); return this._ownersReady(); }
+    if (cache.loading) { await cache.loading; if (sceneAssetCache() !== cache) return false; this._applyFrames(); return this._ownersReady(); }
     cache.loading = (async () => {
     try {
       // Junta o preload global para que os strips canônicos já estejam prontos.
@@ -210,6 +217,7 @@ export default class ServerSelectScene {
       const ex01slices = ex01 ? await MUSprites.slice(ex01, [
         { x: 0, y: 0, w: 512, h: 6 }, { x: 0, y: 6, w: 512, h: 6 },
       ]) : [];
+      if (sceneAssetCache() !== cache) return;
       cache.frames = {
         group: groupFrames, server: serverFrames, gauge: gauge?.url || null,
         deco0: decoSlices[0], deco1: decoSlices[1],
@@ -223,18 +231,21 @@ export default class ServerSelectScene {
     }
     })();
     try { await cache.loading; } finally { cache.loading = null; }
+    if (sceneAssetCache() !== cache) return false;
     this._applyFrames();
     return this._ownersReady();
   }
 
   _ownersReady() {
+    const cache = sceneAssetCache();
     const f = cache.frames;
-    return Boolean(f && f.group?.[0] && f.server?.[0] && f.gauge &&
-      f.deco0 && f.deco1 && f.arrow0 && f.arrow1 && f.regBtn?.[0] &&
+    return Boolean(f && f.group?.length === 4 && f.group.every(Boolean) && f.server?.length === 3 && f.server.every(Boolean) && f.gauge &&
+      f.deco0 && f.deco1 && f.arrow0 && f.arrow1 && f.regBtn?.length === 3 && f.regBtn.every(Boolean) &&
       f.ex03 && f.ex01top && f.ex01bot && f.ex02);
   }
 
   _applyFrames() {
+    const cache = sceneAssetCache();
     if (!cache.frames || !this.winEl) return;
     const f = cache.frames;
     const set = (sel, url, rep) => {
@@ -301,6 +312,7 @@ export default class ServerSelectScene {
   // UpdateDisplay — grupos/servidores/gauges/setas/deco
   // ------------------------------------------------------------------
   _render(assetsOnly = false) {
+    const cache = sceneAssetCache();
     if (!this.winEl) return;
     for (const { el } of this._groupEls) el.remove();
     for (const { el } of this._serverEls) el.remove();

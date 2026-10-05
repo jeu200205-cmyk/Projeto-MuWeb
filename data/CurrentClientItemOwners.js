@@ -195,20 +195,28 @@ export async function loadCurrentClientItemOwners(fetchBinary=(p)=>RemoteAssets.
   if(_meta.loaded)return _meta;
   if(_inflight)return _inflight;
   _inflight=(async()=>{
-    const [li,cw,cc]=await Promise.all([
+    // FIX41 recovery: each desktop Lua owner is independent. A malformed or
+    // absent CharacterCreateCape.lua must never suppress valid LoadItens.lua or
+    // CustomWings.lua tables. Publish the union of every owner that validated.
+    const [liResult,cwResult,ccResult]=await Promise.allSettled([
       loadFirst(LOAD_ITENS_PATHS,parseLoadItensLua,fetchBinary),
       loadFirst(CUSTOM_WINGS_PATHS,parseCustomWingsLua,fetchBinary),
       loadFirst(CUSTOM_CAPE_PATHS,parseCharacterCreateCapeLua,fetchBinary),
     ]);
+    const ownerValue=(r)=>r.status==='fulfilled'?r.value:{path:null,value:new Map()};
+    const li=ownerValue(liResult), cw=ownerValue(cwResult), cc=ownerValue(ccResult);
+    for (const [name,result] of [['LoadItens',liResult],['CustomWings',cwResult],['CharacterCreateCape',ccResult]]) {
+      if (result.status==='rejected') console.warn(`[CurrentClientItemOwners] ${name} indisponível; owner isolado: ${result.reason?.message||result.reason}`);
+    }
     const next=new Map(li.value);
     for(const [type,wing] of cw.value) {
       const cape=cc.value.get(type)||null;
       next.set(type,Object.freeze({...wing,cape}));
     }
-    // Atomic publish: no half-loaded owner table can leak into render paths.
+    // Atomic publish of the validated union: no partially-mutated table leaks.
     _registry=next;
-    _meta=Object.freeze({loaded:true,count:next.size,loadItens:li.value.size,wings:cw.value.size,capes:cc.value.size,paths:Object.freeze({loadItens:li.path,wings:cw.path,capes:cc.path})});
-    console.info(`[CurrentClientItemOwners] real owners loaded: LoadItens=${li.value.size} CustomWings=${cw.value.size} CapePos=${cc.value.size} total=${next.size}`);
+    _meta=Object.freeze({loaded:true,count:next.size,loadItens:li.value.size,wings:cw.value.size,capes:cc.value.size,paths:Object.freeze({loadItens:li.path,wings:cw.path,capes:cc.path}),errors:Object.freeze({loadItens:liResult.status==='rejected',wings:cwResult.status==='rejected',capes:ccResult.status==='rejected'})});
+    console.info(`[CurrentClientItemOwners] real owners loaded independently: LoadItens=${li.value.size} CustomWings=${cw.value.size} CapePos=${cc.value.size} total=${next.size}`);
     return _meta;
   })().finally(()=>{_inflight=null;});
   return _inflight;

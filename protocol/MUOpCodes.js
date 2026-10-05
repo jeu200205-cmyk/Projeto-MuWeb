@@ -280,7 +280,7 @@ export const F3_SUBCODE = {
   MASTER_LEVEL_UP: 0x51,   // Master level up
   MASTER_GET_SKILL: 0x52,  // Master get skill
   ADD_POINTS: 0xE0,        // Add points (batch)
-  CUSTOM_PREVIEW_LIST: 0x70, // Custom preview char list
+  CUSTOM_PREVIEW_LIST: 0x70, // Custom preview/name helper; shape-discriminated in router
   CUSTOM_PREVIEW_SET: 0x72,  // Custom preview char set
   PATENTE: 0xE9,           // Patente/ranking
 };

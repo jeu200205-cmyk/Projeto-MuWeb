@@ -1,182 +1,90 @@
-// ui2/NpcShop.js — janela de loja de NPC com abas Comprar/Vender.
-//
-// Contrato de ShopItem: { id, name, type?, icon, level?, price /* zen */, stock? }
-// Reutiliza o contrato de Inventory (../data/Inventory.js): addItem, removeItem, grid, zen,
-// addZen(n) / spendZen(n) -> bool.
+// ui2/NpcShop.js — CNewUINPCShop Web presentation, GameServer-authoritative.
+// FIX42 removes the old local Inventory/Zen simulation. Every mutation is a
+// request (0x32/0x33/0x34) and is committed only by the server RX owner.
 
 import { MUWindow } from './MUWindow.js';
-import { Inventory } from '../data/Inventory.js';
+import { renderIcon3D } from './ItemIconRenderer.js';
 
 export class NpcShop extends MUWindow {
-    /**
-     * @param {object} opts
-     * @param {string}  [opts.npcName]
-     * @param {ShopItem[]} [opts.stock]
-     * @param {Inventory} [opts.inventory] - inventário do jogador (zen + itens para vender)
-     * @param {number} [opts.sellRate]  - fração do preço ao vender (default 0.3)
-     * @param {Function} [opts.getTooltip] - (item) => string HTML (opcional)
-     */
     constructor(opts = {}) {
-        super({
-            title: opts.npcName || 'Loja',
-            width: 320,
-            x: opts.x !== undefined ? opts.x : 200,
-            y: opts.y !== undefined ? opts.y : 100,
-            parent: opts.parent || document.body,
-        });
-        this.stock = opts.stock || [];
-        this.inventory = opts.inventory || new Inventory();
-        this.sellRate = opts.sellRate !== undefined ? opts.sellRate : 0.3;
-        this.getTooltip = opts.getTooltip || null;
+        super({ title: opts.npcName || 'Loja', width: 190, x: opts.x ?? 0, y: opts.y ?? 0,
+            parent: opts.parent || document.body, onClose: opts.onClose || null });
+        this.mirror = opts.mirror || null;
+        this.serverInventory = opts.serverInventory || null;
+        this.onBuy = typeof opts.onBuy === 'function' ? opts.onBuy : null;
+        this.onSell = typeof opts.onSell === 'function' ? opts.onSell : null;
+        this.onRepair = typeof opts.onRepair === 'function' ? opts.onRepair : null;
+        this.repairShop = false;
         this.tab = 'buy';
+        this.pending = false;
+        this.element.dataset.muPcOwner = 'CNewUINPCShop';
+        this.body.style.padding = '5px';
 
-        // Abas
         const tabs = document.createElement('div');
-        tabs.style.cssText = 'display:flex;gap:6px;margin-bottom:6px;';
-        this.tabBuy = document.createElement('div');
-        this.tabSell = document.createElement('div');
-        for (const [el, id, txt] of [[this.tabBuy, 'buy', 'Comprar'], [this.tabSell, 'sell', 'Vender']]) {
-            el.className = 'mu-btn';
-            el.textContent = txt;
-            el.style.flex = '1';
-            el.addEventListener('click', () => { this.tab = id; this.refresh(); });
-            tabs.appendChild(el);
-        }
+        tabs.style.cssText = 'display:flex;gap:2px;margin-bottom:4px;';
+        this.tabBuy = this._tab(tabs, 'buy', 'Comprar');
+        this.tabSell = this._tab(tabs, 'sell', 'Vender');
+        this.tabRepair = this._tab(tabs, 'repair', 'Reparar');
+        this.tabRepair.style.display='none';
         this.body.appendChild(tabs);
 
-        this.zenEl = document.createElement('div');
-        this.zenEl.style.cssText = 'color:#ffd24b;font-weight:bold;margin-bottom:4px;font-size:11px;';
+        this.zenEl=document.createElement('div');
+        this.zenEl.style.cssText='height:18px;color:#ffd24b;font:10px Tahoma;text-align:right;padding-right:3px;';
         this.body.appendChild(this.zenEl);
-
-        this.listEl = document.createElement('div');
-        this.listEl.className = 'mu-scrollbar';
-        this.listEl.style.cssText = 'max-height:280px;overflow-y:auto;display:grid;grid-template-columns:repeat(5,44px);gap:4px;padding:2px;';
+        this.listEl=document.createElement('div');
+        this.listEl.style.cssText='height:300px;overflow-y:auto;display:grid;grid-template-columns:repeat(8,20px);grid-auto-rows:20px;gap:1px;padding:2px;background:rgba(0,0,0,.30);';
         this.body.appendChild(this.listEl);
+        this.repairAll=document.createElement('button');
+        this.repairAll.type='button'; this.repairAll.textContent='Reparar tudo';
+        this.repairAll.className='mu-btn'; this.repairAll.style.cssText='display:none;width:100%;margin:4px 0 0;';
+        this.repairAll.addEventListener('click',()=>{ if(!this.pending && this.onRepair) this.onRepair(255,0); });
+        this.body.appendChild(this.repairAll);
 
-        // Tooltip
-        this.tooltip = document.createElement('div');
-        this.tooltip.style.cssText = `
-            position: fixed; pointer-events: none; z-index: 9999; display: none;
-            background: rgba(8,8,14,0.95); border: 1px solid #8a6d2f; border-radius: 4px;
-            padding: 8px 10px; color: #e8dcc0; font-size: 11px; max-width: 220px;
-        `;
-        document.body.appendChild(this.tooltip);
-
+        this._mirrorOff=this.mirror?.onChange?.(()=>this.refresh()) || null;
+        this._invOff=this.serverInventory?.onChange?.(()=>this.refresh()) || null;
         this.refresh();
     }
-
-    _tile(item, mode) {
-        const cell = document.createElement('div');
-        cell.style.cssText = `
-            width:44px;height:44px;position:relative;cursor:pointer;
-            background:rgba(30,24,14,0.9);border:1px solid #4a3d22;border-radius:3px;
-            display:flex;align-items:center;justify-content:center;font-size:22px;
-        `;
-        const icon = document.createElement('span');
-        icon.textContent = item.icon || '❔';
-        cell.appendChild(icon);
-
-        const price = document.createElement('div');
-        const val = mode === 'buy' ? (item.price || 0) : Math.floor((item.price || 0) * this.sellRate);
-        price.textContent = this._fmtZen(val);
-        price.style.cssText = 'position:absolute;bottom:0;left:0;right:0;text-align:center;font-size:8px;color:#ffd24b;background:rgba(0,0,0,0.6);';
-        cell.appendChild(price);
-
-        cell.addEventListener('mouseenter', (e) => {
-            cell.style.borderColor = '#f0d98c';
-            const tip = this.getTooltip ? this.getTooltip(item)
-                : `<b style="color:#9ecbff">${item.icon || ''} ${item.name}${item.level ? ' +' + item.level : ''}</b>` +
-                  `<br><span style="color:#ffd24b">${val.toLocaleString()} Zen</span>` +
-                  (mode === 'sell' ? '<br><span style="color:#aaa">Preço de venda</span>' : '');
-            this.tooltip.innerHTML = tip;
-            this.tooltip.style.display = 'block';
-            this.tooltip.style.left = `${Math.min(e.clientX + 12, window.innerWidth - 240)}px`;
-            this.tooltip.style.top = `${e.clientY + 12}px`;
-        });
-        cell.addEventListener('mouseleave', () => {
-            cell.style.borderColor = '#4a3d22';
-            this.tooltip.style.display = 'none';
-        });
-        cell.addEventListener('mouseenter', () => cell.style.borderColor = '#f0d98c');
-        cell.addEventListener('click', () => {
-            if (mode === 'buy') this.buy(item);
-            else this.sell(item);
+    _tab(parent,id,text){ const b=document.createElement('button'); b.type='button'; b.className='mu-btn'; b.textContent=text; b.style.cssText='flex:1;margin:0;padding:3px 2px;'; b.addEventListener('click',()=>{this.tab=id;this.refresh();}); parent.appendChild(b); return b; }
+    setRepairShop(on){ this.repairShop=!!on; this.tabRepair.style.display=this.repairShop?'':'none'; if(!this.repairShop&&this.tab==='repair')this.tab='buy'; this.refresh(); }
+    setPending(on){ this.pending=!!on; this.refresh(); }
+    _itemIO(){ if(!this._ioPromise)this._ioPromise=Promise.all([import('../assets/MUAssetLoader.js'),import('../data/RemoteAssets.js')]).then(([a,d])=>({loadBMD:p=>a.MUAssets.loadBMD(p),fetchBinary:p=>d.RemoteAssets.fetchBinary(p)})).catch(()=>null); return this._ioPromise; }
+    _icon(item){
+        const host=document.createElement('span'); host.style.cssText='position:absolute;inset:0;display:flex;align-items:center;justify-content:center;overflow:visible;pointer-events:none;';
+        const t=Number(item?.itemType ?? item?.type); if(!Number.isInteger(t))return host;
+        void this._itemIO().then(io=>io&&renderIcon3D(io,t,Number.isInteger(item.rawLevel)?item.rawLevel:((item.level||0)<<3),{w:20,h:20},{...item,iconPadding:28})).then(cv=>{if(!cv||!host.isConnected)return;const pad=Number(cv.dataset.muIconPadding)||0;cv.style.cssText=`position:absolute;left:${-pad}px;top:${-pad}px;width:${cv.width}px;height:${cv.height}px;max-width:none;max-height:none;pointer-events:none;`;host.appendChild(cv);}).catch(()=>{});
+        return host;
+    }
+    _cell(item,mode){
+        const cell=document.createElement('div'); cell.dataset.muPcOwner='CNewUIInventoryCtrl::RenderItem3D';
+        cell.style.cssText='position:relative;width:20px;height:20px;border:1px solid rgba(90,75,42,.45);box-sizing:border-box;cursor:pointer;overflow:visible;';
+        cell.appendChild(this._icon(item));
+        cell.title=`Type ${item.itemType ?? item.type}${Number(item.level)>0?' +'+item.level:''}`;
+        cell.addEventListener('mouseenter',()=>cell.style.borderColor='#f0d98c');
+        cell.addEventListener('mouseleave',()=>cell.style.borderColor='rgba(90,75,42,.45)');
+        cell.addEventListener('click',()=>{
+            if(this.pending)return;
+            const slot=Number(item.slot);
+            if(!Number.isInteger(slot))return;
+            if(mode==='buy') this.onBuy?.(slot,item);
+            else if(mode==='sell') this.onSell?.(slot,item);
+            else if(mode==='repair') this.onRepair?.(slot,0,item);
         });
         return cell;
     }
-
-    _fmtZen(n) {
-        if (n >= 1e6) return (n / 1e6).toFixed(1) + 'M';
-        if (n >= 1e3) return Math.round(n / 1e3) + 'K';
-        return String(n);
-    }
-
-    buy(item) {
-        const inv = this.inventory;
-        const price = item.price || 0;
-        if (inv.spendZen && !inv.spendZen(price)) { this._toast('Zen insuficiente'); return; }
-        if (!inv.spendZen) {
-            if ((inv.zen || 0) < price) { this._toast('Zen insuficiente'); return; }
-            inv.zen -= price;
-        }
-        const copy = { ...item };
-        delete copy.stock;
-        const free = inv.grid ? inv.grid.indexOf(null) : -1;
-        if (inv.grid) {
-            if (free < 0) {
-                // devolve o zen se não coube
-                if (inv.addZen) inv.addZen(price); else inv.zen += price;
-                this._toast('Inventário cheio');
-                return;
-            }
-            inv.grid[free] = copy;
-        }
-        if (item.stock !== undefined && item.stock !== Infinity) {
-            item.stock = Math.max(0, item.stock - 1);
-        }
-        this.refresh();
-    }
-
-    sell(item) {
-        const inv = this.inventory;
-        const gain = Math.floor((item.price || 0) * this.sellRate);
-        if (inv.grid) {
-            const i = inv.grid.indexOf(item);
-            if (i >= 0) inv.grid[i] = null;
-            else return;
-        }
-        if (inv.addZen) inv.addZen(gain); else inv.zen = (inv.zen || 0) + gain;
-        this.refresh();
-    }
-
-    _toast(msg) {
-        const t = document.createElement('div');
-        t.textContent = msg;
-        t.style.cssText = `
-            position: absolute; left: 50%; bottom: 6px; transform: translateX(-50%);
-            background: rgba(120,20,20,0.9); color: #fff; padding: 3px 10px; font-size: 10px;
-            border-radius: 3px; pointer-events: none;
-        `;
-        this.body.appendChild(t);
-        setTimeout(() => t.remove(), 1500);
-    }
-
-    refresh() {
-        const inv = this.inventory;
-        this.zenEl.textContent = `Seu Zen: ${(inv.zen || 0).toLocaleString()}`;
-        this.tabBuy.style.background = this.tab === 'buy'
-            ? 'linear-gradient(180deg,#54401e,#2a200e)' : '';
-        this.tabSell.style.background = this.tab === 'sell'
-            ? 'linear-gradient(180deg,#54401e,#2a200e)' : '';
-        this.listEl.innerHTML = '';
-        if (this.tab === 'buy') {
-            for (const item of this.stock) {
-                if (item.stock === 0) continue;
-                this.listEl.appendChild(this._tile(item, 'buy'));
-            }
+    refresh(){
+        const zen=Number(this.serverInventory?.zen||0)>>>0;
+        this.zenEl.textContent=`Zen: ${zen.toLocaleString()}`;
+        this.tabBuy.style.opacity=this.tab==='buy'?'1':'.65'; this.tabSell.style.opacity=this.tab==='sell'?'1':'.65'; this.tabRepair.style.opacity=this.tab==='repair'?'1':'.65';
+        this.repairAll.style.display=(this.repairShop&&this.tab==='repair')?'block':'none';
+        this.listEl.innerHTML=''; this.listEl.style.opacity=this.pending?'.6':'1';
+        if(this.tab==='buy'){
+            for(let i=0;i<120;i++){const item=this.mirror?.getDisplayItem?.(i);if(item)this.listEl.appendChild(this._cell(item,'buy'));}
         } else {
-            const items = inv.grid ? inv.grid.filter(Boolean) : [];
-            for (const item of items) this.listEl.appendChild(this._tile(item, 'sell'));
+            for(let i=0;i<76;i++){const item=this.serverInventory?.getDisplayItem?.(i);if(item)this.listEl.appendChild(this._cell(item,this.tab));}
         }
     }
+    show(){ this.mirror?.beginSession?.(); super.show(); this.refresh(); }
+    hide(){ super.hide(); this.pending=false; }
+    destroy(){ this.mirror?.endSession?.();this.pending=false;this._mirrorOff?.();this._invOff?.();this._mirrorOff=null;this._invOff=null;super.destroy?.(); }
 }
+export default NpcShop;

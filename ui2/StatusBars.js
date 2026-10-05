@@ -23,6 +23,11 @@ const ASSETS = Object.freeze({
 });
 
 const PC_W = 640, PC_H = 480, WEB_SCALE = 1.25; // common Web board is 800x600
+// NewUIMainFrameWindow::RenderFrame, in the same 640x480 space as artwork.
+export const PC_MAINFRAME_FPS_RECT = Object.freeze({x:555,y:466,w:35,h:12});
+export const PC_MAINFRAME_COORD_RECTS = Object.freeze([
+    Object.freeze({x:55,y:467,w:6,h:6}), Object.freeze({x:76.5,y:467,w:6,h:6}),
+]);
 function clamp01(v) { return Math.max(0, Math.min(1, Number(v) || 0)); }
 function div(cls, css = '') { const e=document.createElement('div'); e.className=cls; e.style.cssText=css; return e; }
 
@@ -152,6 +157,12 @@ export class StatusBars {
 
     setActions(actions={}){this.actions=actions;}
 
+    setPosition(x, y) {
+        if (!this._ready) return;
+        const values = [x, y];
+        PC_MAINFRAME_COORD_RECTS.forEach((r, i) => this._renderNumber(`position${i}`, values[i], r.x, r.y, r.w, r.h, 0.6));
+    }
+
     setStats(stats={}) {
         if(stats.maxHp!==undefined)this.max.hp=Math.max(1,Number(stats.maxHp)||1);
         if(stats.maxMp!==undefined)this.max.mp=Math.max(1,Number(stats.maxMp)||1);
@@ -200,14 +211,15 @@ export class StatusBars {
         g.fill.style.left='0';g.fill.style.top='0';
     }
 
-    _renderNumber(id,value,centerX,y,w=6,h=6){
+    _renderNumber(id,value,centerX,y,w=6,h=6,tint=1){
         if(!this._digits||!Number.isFinite(Number(value)))return;
         const text=String(Math.max(0,Math.trunc(Number(value))));
-        const cacheKey=`${text}:${centerX}:${y}:${w}:${h}`;
+        const cacheKey=`${text}:${centerX}:${y}:${w}:${h}:${tint}`;
         if(this._numberCache.get(id)===cacheKey)return;
         this._numberCache.set(id,cacheKey);
         let group=this.numberLayer.querySelector(`[data-pc-num="${id}"]`);
         if(!group){group=div('mu-mainframe-number','position:absolute;left:0;top:0;');group.dataset.pcNum=id;this.numberLayer.appendChild(group);}
+        group.style.filter=tint===1?'none':`brightness(${tint})`;
         group.replaceChildren();
         let x=centerX-text.length*w/2;
         const bgW=w*(this._digits.w/16), bgH=h*2; // PC crop = 16px × half atlas height.

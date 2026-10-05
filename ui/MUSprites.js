@@ -55,13 +55,21 @@ const DEFS = {
   btnOk:         { path: 'Interface/message_ok_b_all.OZT', kind: 'btn', fw: 54, fh: 30, frames: 3 },
   btnCancel:     { path: 'Interface/loding_cancel_b_all.OZT', kind: 'btn', fw: 54, fh: 30, frames: 3 },
   btnCreate:     { path: 'Interface/b_create.OZT', kind: 'btn', fw: 54, fh: 30, frames: 4 },
+  btnMenu:       { path: 'Interface/server_menu_b_all.OZT', kind: 'btn', fw: 54, fh: 30, frames: 3 },
   btnDelete:     { path: 'Interface/b_delete.OZT', kind: 'btn', fw: 54, fh: 30, frames: 4 },
   btnConnect:    { path: 'Interface/b_connect.OZT', kind: 'btn', fw: 54, fh: 30, frames: 4 },
   serverGroupBtn:{ path: 'Interface/cha_bt.OZT', kind: 'btn', fw: 108, fh: 26, frames: 4 },
   serverBtn:     { path: 'Interface/server_b2_all.OZT', kind: 'btn', fw: 193, fh: 26, frames: 3 },
 };
 
-const cache = { loaded: false, loading: null, images: {}, btnFrames: {} };
+let cache;
+function spriteCache() {
+  const authority = String(RemoteAssets.baseUrl || '');
+  if (!cache || cache.authority !== authority) cache = {authority, loaded:false, loading:null, images:{}, btnFrames:{}};
+  return cache;
+}
+function spriteOwnerCurrent(owner) { return spriteCache() === owner; }
+function completeFrames(frames, count) { return frames?.length === count && frames.every(Boolean); }
 
 /** Recorta frames verticais de um strip em dataURLs (canvas) */
 function sliceFrames(decoded, fw, fh, count) {
@@ -88,6 +96,7 @@ function sliceFrames(decoded, fw, fh, count) {
 export const MUSprites = {
   /** Carrega TODOS os sprites (uma vez por sessão). Não lança — ausentes ficam null. */
   async load() {
+    const cache = spriteCache();
     if (cache.loaded) return this;
     // R13: a flag antiga era marcada ANTES do await. Chamadas concorrentes
     // (loading -> server-select -> char-select) viam loaded=true e recebiam
@@ -99,21 +108,25 @@ export const MUSprites = {
     }
 
     cache.loading = (async () => {
-      const entries = Object.entries(DEFS);
+      const entries = Object.entries(DEFS).filter(([key, def]) =>
+        !cache.images[key] || ((def.kind === "btn" || def.kind === "strip") && !completeFrames(cache.btnFrames[key], def.frames)));
       const results = await Promise.all(entries.map(async ([key, def]) => {
         const decoded = await RemoteAssets.fetchDecodedImage(def.path).catch(() => null);
         return decoded ? { key, def, decoded, url: decoded.url } : null;
       }));
 
+      if (!spriteOwnerCurrent(cache)) return;
       for (const r of results) {
         if (!r) continue;
         cache.images[r.key] = r.url;
         if (r.def.kind === 'btn' || r.def.kind === 'strip') {
           const frames = await sliceFrames(r.decoded, r.def.fw, r.def.fh, r.def.frames);
-          if (frames) cache.btnFrames[r.key] = frames;
+          if (!spriteOwnerCurrent(cache)) return;
+          if (completeFrames(frames, r.def.frames)) cache.btnFrames[r.key] = frames;
         }
       }
-      cache.loaded = true;
+      cache.loaded = Object.entries(DEFS).every(([key, def]) => Boolean(cache.images[key]) &&
+        ((def.kind !== "btn" && def.kind !== "strip") || (cache.btnFrames[key]?.length === def.frames && cache.btnFrames[key].every(Boolean))));
     })();
 
     try {
@@ -125,35 +138,37 @@ export const MUSprites = {
   },
 
   /** URL da imagem completa (ou null se ausente) */
-  get(key) { return cache.images[key] || null; },
+  get(key) { return spriteCache().images[key] || null; },
 
   /** Frame específico de botão: state = 'up' | 'active' | 'down' | 'disable' */
   btn(key, state = 'up') {
-    const frames = cache.btnFrames[key];
+    const frames = spriteCache().btnFrames[key];
     if (!frames) return null;
     const idx = { up: 0, active: 1, down: 2, disable: 3 }[state] ?? 0;
     return frames[Math.min(idx, frames.length - 1)];
   },
 
   /** Todos os frames de um botão (para clientes que gerenciam estados) */
-  frames(key) { return cache.btnFrames[key] || null; },
+  frames(key) { return spriteCache().btnFrames[key] || null; },
 
   /**
    * Frames de um strip por definição key com geometria explícita (fw×fh).
    * Usado quando a cena precisa dos frames crus (ex.: cha_bt 108×26×4).
    */
   async stripFrames(key, fw, fh) {
+    const cache = spriteCache();
     const def = DEFS[key];
     if (!def) return null;
-    if (cache.btnFrames[key]) return cache.btnFrames[key];
+    if (completeFrames(cache.btnFrames[key], def.frames)) return cache.btnFrames[key];
     if (cache.loading) await cache.loading;
-    if (cache.btnFrames[key]) return cache.btnFrames[key];
+    if (!spriteOwnerCurrent(cache)) return null;
+    if (completeFrames(cache.btnFrames[key], def.frames)) return cache.btnFrames[key];
     const decoded = await RemoteAssets.fetchDecodedImage(def.path).catch(() => null);
-    if (!decoded) return null;
+    if (!decoded || !spriteOwnerCurrent(cache)) return null;
     cache.images[key] = decoded.url;
-    const count = Math.max(1, def.frames || Math.floor(fh > 0 ? fh / fh : 1));
     const frames = await sliceFrames(decoded, fw, fh, def.frames || 3);
-    if (frames) cache.btnFrames[key] = frames;
+    if (!spriteOwnerCurrent(cache)) return null;
+    if (completeFrames(frames, def.frames || 3)) cache.btnFrames[key] = frames;
     return frames;
   },
 

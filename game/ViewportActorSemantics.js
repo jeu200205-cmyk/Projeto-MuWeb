@@ -15,7 +15,8 @@
  * Tipos NPC abaixo têm apresentação comprovada pelos arquivos enviados:
  * 230/248/250 -> Man01 + partes; 253 -> Girl01 + partes;
  * 255 -> Female01 + partes; 251 -> Smith01; 254 -> Wizard01.
- * 247/249 são guards MODEL_PLAYER no PC; sem inventar equipamento aqui.
+ * FIX51: 247/249 MODEL_PLAYER recipes materialized exactly from Setting_Monster();
+ * 226 uses MODEL_NPC_BREEDER -> Data/Npc/Breeder.bmd.
  */
 
 export const VIEWPORT_KIND = Object.freeze({
@@ -53,11 +54,13 @@ const NPC_VISUAL = new Map([
   [253, { base: 'Data/Npc/Girl01.bmd', parts: ['Data/Npc/GirlHead01.bmd','Data/Npc/GirlUpper01.bmd','Data/Npc/GirlLower01.bmd'] }],
   [254, { base: 'Data/Npc/Wizard01.bmd', parts: [] }],
   [255, { base: 'Data/Npc/Female01.bmd', parts: ['Data/Npc/FemaleHead02.bmd','Data/Npc/FemaleUpper02.bmd','Data/Npc/FemaleLower02.bmd','Data/Npc/FemaleBoots02.bmd'] }],
-  // Setting_Monster() authors these guards from MODEL_PLAYER + equipment.
-  // Until the exact equipment recipe is recovered from source.zip in-workspace,
-  // they MUST stay fail-closed rather than become Monster01.
-  [247, { playerBody: true, base: null, parts: [] }],
-  [249, { playerBody: true, base: null, parts: [] }],
+  [226, { base: 'Data/Npc/Breeder.bmd', parts: [] }],
+  // ZzzCharacter.cpp Setting_Monster exact MODEL_PLAYER guard recipes.
+  // classByte 0x20 = first-class Knight. Body offsets are MODEL_{part}+9.
+  [229, { playerBody: true, classByte: 0x00, bodyOffset: 9, bodyLevel: 7, weaponRightExtType: 3*512+7, weaponLeftExtType: null }],
+  [247, { playerBody: true, classByte: 0x00, bodyOffset: 9, weaponRightExtType: 4*512+11, weaponLeftExtType: 4*512+7 }],
+  [249, { playerBody: true, classByte: 0x00, bodyOffset: 9, weaponRightExtType: 3*512+7, weaponLeftExtType: null }],
+  [258, { playerBody: true, classByte: 0x00, bodyOffset: 9, weaponRightExtType: null, weaponLeftExtType: null }],
 ]);
 
 export function getPcNpcVisualRule(type) {

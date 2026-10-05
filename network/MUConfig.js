@@ -41,7 +41,7 @@ class MUConfig {
         return {
             // Gateway WebSocket
             gateway: {
-                host: '127.0.0.1',
+                host: '0.0.0.0',
                 port: 9091,
                 maxConnections: 10000,
                 heartbeatInterval: 30000,
@@ -61,7 +61,7 @@ class MUConfig {
                 timeout: 10000,
                 encryption: {
                     enabled: true,
-                    key: '',
+                    key: 'MuEMU_ConnectServer_Key_2024',
                     version: 'S6'
                 }
             },
@@ -97,7 +97,7 @@ class MUConfig {
                 },
                 encryption: {
                     enabled: true,
-                    key: ''
+                    key: 'MuEMU_JoinServer_Key_2024'
                 }
             },
 
@@ -116,7 +116,7 @@ class MUConfig {
                 },
                 encryption: {
                     enabled: true,
-                    key: ''
+                    key: 'MuEMU_DataServer_Key_2024'
                 }
             },
 
@@ -205,7 +205,7 @@ class MUConfig {
                 autoRestart: true,
                 maxRestarts: 5,
                 restartDelay: 10000,
-                workingDirectory: 'C:\\MU\\Server',
+                workingDirectory: 'C:\\Users\\jeu\\Documents\\Nova pasta\\mu-server',
                 servers: {
                     connectServer: {
                         executable: 'ConnectServer.exe',

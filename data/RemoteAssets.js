@@ -37,7 +37,12 @@ export class RemoteAssetSystem {
         this.offline = false;                         // true se baseUrl indisponível
         this.stats = { fetched: 0, cached: 0, failed: 0 };
         this.onProgress = null;
-        this._cacheName = 'mu-web-assets-v1';
+        // FIX44: persistent raw-byte cache is scoped by the selected physical
+        // Data authority. The old global v1 name let :8081/:8082 keep bytes
+        // from a previous client/Data selection while :8080 happened to be
+        // clean, making the same Lorencia source render differently by port.
+        this._authorityRevision = null;
+        this._cacheName = 'mu-web-assets-v2-unbound';
         // R12.4: índice local do inventário REAL de Data/. Evita dezenas de
         // GET 404 por textura (case/extensão) e resolve o casing exato antes
         // de tocar o asset-server. Se o manifesto não puder ser lido, cai
@@ -49,13 +54,13 @@ export class RemoteAssetSystem {
     }
 
     /** Configura a URL base dos dados do cliente */
-    configure(baseUrl) {
+    configure(baseUrl, authorityRevision = null) {
         const next = baseUrl.endsWith('/') ? baseUrl : baseUrl + '/';
-        if (this.baseUrl && this.baseUrl !== next) {
-            // R89: caches AND the path inventory belong to one Data authority.
-            // R77 cleared bytes on root changes but kept the old manifest index,
-            // so a newly selected official Data tree could still be rejected by
-            // paths from the previous root before the asset server was queried.
+        const nextAuthority = authorityRevision == null || authorityRevision === ''
+            ? null : String(authorityRevision);
+        const authorityChanged = this._authorityRevision !== nextAuthority;
+        if ((this.baseUrl && this.baseUrl !== next) || authorityChanged) {
+            // Caches AND path inventory belong to one physical Data authority.
             this.memoryCache.clear();
             this.binaryInflight.clear();
             this.imageUrlCache.clear();
@@ -66,8 +71,16 @@ export class RemoteAssetSystem {
             this._manifestUnavailable = false;
         }
         this.baseUrl = next;
+        this._authorityRevision = nextAuthority;
+        const safe = nextAuthority && /^[a-f0-9]{16,128}$/i.test(nextAuthority)
+            ? nextAuthority.toLowerCase()
+            : 'url-' + Array.from(next).reduce((h,ch)=>((h*33)^ch.charCodeAt(0))>>>0,5381).toString(16);
+        this._cacheName = `mu-web-assets-v2-${safe}`;
         this.offline = false;
     }
+
+    get authorityRevision() { return this._authorityRevision; }
+    get authorityKey() { return `${this.baseUrl || ''}#${this._authorityRevision || 'unbound'}`; }
 
     /** Verifica se o servidor de assets está acessível */
     async ping() {
@@ -141,6 +154,9 @@ export class RemoteAssetSystem {
                             const live = await fetch(this.baseUrl + '__muweb_asset_manifest.json', { cache: 'no-store' });
                             if (live.ok) {
                                 j = await live.json();
+                                if (this._authorityRevision && j?.authorityRevision !== this._authorityRevision) {
+                                    throw new Error(`asset authority mismatch runtime=${this._authorityRevision} server=${j?.authorityRevision || 'missing'}`);
+                                }
                                 manifestSource = 'live-data-root';
                             }
                         } catch (_) { /* fallback below */ }
@@ -202,6 +218,30 @@ export class RemoteAssetSystem {
         // safe basename owner was unreachable. Ambiguous names remain null.
         const base = normalized.split('/').pop().toLowerCase();
         return this._manifestBasenameIndex?.get(base) || null;
+    }
+
+    /**
+     * FIX50: lista arquivos reais de um diretório do Data usando o mesmo
+     * manifesto autoritativo/case-insensitive do restante do loader. Necessário
+     * para portar LuaOpenFolder.cpp sem inventar módulos nem depender de IO do
+     * browser. Retorna somente filhos diretos e preserva o path canônico.
+     */
+    async listFolder(relFolder, { suffix = null } = {}) {
+        const folder = normalizeDataRelativePath(relFolder || '');
+        if (!folder) return [];
+        const prefix = folder.replace(/\/+$/, '') + '/';
+        const index = await this._ensureManifest();
+        if (!index) return [];
+        const out = [];
+        for (const canonical of index.values()) {
+            if (!canonical.toLowerCase().startsWith(prefix.toLowerCase())) continue;
+            const tail = canonical.slice(prefix.length);
+            if (!tail || tail.includes('/')) continue;
+            if (suffix && !tail.toLowerCase().endsWith(String(suffix).toLowerCase())) continue;
+            out.push(canonical);
+        }
+        out.sort((a,b)=>a.localeCompare(b, undefined, {sensitivity:'base'}));
+        return out;
     }
 
     /** URL completa de um asset */
@@ -291,8 +331,8 @@ export class RemoteAssetSystem {
      * OZT: formato custom do MU (GlobalBitmap.cpp::OpenTga) → decodeOZT
      * TGA padrão → decodeTGA (fallback)
      */
-    async fetchImageURL(relPath) {
-        const canonical = await this.resolveExistingPath(relPath);
+    async fetchImageURL(relPath, options = {}) {
+        const canonical = await this.resolveExistingPath(relPath, options);
         if (canonical == null) return null;
         let pending = this.imageUrlCache.get(canonical);
         if (!pending) {
