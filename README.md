@@ -2,7 +2,7 @@
 
 Cliente/engine Web experimental desenvolvido a partir da base **MU Online Main 5.2 do Dinho**, com adaptação progressiva dos sistemas originais para JavaScript/WebGL.
 
-O repositório publica a **source de desenvolvimento atual** do projeto para estudo e continuação. Ele ainda não representa uma portabilidade completa do cliente de PC e vários sistemas continuam em evolução.
+O repositório publica a source de desenvolvimento atual do projeto para estudo e continuação. O projeto ainda está em evolução e não representa uma portabilidade completa do cliente de PC.
 
 ## Principais áreas da source
 
@@ -25,13 +25,13 @@ O repositório publica a **source de desenvolvimento atual** do projeto para est
 
 ## Executar no Windows
 
-1. Extraia/clone o projeto.
+1. Extraia ou clone o projeto.
 2. Execute `INSTALAR_DEPENDENCIAS.bat` na primeira vez.
 3. Execute `INICIAR_MUWEB.bat`.
 4. Acesse o endereço local informado pelo launcher.
-5. Para encerrar os processos Node iniciados a partir desta source, execute `PARAR_MUWEB.bat`.
+5. Para encerrar os processos iniciados pela source, execute `PARAR_MUWEB.bat`.
 
-A pasta `Data`, GameServer, ConnectServer e demais servidores **não fazem parte deste repositório**.
+A pasta `Data`, GameServer, ConnectServer e demais servidores não fazem parte deste repositório.
 
 ## Executar manualmente
 
@@ -56,10 +56,6 @@ Depois abra `http://127.0.0.1:8080/`.
 - [Portabilidade PC → Web](docs/PORTING.md)
 - [Estrutura da source](docs/SOURCE_LAYOUT.md)
 - [Roadmap](docs/ROADMAP.md)
-
-## Organização pública
-
-O GitHub mantém apenas arquivos úteis para executar, estudar e desenvolver o projeto. Relatórios internos, checkpoints de desenvolvimento, pacotes de auditoria e históricos privados não fazem parte da publicação pública.
 
 ## Segurança
 
