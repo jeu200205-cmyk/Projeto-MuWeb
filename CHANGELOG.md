@@ -1,7 +1,5 @@
 # Changelog
 
-Histórico público acumulativo do Projeto MuWeb.
-
 Base do projeto: **MU Online Main 5.2 do Dinho**.
 
 ---
@@ -10,7 +8,7 @@ Base do projeto: **MU Online Main 5.2 do Dinho**.
 
 ### Estado acumulado do projeto
 
-Esta atualização consolida o estado público atual da source e organiza o changelog por sistemas, sem expor nomes internos de builds, checkpoints ou correções privadas.
+Esta atualização consolida o estado atual da source e organiza as principais áreas já implementadas.
 
 ### Engine e runtime
 
@@ -55,7 +53,7 @@ Esta atualização consolida o estado público atual da source e organiza o chan
 
 - estrutura de itens e atributos;
 - inventário e movimentação de itens;
-- codificação/decodificação de itens de protocolo;
+- codificação e decodificação de itens de protocolo;
 - modelos e resolução de apresentação de itens;
 - equipamentos no personagem;
 - materiais, transparência, efeitos e apresentação visual;
@@ -75,7 +73,7 @@ Esta atualização consolida o estado público atual da source e organiza o chan
 - sistema de pets integrado ao personagem e viewport;
 - lógica de helpers e composição visual associada;
 - suporte a apresentação customizada de equipamentos e elementos auxiliares;
-- integração com dados de preview e apresentação definidos pelo cliente/servidor.
+- integração com dados de preview e apresentação definidos pelo cliente e servidor.
 
 ### Skills, buffs e efeitos de gameplay
 
@@ -149,20 +147,12 @@ Esta atualização consolida o estado público atual da source e organiza o chan
 
 - servidor local de assets;
 - servidor web de desenvolvimento;
-- geradores de mapas/tabelas de dados usados pela source;
+- geradores de mapas e tabelas de dados usados pela source;
 - utilitários para dados reais, itens, monstros e skills;
 - ferramentas auxiliares necessárias para preparar ou validar recursos da engine.
 
 ### Inicialização no Windows
 
-A publicação pública mantém somente os launchers necessários para uso da source:
-
 - `INICIAR_MUWEB.bat`;
 - `INSTALAR_DEPENDENCIAS.bat`;
 - `PARAR_MUWEB.bat`.
-
-Os launchers públicos representam a versão operacional mais recente disponível na source publicada.
-
-### Organização pública
-
-A publicação pública não acumula arquivos temporários, relatórios internos, hashes de checkpoints, históricos privados de desenvolvimento, launchers antigos ou artefatos de teste desnecessários para executar, estudar ou continuar o projeto.
