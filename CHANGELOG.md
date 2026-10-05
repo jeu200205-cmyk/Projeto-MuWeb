@@ -4,8 +4,6 @@ Histórico público acumulativo do Projeto MuWeb.
 
 Base do projeto: **MU Online Main 5.2 do Dinho**.
 
-As atualizações são registradas em ordem decrescente, com **data e hora local (Bahia/BRT)**. Cada nova publicação deve acrescentar uma nova entrada sem apagar o histórico anterior.
-
 ---
 
 ## 05/10/2026 01:22 BRT
@@ -163,28 +161,8 @@ A publicação pública mantém somente os launchers necessários para uso da so
 - `INSTALAR_DEPENDENCIAS.bat`;
 - `PARAR_MUWEB.bat`.
 
-Os launchers públicos devem sempre representar a versão operacional mais recente disponível na source publicada.
+Os launchers públicos representam a versão operacional mais recente disponível na source publicada.
 
 ### Organização pública
 
-A publicação pública não deve acumular arquivos temporários, relatórios internos, hashes de checkpoints, históricos privados de desenvolvimento, launchers antigos ou artefatos de teste que não sejam necessários para executar, estudar ou continuar o projeto.
-
----
-
-## Regra para próximas atualizações
-
-Cada nova atualização deve adicionar no topo deste arquivo uma entrada no formato:
-
-`DD/MM/AAAA HH:MM BRT`
-
-A entrada deve registrar de forma acumulativa:
-
-- o que foi adicionado;
-- o que foi corrigido;
-- o que foi alterado;
-- sistemas novos ou expandidos;
-- alterações de engine, renderização, mapas, itens, skills, Lua, UI, protocolo e ferramentas quando aplicável;
-- mudanças nos arquivos de inicialização;
-- observações públicas importantes para quem baixar ou continuar o projeto.
-
-O histórico anterior deve ser preservado. Novas atualizações entram sempre acima das anteriores.
+A publicação pública não acumula arquivos temporários, relatórios internos, hashes de checkpoints, históricos privados de desenvolvimento, launchers antigos ou artefatos de teste desnecessários para executar, estudar ou continuar o projeto.
