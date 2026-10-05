@@ -1,0 +1,136 @@
+name: Atualizar Changelog
+
+on:
+  push:
+    branches:
+      - main
+    paths-ignore:
+      - 'CHANGELOG.md'
+      - '.github/workflows/changelog-acumulativo.yml'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: changelog-acumulativo
+  cancel-in-progress: false
+
+jobs:
+  changelog:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Verificar se o commit ja atualizou o changelog
+        id: check
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git diff-tree --no-commit-id --name-only -r HEAD | grep -qx 'CHANGELOG.md'; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Gerar entrada acumulativa
+        if: steps.check.outputs.skip != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          export TZ=America/Bahia
+          STAMP="$(date '+%d/%m/%Y %H:%M BRT')"
+
+          BEFORE="${{ github.event.before }}"
+          AFTER="${{ github.sha }}"
+
+          if [ "$BEFORE" = "0000000000000000000000000000000000000000" ]; then
+            CHANGED="$(git show --pretty='' --name-only "$AFTER")"
+          else
+            CHANGED="$(git diff --name-only "$BEFORE" "$AFTER")"
+          fi
+
+          engine=0
+          render=0
+          world=0
+          gameplay=0
+          ui=0
+          network=0
+          tools=0
+          startup=0
+          other=0
+
+          while IFS= read -r file; do
+            [ -z "$file" ] && continue
+            case "$file" in
+              *.bat) startup=$((startup+1)) ;;
+              core/*|runtime-config.js|package.json|package-lock.json) engine=$((engine+1)) ;;
+              graphics/*|assets/*|effects2/*|audio/*) render=$((render+1)) ;;
+              world/*|maps/*|scenes/*) world=$((world+1)) ;;
+              game/*|data/*|skills/*|progression/*|social/*) gameplay=$((gameplay+1)) ;;
+              ui/*|ui2/*|ui.js) ui=$((ui+1)) ;;
+              network/*|protocol/*|net/*|database/*|gateway-server.cjs) network=$((network+1)) ;;
+              tools/*) tools=$((tools+1)) ;;
+              README.md|docs/*) ;;
+              *) other=$((other+1)) ;;
+            esac
+          done <<< "$CHANGED"
+
+          ENTRY="$(mktemp)"
+          {
+            echo "## $STAMP"
+            echo
+            echo "Atualização acumulativa da source pública do Projeto MuWeb."
+            echo
+            echo "### Áreas atualizadas"
+            echo
+            [ "$engine" -gt 0 ] && echo "- Engine e runtime: $engine arquivo(s)."
+            [ "$render" -gt 0 ] && echo "- Renderização, gráficos e áudio: $render arquivo(s)."
+            [ "$world" -gt 0 ] && echo "- Mapas, cenas e mundo: $world arquivo(s)."
+            [ "$gameplay" -gt 0 ] && echo "- Gameplay, dados, itens, pets e skills: $gameplay arquivo(s)."
+            [ "$ui" -gt 0 ] && echo "- Interface e HUD: $ui arquivo(s)."
+            [ "$network" -gt 0 ] && echo "- Rede, protocolo e banco: $network arquivo(s)."
+            [ "$tools" -gt 0 ] && echo "- Ferramentas: $tools arquivo(s)."
+            [ "$startup" -gt 0 ] && echo "- Inicialização e instalação: $startup arquivo(s)."
+            [ "$other" -gt 0 ] && echo "- Outros componentes: $other arquivo(s)."
+            echo
+            echo "### Commit"
+            echo
+            echo "- \`${AFTER}\`"
+            echo
+            echo "---"
+            echo
+          } > "$ENTRY"
+
+          if [ ! -f CHANGELOG.md ]; then
+            printf '# Changelog\n\n' > CHANGELOG.md
+          fi
+
+          tail -n +2 CHANGELOG.md > /tmp/changelog-rest.md || true
+          {
+            echo '# Changelog'
+            echo
+            cat "$ENTRY"
+            cat /tmp/changelog-rest.md
+          } > /tmp/CHANGELOG.new
+          mv /tmp/CHANGELOG.new CHANGELOG.md
+
+      - name: Commitar changelog
+        if: steps.check.outputs.skip != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add CHANGELOG.md
+
+          if git diff --cached --quiet; then
+            exit 0
+          fi
+
+          git commit -m "Atualiza changelog acumulativo"
+          git push origin HEAD:main
