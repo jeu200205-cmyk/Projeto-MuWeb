@@ -46,10 +46,7 @@ Depois abra `http://127.0.0.1:8080/`.
 
 ## Atualizações
 
-O projeto possui um fluxo público de publicação que pode gerar automaticamente changelog, tag e GitHub Release depois que a source nova é sincronizada com a branch `main`.
-
-- [Changelog público](CHANGELOG.md)
-- [Como publicar uma atualização](PUBLICAR_ATUALIZACAO.md)
+- [Changelog](CHANGELOG.md)
 
 ## Documentação
 
