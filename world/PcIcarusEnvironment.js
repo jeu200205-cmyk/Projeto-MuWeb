@@ -9,6 +9,7 @@ import { Sound } from '../audio/SoundManager.js';
 import { MUAssets } from '../assets/MUAssetLoader.js';
 import { MUModelRenderer } from '../assets/MUModelRenderer.js';
 import { applyMuUpAxis } from '../graphics/BmdAdapter.js';
+import { createPcThunderJoint, tickPcThunderJoint, disposePcThunderJoint } from './PcThunderJoint.js';
 
 const PC_HZ = 25;
 const TICK = 1 / PC_HZ;
@@ -118,6 +119,7 @@ export async function createPcIcarusEnvironmentOwner(gameScene) {
   let accumulator = 0;
   let elapsed = 0;
   const heavenClouds = [];
+  const thunderJoints = [];
   void loadHeavenCloudBmd().then((b)=>{ if(!b) group.userData.muPcHeavenCloudMissing=HEAVEN_CLOUD_BMD; });
 
 
@@ -171,6 +173,27 @@ export async function createPcIcarusEnvironmentOwner(gameScene) {
       .catch(()=>{group.userData.muPcAmbientMissing='Sound/aHeaven.wav';});
   }
 
+
+  const pcToWeb=(v)=>new THREE.Vector3(v[0],v[2],-v[1]);
+  const webHeroToPc=(hero)=>[hero.x,-hero.z,hero.y];
+  const rotZ=(v,deg)=>{const a=deg*Math.PI/180,c=Math.cos(a),sn=Math.sin(a);return [v[0]*c-v[1]*sn,v[0]*sn+v[1]*c,v[2]];};
+  const addPc=(a,b)=>[a[0]+b[0],a[1]+b[1],a[2]+b[2]];
+  const subPc=(a,b)=>[a[0]-b[0],a[1]-b[1],a[2]-b[2]];
+  const spawnHeavenThunderRibbon = (hero) => {
+    // ZzzObject.cpp::MoveHeavenThunder exact 1/5 child branch after the 1/50 root gate.
+    const h=webHeroToPc(hero); const caseId=Math.floor(Math.random()*4);
+    let v1,rot2,v2;
+    if(caseId===0){v1=[-400,-1000,0];rot2=240;v2=[-200,-1000,0];}
+    else if(caseId===1){v1=[-300,-400,0];rot2=210;v2=[-500,-1000,0];}
+    else if(caseId===2){v1=[-200,-400,0];rot2=235;v2=[-1000,-1500,0];}
+    else {v1=[-200,400,0];rot2=200;v2=[-600,-1200,0];}
+    const r1=rotZ(v1,-45);
+    const pos=caseId===1?subPc(h,r1):addPc(h,r1);
+    const r2=rotZ(v2,rot2); let p2=subPc(pos,r2),p1=addPc(pos,r2);
+    p1=[p1[0],p1[1],p1[2]-300];p2=[p2[0],p2[1],p2[2]-300];
+    for(let i=0;i<2;i++){const scale=40+Math.floor(Math.random()*10);void createPcThunderJoint({group,camera:gameScene.camera?.threeCamera,start:pcToWeb(p1),end:pcToWeb(p2),bitmapPlusOne:true,subtype:0,scale}).then(j=>{if(j&&!disposed)thunderJoints.push(j);else if(j)disposePcThunderJoint(j);});}
+  };
+
   const spawnHeavenThunderRoot = (hero) => {
     // MoveHeavenThunder: 1/50 authored tick gate. The source always adds the
     // local terrain-light pulse and creates MODEL_CLOUD at Hero position; the
@@ -195,8 +218,9 @@ export async function createPcIcarusEnvironmentOwner(gameScene) {
     if (!hero) return;
     if (rainCurrent > RAIN_TARGET) rainCurrent -= 1;
     else if (rainCurrent < RAIN_TARGET) rainCurrent += 1;
-    if(Math.floor(Math.random()*50)===0) spawnHeavenThunderRoot(hero);
+    if(Math.floor(Math.random()*50)===0){ spawnHeavenThunderRoot(hero); if(Math.floor(Math.random()*5)===0) spawnHeavenThunderRibbon(hero); }
     for(let i=heavenClouds.length-1;i>=0;i--){const c=heavenClouds[i];c.r.update?.(TICK,elapsed);c.ticks--;if(c.ticks<=0){try{c.r.dispose?.();}catch{}heavenClouds.splice(i,1);}}
+    for(let i=thunderJoints.length-1;i>=0;i--){if(!tickPcThunderJoint(thunderJoints[i]))thunderJoints.splice(i,1);}
     const rainly = rainCurrent * 2; // RainCurrent * MAX_LEAVES / 100; MAX_LEAVES=200.
     for(let i=0;i<MAX_ACTIVE_RAIN;i++) {
       const p=particles[i];
@@ -240,6 +264,7 @@ export async function createPcIcarusEnvironmentOwner(gameScene) {
         ambientStarted=false;
       }
       for(const c of heavenClouds.splice(0)){try{c.r?.dispose?.();}catch{}}
+      for(const j of thunderJoints.splice(0))disposePcThunderJoint(j);
       rainMesh?.parent?.remove(rainMesh);
       rainGeometry?.dispose?.(); rainMaterial?.dispose?.();
       group.clear();

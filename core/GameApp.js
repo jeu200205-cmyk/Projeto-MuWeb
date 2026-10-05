@@ -84,7 +84,7 @@ import { TERRAIN_SCALE as TERRAIN_CELL, prefetchWorldTerrainCore } from '../worl
 import { prefetchWorldTerrainObjects } from '../world/TerrainObjectWorld.js';
 import { getPcWorldDescriptor } from '../world/PcWorldRegistry.js';
 import { decodeCharacterEquipment } from '../data/CharacterEquipmentCodec.js';
-import { loadCurrentClientItemOwners } from '../data/CustomItemModelMap.js';
+import { loadCurrentClientItemOwners, customItemModelForType } from '../data/CustomItemModelMap.js';
 import { loadPcBitmapLuaOwners } from '../data/PcBitmapLuaOwners.js';
 import { loadCustomItemFloorLua } from '../data/CustomItemFloorLua.js';
 import { loadDisableExcellentLua } from '../data/DisableExcellentLua.js';
@@ -115,7 +115,7 @@ export const MUWEB_SOURCE_PARENT_REVISION = 'MUWEB_R28_FURY_CORE_BMD_2026-09-27_
 export const MUWEB_R90_FIX15_REVISION = 'MUWEB_R90_FIX15_BMD_INFLIGHT_MAP_CANCEL_2026-10-03_A';
 export const MUWEB_R90_FIX46_REVISION = 'MUWEB_R90_FIX46_DARKSPIRIT_MONSTER_LUA_CONTRACTS_2026-10-04_A';
 export const MUWEB_R90_FIX47_REVISION = 'MUWEB_R90_FIX47_CHARACTER_LUA_MONSTER_PRESENTATION_2026-10-04_A';
-export const MUWEB_SOURCE_REVISION = 'MUWEB_R90_FIX53_ELEMENT_PETS_HELPER_MOVEMENT_SUMMONER_SKILLS_2026-10-05';
+export const MUWEB_SOURCE_REVISION = 'MUWEB_R90_FIX57_CAPE_LINK_MATRIX_WING_PRESENTATION_2026-10-05';
 export const MUWEB_PREVIOUS_SOURCE_REVISION = 'MUWEB_R78_ITEMVIEW_WORLDENTRY_ANIMATION_CHARSELECT_RECOVERY_2026-09-30_A';
 export const MUWEB_R77_BASE_REVISION = 'MUWEB_R77_CANONICAL_WORLD_ROUTING_CUSTOMMOVE_PREFETCH_UTF8_2026-09-30_A';
 
@@ -1103,7 +1103,7 @@ export class GameApp {
                 // PC applies WingIndex after ChangeCharacterExt. If the hero is
                 // already published, queue the same transactional visual refresh
                 // used by F3:13 instead of waiting for another equipment packet.
-                const heroPreview = this.serverCustomPreview?.get?.(this._heroServerKey) || this.serverCustomPreview?.getByName?.(this.playerChar?.name);
+                const heroPreview = this._effectiveHeroCustomPreview?.() || this.serverCustomPreview?.get?.(this._heroServerKey) || this.serverCustomPreview?.getByName?.(this.playerChar?.name);
                 if (Array.isArray(this._heroEquipCharset) && this._heroEquipCharset.length >= 18) {
                     // Always re-key from the authoritative preview snapshot so a
                     // WingIndex/PetIndex transition back to zero removes the old
@@ -1182,6 +1182,11 @@ export class GameApp {
                 // for the same 0x24. Storage has its own mirror/listener; only an
                 // open cross-container view needs an explicit refresh fallback.
                 if (subCode === 2) this._ui?.storageWin?.refresh?.();
+                // FIX55 custom wing local-equipment bridge: slot 7 carries the
+                // exact item immediately even when the GS delays/omits a fresh
+                // F3:72 custom-preview snapshot. The fast linked-equipment path
+                // keeps this targeted refresh from rebuilding Player.bmd.
+                if (subCode === 0 && index === 7 && typeof this._syncWings === 'function') this._syncWings();
             },
             onEquipmentItemCancel: () => {
                 this._equipmentMovePending = null;
@@ -2602,10 +2607,34 @@ export class GameApp {
         // CharSet sync REAL de wings/helper/weapons do herói.
         // Key = CharSet[18] inteiro; mudou (inventário real) → re-attach com o
         // pipeline bone-parented (Scene.attachPlayerCharacter opts.charset).
+        // FIX55: the custom Main uses F3:72 for the post-CharSet custom wing,
+        // but the local equipment container (slot 7) is also authoritative for
+        // the actual equipped item. Some GS builds update 0x24/F3:13 before the
+        // next F3:72 snapshot; without this bridge the CharSet has no way to
+        // encode a custom WING+index and the hero appears wingless. Only an
+        // exact CustomWings.lua-owned group-12 item may override wingIndex.
+        this._effectiveHeroCustomPreview = () => {
+            const base = this.serverCustomPreview?.get?.(this._heroServerKey) || this.serverCustomPreview?.getByName?.(this.playerChar?.name) || null;
+            const equipped = this.serverInventory?.getDisplayItem?.(7) || null;
+            const itemType = Number(equipped?.itemType ?? equipped?.type);
+            const owner = Number.isInteger(itemType) ? customItemModelForType(itemType) : null;
+            const isCustomWing = Number.isInteger(itemType) && Math.floor(itemType / 512) === 12 && owner?.customWing === true;
+            if (isCustomWing) {
+                const wingIndex = itemType % 512;
+                return Object.freeze({ ...(base || {}), wingIndex, muLocalEquipmentWingOwner:true });
+            }
+            // A real empty/local stock wing slot must not keep a stale custom
+            // F3:72 wing latched on the hero. Stock wings remain CharSet-owned.
+            if (!equipped && Number(base?.wingIndex || 0) > 0) {
+                return Object.freeze({ ...(base || {}), wingIndex:0, muLocalEquipmentWingOwner:true });
+            }
+            return base;
+        };
+
         this._syncWings = () => {
             const cs = this.playerChar?.charset;
             if (!this.scene?.mainObject || !Array.isArray(cs) || cs.length < 18) return Promise.resolve(false);
-            const preview = this.serverCustomPreview?.get?.(this._heroServerKey) || this.serverCustomPreview?.getByName?.(this.playerChar?.name) || null;
+            const preview = this._effectiveHeroCustomPreview?.() || null;
             const key = `${cs.join(',')}|previewWing=${Number(preview?.wingIndex || 0)}|previewPet=${Number(preview?.petIndex || 0)}|previewSecondPet=${Number(preview?.secondPetIndex || 0)}|previewElement=${Number(preview?.element?.[0] || 0)}:${Number(preview?.element?.[1] || 0)}`;
             if (this._heroEquipKey === undefined) {
                 this._heroEquipKey = key;
@@ -2658,7 +2687,7 @@ export class GameApp {
                             // This avoids rebuilding Player.bmd for a simple inventory
                             // move and reuses unchanged linked renderers.
                             const fast = await this.scene.replacePlayerEquipmentAccessories?.(job.visualClassId, job.charset, {
-                                customPreview: this.serverCustomPreview?.get?.(this._heroServerKey) || this.serverCustomPreview?.getByName?.(this.playerChar?.name) || null,
+                                customPreview: this._effectiveHeroCustomPreview?.() || null,
                                 acceptPublish: () => job.generation === this._heroEquipVisualGeneration,
                             });
                             if (fast?.status === 'stale') continue;
@@ -2666,7 +2695,7 @@ export class GameApp {
                             if (!next) {
                                 next = await this.scene.replacePlayerCharacter(job.visualClassId, [pos.x, pos.y, pos.z], {
                                     charset: job.charset,
-                                    customPreview: this.serverCustomPreview?.get?.(this._heroServerKey) || this.serverCustomPreview?.getByName?.(this.playerChar?.name) || null,
+                                    customPreview: this._effectiveHeroCustomPreview?.() || null,
                                     acceptPublish: () => job.generation === this._heroEquipVisualGeneration,
                                 });
                             }

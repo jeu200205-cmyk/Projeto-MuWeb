@@ -497,7 +497,7 @@ export class InventoryWindow extends MUWindow {
         // same owner clamp, translated by this window's logical Y.
         let top=y; const screenH=(Number(this.y)||0)+420; if(top+h>screenH) top+=screenH-(top+h);
         tip.style.left=`${Math.round(left)}px`; tip.style.top=`${Math.round(top)}px`;
-        tip.dataset.muTooltipCoverage='pc-stock-groups-0-11-plus-excellent-ancient-set-380-harmony-socket-period';
+        tip.dataset.muTooltipCoverage='pc-stock-groups-0-12-wings-plus-custom-wings-excellent-ancient-set-380-harmony-socket-period';
     }
 
     wireTargetAtClientPoint(clientX, clientY) {

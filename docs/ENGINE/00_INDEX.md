@@ -1,6 +1,6 @@
-# MUWEB Engine Documentation — FIX40
+# MUWEB Engine Documentation — FIX28
 
-Autoridade pública atual: **R90 FIX40 HOTFIX1**, preservando integralmente os incrementos anteriores. Autoridade semântica: source PC Main 5.2 limpa. Esta é uma base parcial de desenvolvimento; nenhum percentual de completude é homologado como 100%.
+Base direta atual: FIX27, preservando FIX26, FIX25, FIX24, FIX23, FIX22, FIX21, FIX20, FIX19 e os incrementos anteriores. Autoridade semântica: source.zip / Main 5.2 limpa. Esta é uma base parcial de desenvolvimento, sem percentual de completude homologado.
 
 ## Leitura recomendada
 
@@ -22,7 +22,6 @@ Autoridade pública atual: **R90 FIX40 HOTFIX1**, preservando integralmente os i
 16. [Índice automático de módulos](AUTOGEN_MODULE_INDEX.md)
 17. [Índice automático de testes](AUTOGEN_TEST_INDEX.md)
 18. [Pré-check de segurança para GitHub](GITHUB_SECURITY_PRECHECK.md)
-19. [Notas da publicação FIX40](16_FIX40_RELEASE_NOTES.md)
 
 ## Validação atual
 

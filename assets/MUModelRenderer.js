@@ -1577,6 +1577,61 @@ export class MUModelRenderer {
         return owner;
     }
 
+
+    /** FIX54: pooled bone particle lane for the PC CreateParticle bridge.
+     * CustomMonsterEffect/CharacterEffect call CreateParticle every render from a
+     * transformed bone position.  We retain that ownership without per-frame
+     * allocation: a small sprite pool is anchored to the authored bone and
+     * re-emitted on the fixed 40 ms FX clock. EffectLv/SubType is retained as
+     * metadata because its bitmap-specific physics belongs to ZzzEffectParticle. */
+    createBoneParticle({ boneIndex = 0, map = null, offset = null, scale = 1, color = null, subtype = 0, emitMs = 40, poolSize = 4 } = {}) {
+        if (this._disposed || !map?.isTexture) return null;
+        const anchor = this.bones?.[Number(boneIndex)];
+        const image = map.image || map.source?.data;
+        const width = Number(image?.width || image?.naturalWidth);
+        const height = Number(image?.height || image?.naturalHeight);
+        if (!anchor?.isBone || !(width > 0) || !(height > 0)) return null;
+        const base = offset?.isVector3 ? offset.clone() : new THREE.Vector3(...(offset || [0, 0, 0]));
+        const count = Math.max(1, Math.min(12, Number(poolSize) || 4));
+        const particles = [];
+        for (let i = 0; i < count; i++) {
+            const material = new THREE.SpriteMaterial({
+                map, color: color?.isColor ? color : new THREE.Color(color ?? 0xffffff),
+                transparent: true, opacity: 0, depthTest: true, depthWrite: false,
+                blending: THREE.AdditiveBlending, toneMapped: false, fog: false,
+            });
+            const sprite = new THREE.Sprite(material);
+            sprite.visible = false; sprite.frustumCulled = false;
+            sprite.scale.set(width * Number(scale || 0), height * Number(scale || 0), 1);
+            anchor.add(sprite);
+            particles.push({ sprite, material, born: -Infinity, phase: i / count });
+        }
+        const owner = {
+            particles, boneIndex:Number(boneIndex), subtype:Number(subtype)||0, emitMs:Math.max(16,Number(emitMs)||40),
+            lastEmit:-Infinity, cursor:0, disposed:false,
+            update:(nowMs)=>{
+                if (owner.disposed) return;
+                const now=Number(nowMs)||0;
+                if (now-owner.lastEmit >= owner.emitMs) {
+                    owner.lastEmit=now;
+                    const p=particles[owner.cursor++ % particles.length];
+                    p.born=now; p.sprite.visible=true; p.sprite.position.copy(base); p.material.opacity=1;
+                }
+                for (const p of particles) {
+                    const age=(now-p.born)/1000;
+                    if (!(age>=0) || age>0.32) { p.sprite.visible=false; continue; }
+                    const t=age/0.32; p.material.opacity=1-t;
+                    p.sprite.position.set(base.x, base.y + t * (5 + (owner.subtype%5)*1.5), base.z);
+                    const mul=1 + t*0.35; p.sprite.scale.set(width*Number(scale||0)*mul,height*Number(scale||0)*mul,1);
+                }
+            },
+            setColor:(next)=>{ for(const p of particles)p.material.color.copy(next?.isColor?next:new THREE.Color(next??0xffffff)); },
+            dispose:()=>{ if(owner.disposed)return; owner.disposed=true; for(const p of particles){p.sprite.parent?.remove(p.sprite);p.material.dispose();} },
+        };
+        this._presentationUpdates.push(owner.update);
+        return owner;
+    }
+
     _applyChromeEffect(mesh, flags) {
         const mat = mesh.material;
         // Convert to shader material if needed

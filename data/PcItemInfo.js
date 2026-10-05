@@ -10,6 +10,7 @@ import { resolveSkillByType } from '../skills/ServerMagicList.js';
 import { pcHarmonyItemType, pcIsSocketItemType, pcDecodeSocketFields } from './PcAdvancedItemOwners.js';
 import { pcResolveSetItem } from './PcItemSetOwners.js';
 import { pcApplyCustomItemForce } from './CustomItemForceLua.js';
+import { customItemModelForType } from './CustomItemModelMap.js';
 
 export const PC_TEXT_COLOR = Object.freeze({
   WHITE:'white', BLUE:'blue', GRAY:'gray', GREEN_BLUE:'greenBlue', RED:'red',
@@ -34,6 +35,8 @@ const AT = Object.freeze({
   IMPROVE_BLOCKING_PERCENT:91, IMPROVE_GAIN_GOLD:92, EXCELLENT_DAMAGE:93,
   IMPROVE_DAMAGE_LEVEL:94, IMPROVE_DAMAGE_PERCENT:95, IMPROVE_MAGIC_LEVEL:96,
   IMPROVE_MAGIC_PERCENT:97, IMPROVE_ATTACK_SPEED:98, IMPROVE_GAIN_LIFE:99, IMPROVE_GAIN_MANA:100,
+  IMPROVE_HP_MAX:101, IMPROVE_MP_MAX:102, ONE_PERCENT_DAMAGE:103, IMPROVE_AG_MAX:104,
+  DAMAGE_ABSORB:105, DAMAGE_REFLECTION:106, RECOVER_FULL_LIFE:107, RECOVER_FULL_MANA:108, IMPROVE_CHARISMA:109,
   SKILL_RECOVER:234, SKILL_MULTI_SHOT:235,
   SKILL_MANY_ARROW_UP:490, SKILL_POWER_SLASH_UP:505, SKILL_ASHAKE_UP:515,
 });
@@ -302,6 +305,14 @@ function pcCommonSpecialText(type,special,globalText){
     case AT.IMPROVE_ATTACK_SPEED:key=633;args=[value];break;
     case AT.IMPROVE_GAIN_LIFE:key=634;break;
     case AT.IMPROVE_GAIN_MANA:key=635;break;
+    case AT.IMPROVE_HP_MAX:key=740;args=[value];break;
+    case AT.IMPROVE_MP_MAX:key=741;args=[value];break;
+    case AT.ONE_PERCENT_DAMAGE:key=742;args=[value];break;
+    case AT.IMPROVE_AG_MAX:key=743;args=[value];break;
+    case AT.DAMAGE_ABSORB:key=744;args=[value];break;
+    case AT.DAMAGE_REFLECTION:key=1673;args=[value];break;
+    case AT.RECOVER_FULL_LIFE:key=1674;args=[value];break;
+    case AT.RECOVER_FULL_MANA:key=1675;args=[value];break;
     default:return null;
   }
   const main=gt(globalText,key,...args);if(main==null)return null;
@@ -313,6 +324,148 @@ function pcCommonSpecialText(type,special,globalText){
   return {main,extra};
 }
 
+
+
+
+function isPcStockWingType(type){
+  if(!Number.isInteger(type)||type<ITEM_WING||type>=ITEM_WING+G)return false;
+  const n=type-ITEM_WING;
+  return (n>=0&&n<=6)||n===41||n===42||(n>=36&&n<=40)||n===43||(n>=49&&n<=50)||(n>=130&&n<=135);
+}
+function pcWingLevelExtra(level,third=false){
+  if(level<10||level>15)return 0;
+  return (level-9)+(third?4:3); // third: +10=>5..+15=>10; common: +10=>4..+15=>9
+}
+function pcStockWingOptionSpecials(item,type,level){
+  const attribute1=Number(item.rawLevel ?? item.raw?.[1] ?? 0)&0xff;
+  const excelWing=Number(item.option1 ?? item.raw?.[3] ?? 0)&63;
+  const n=type-ITEM_WING,out=[];
+  const add=(t,v,k='wing')=>out.push(Object.freeze({type:t,value:v,kind:k}));
+  if((n>=3&&n<=6)||n===42){
+    if(excelWing&1)add(AT.IMPROVE_HP_MAX,50+level*5);if(excelWing&2)add(AT.IMPROVE_MP_MAX,50+level*5);
+    if(excelWing&4)add(AT.ONE_PERCENT_DAMAGE,3);if(excelWing&8)add(AT.IMPROVE_AG_MAX,50);if(excelWing&16)add(AT.IMPROVE_ATTACK_SPEED,5);
+  }else if((n>=36&&n<=40)||n===43){
+    if(excelWing&1)add(AT.ONE_PERCENT_DAMAGE,5);if(excelWing&2)add(AT.DAMAGE_REFLECTION,5);
+    if(excelWing&4)add(AT.RECOVER_FULL_LIFE,5);if(excelWing&8)add(AT.RECOVER_FULL_MANA,5);
+  }
+  // ItemConvert luck families.
+  if((attribute1&4)!==0 && ((n>=0&&n<=6)||(n>=36&&n<=43)||(n>=49&&n<=50))) add(AT.LUCK,0,'luck');
+  const option3=(attribute1&3)+(((Number(item.option1)||0)&0x40)?4:0);
+  if(option3){
+    const ex4=(excelWing&16)!==0,ex5=(excelWing&32)!==0;
+    if(n===0)add(AT.LIFE_REGENERATION,option3);
+    else if(n===1||n===41)add(AT.IMPROVE_MAGIC,option3*4);
+    else if(n===2)add(AT.IMPROVE_DAMAGE,option3*4);
+    else if(n===3)add(ex5?AT.LIFE_REGENERATION:AT.IMPROVE_DAMAGE,ex5?option3:option3*4);
+    else if(n===4)add(ex5?AT.IMPROVE_MAGIC:AT.LIFE_REGENERATION,ex5?option3*4:option3);
+    else if(n===5)add(ex5?AT.IMPROVE_DAMAGE:AT.LIFE_REGENERATION,ex5?option3*4:option3);
+    else if(n===6)add(ex5?AT.IMPROVE_DAMAGE:AT.IMPROVE_MAGIC,option3*4);
+    else if(n===42)add(ex5?AT.IMPROVE_MAGIC:AT.IMPROVE_CURSE,option3*4);
+    else if(n===36)add(ex4?AT.IMPROVE_DAMAGE:(ex5?AT.IMPROVE_DEFENSE:AT.LIFE_REGENERATION),ex4||ex5?option3*4:option3);
+    else if(n===37)add(ex4?AT.IMPROVE_MAGIC:(ex5?AT.IMPROVE_DEFENSE:AT.LIFE_REGENERATION),ex4||ex5?option3*4:option3);
+    else if(n===38)add(ex4?AT.IMPROVE_DAMAGE:(ex5?AT.IMPROVE_DEFENSE:AT.LIFE_REGENERATION),ex4||ex5?option3*4:option3);
+    else if(n===39)add(ex4?AT.IMPROVE_DAMAGE:(ex5?AT.IMPROVE_MAGIC:AT.LIFE_REGENERATION),ex4||ex5?option3*4:option3);
+    else if(n===40)add(ex4?AT.IMPROVE_DAMAGE:(ex5?AT.IMPROVE_DEFENSE:AT.LIFE_REGENERATION),ex4||ex5?option3*4:option3);
+    else if(n===43)add(ex4?AT.IMPROVE_MAGIC:(ex5?AT.IMPROVE_CURSE:AT.LIFE_REGENERATION),ex4||ex5?option3*4:option3);
+  }
+  return out;
+}
+function buildPcStockWingTooltip(item,attr,globalText,character=null){
+  const type=Number(item?.itemType ?? item?.type);if(!isPcStockWingType(type)||customWingOwnerForItem(item)||!attr?.name||!(globalText instanceof Map))return null;
+  const n=type-ITEM_WING,raw=Number(item.rawLevel ?? item.raw?.[1] ?? 0)&0xff,level=(raw>>3)&15,excelWing=Number(item.option1 ?? item.raw?.[3] ?? 0)&63;
+  const suppressExcel=(n>=3&&n<=6)||(n>=36&&n<=40)||(n>=42&&n<=43)||(n>=49&&n<=50)||(n>=130&&n<=135);
+  const excel=suppressExcel?0:excelWing;
+  const third=(n>=36&&n<=40)||n===43;
+  let defense=Number(attr.defense||0),baseLevel=Number(attr.itemLevel||0);
+  if(defense>0){if(excel>0&&baseLevel)defense+=Math.trunc(Number(attr.defense||0)*12/baseLevel)+4+Math.trunc(baseLevel/5);
+    const mult=((n>=3&&n<=6)||n===42)?2:(third?4:3);defense+=Math.min(9,level)*mult+pcWingLevelExtra(level,third);}
+  const specials=pcStockWingOptionSpecials(item,type,level);
+  const lines=[];blank(lines);add(lines,level?`${attr.name} +${level}`:attr.name,level>=7?PC_TEXT_COLOR.YELLOW:(specials.length?PC_TEXT_COLOR.BLUE:PC_TEXT_COLOR.WHITE),true);blank(lines);
+  if(defense>0)add(lines,gt(globalText,65,defense));
+  const maxDur=pcMaxDurability(item,attr);if(maxDur!=null&&(attr.durability||attr.magicDur))add(lines,gt(globalText,71,Number(item.durability||0),maxDur));
+  const stat=character&&typeof character==='object'?character:null;
+  const req=(key,need,current)=>{if(!need)return;const cur=Number(current);const ok=Number.isFinite(cur)&&cur>=need;add(lines,gt(globalText,key,need),ok?PC_TEXT_COLOR.WHITE:PC_TEXT_COLOR.RED);if(!ok&&Number.isFinite(cur))add(lines,gt(globalText,74,need-cur),PC_TEXT_COLOR.RED);};
+  const addValue=((n>=3&&n<=6)||n===42)?5:4;
+  const staticReq=(n>=7&&n<=40)||(n>=43&&n<512);
+  const requireLevel=Number(attr.requireLevel||0)?(staticReq?Number(attr.requireLevel):Number(attr.requireLevel)+level*addValue):0;
+  const itemLevel=excel?baseLevel+25:baseLevel,statBase=itemLevel+level*3;
+  const calc=(base,mul)=>Number(base||0)?20+Math.trunc(Number(base)*statBase*mul/100):0;
+  req(76,requireLevel,stat?.level);req(73,calc(attr.requireStrength,3),Number(stat?.strength||0)+Number(stat?.addStrength||0));req(75,calc(attr.requireDexterity,3),Number(stat?.dexterity||0)+Number(stat?.addDexterity||0));req(1930,calc(attr.requireVitality,3),Number(stat?.vitality||0)+Number(stat?.addVitality||0));req(77,calc(attr.requireEnergy,4),Number(stat?.energy||0)+Number(stat?.addEnergy||0));req(698,calc(attr.requireCharisma,3),Number(stat?.charisma||0)+Number(stat?.addCharisma||0));
+  blank(lines);
+  if((n>=0&&n<=2)||n===41){add(lines,gt(globalText,577,12+level*2));add(lines,gt(globalText,578,12+level*2));add(lines,gt(globalText,579));}
+  else if((n>=3&&n<=6)||n===42){add(lines,gt(globalText,577,32+level));add(lines,gt(globalText,578,25+level*2));add(lines,gt(globalText,579));}
+  else if(third){add(lines,gt(globalText,577,39+level*2));add(lines,gt(globalText,578,n===40?24+level*2:39+level*2));add(lines,gt(globalText,579));}
+  else if(n>=130&&n<=135){const v=(n===130||n===135)?20+level*2:12+level*2;add(lines,gt(globalText,577,v));add(lines,gt(globalText,578,v));add(lines,gt(globalText,579));}
+  if(specials.length)blank(lines);for(const sp of specials){const r=pcCommonSpecialText(type,sp,globalText);if(!r){add(lines,null);continue;}add(lines,r.main,PC_TEXT_COLOR.BLUE,false);for(const ex of r.extra)add(lines,ex.text,ex.color,ex.bold);}
+  if(lines.some(l=>l.text==null))return null;return lines;
+}
+
+function customWingOwnerForItem(item) {
+  const type=Number(item?.itemType ?? item?.type);
+  if(!Number.isInteger(type)||type<ITEM_WING||type>=ITEM_WING+G)return null;
+  const owner=customItemModelForType(type);
+  return owner?.customWing===true ? owner : null;
+}
+
+function buildPcCustomWingTooltip(item,attr,globalText,character=null){
+  const owner=customWingOwnerForItem(item);
+  if(!owner || !attr || !(globalText instanceof Map) || !attr.name)return null;
+  const type=Number(item.itemType ?? item.type);
+  const level=((Number(item.rawLevel ?? item.raw?.[1] ?? 0)>>3)&15);
+  const attribute1=Number(item.rawLevel ?? item.raw?.[1] ?? 0)&0xFF;
+  const attribute2=Number(item.option1 ?? item.raw?.[3] ?? 0)&0xFF;
+  const excelWing=attribute2&0x3F;
+  const option3=(attribute1&3)+((attribute2&0x40)!==0?4:0);
+
+  // ZzzInfomation.cpp::ItemConvert custom-wing branch.
+  let defense=Number(attr.defense||0);
+  const itemBaseLevel=Number(attr.itemLevel||0);
+  if(excelWing>0 && itemBaseLevel) defense += Math.trunc(Number(attr.defense||0)*12/itemBaseLevel)+4+Math.trunc(itemBaseLevel/5);
+  defense += Number(owner.defenseConstA||0)*level;
+  if(level>=10&&level<=15) defense += (level-9)+4; // +10=>5 ... +15=>10
+
+  const specials=[];
+  for(let i=0;i<4;i++) if((excelWing>>i)&1){
+    const [idx,val]=owner.newOptionPairs?.[i]||[0,0];
+    if(Number(idx)>0)specials.push({type:Number(idx),value:Number(val||0),kind:'custom-wing-new'});
+  }
+  if((attribute1>>2)&1) specials.push({type:AT.LUCK,value:0,kind:'luck'});
+  if(option3){
+    const slot=((excelWing>>4)&1)?1:(((excelWing>>5)&1)?2:0);
+    const [idx,val]=owner.optionPairs?.[slot]||[0,0];
+    if(Number(idx)>0)specials.push({type:Number(idx),value:Number(val||0),kind:'custom-wing-option3'});
+  }
+
+  const lines=[]; blank(lines);
+  const title=level===0?attr.name:`${attr.name} +${level}`;
+  add(lines,title,level>=7?PC_TEXT_COLOR.YELLOW:(specials.length?PC_TEXT_COLOR.BLUE:PC_TEXT_COLOR.WHITE),true); blank(lines);
+  if(defense>0)add(lines,gt(globalText,65,defense));
+  const maxDur=pcMaxDurability(item,attr);
+  if(maxDur!=null && (attr.durability||attr.magicDur)) add(lines,gt(globalText,71,Number(item.durability||0),maxDur));
+
+  const stat=(character&&typeof character==='object')?character:null;
+  const req=(key,need,current)=>{if(!need)return;const cur=Number(current);const ok=Number.isFinite(cur)&&cur>=need;add(lines,gt(globalText,key,need),ok?PC_TEXT_COLOR.WHITE:PC_TEXT_COLOR.RED);if(!ok&&Number.isFinite(cur))add(lines,gt(globalText,74,need-cur),PC_TEXT_COLOR.RED);};
+  // Custom-wing source keeps RequireLevel authored by ItemAttribute; stat
+  // requirements still follow the common ItemConvert item-level/level formula.
+  const requirementItemLevel=(excelWing>0)?itemBaseLevel+25:itemBaseLevel;
+  const statBase=requirementItemLevel+level*3;
+  const calc=(base,mul)=>Number(base||0)?20+Math.trunc(Number(base)*statBase*mul/100):0;
+  req(76,Number(attr.requireLevel||0),stat?.level);
+  req(73,calc(attr.requireStrength,3),Number(stat?.strength||0)+Number(stat?.addStrength||0));
+  req(75,calc(attr.requireDexterity,3),Number(stat?.dexterity||0)+Number(stat?.addDexterity||0));
+  req(1930,calc(attr.requireVitality,3),Number(stat?.vitality||0)+Number(stat?.addVitality||0));
+  req(77,attr.requireEnergy?20+Math.trunc(Number(attr.requireEnergy)*statBase*4/100):0,Number(stat?.energy||0)+Number(stat?.addEnergy||0));
+  req(698,Number(attr.requireCharisma||0),Number(stat?.charisma||0)+Number(stat?.addCharisma||0));
+
+  blank(lines);
+  add(lines,gt(globalText,577,(Number(owner.incDamageConstA||0)+(level*Number(owner.incDamageConstB||0)))-100));
+  add(lines,gt(globalText,578,100-(Number(owner.decDamageConstA||0)-(level*Number(owner.decDamageConstB||0)))));
+  add(lines,gt(globalText,579));
+  if(specials.length)blank(lines);
+  for(const special of specials){const rendered=pcCommonSpecialText(type,special,globalText);if(!rendered){add(lines,null);continue;}add(lines,rendered.main,PC_TEXT_COLOR.BLUE,false);for(const extra of rendered.extra)add(lines,extra.text,extra.color,extra.bold);}
+  if(lines.some(l=>l.text==null))return null;
+  return lines;
+}
 
 
 function pcExcellentSpecials(item,type){
@@ -804,6 +957,10 @@ export function pcCommonItemTooltip(item, attr, globalText, character=null) {
   return buildPcStockItemTooltip(item,attr,globalText,character,null,true,null);
 }
 export function pcItemTooltip(item, attr, globalText, character=null, advancedOwners=null, setRuntime=null) {
+  const customWing=buildPcCustomWingTooltip(item,attr,globalText,character);
+  if(customWing)return customWing;
+  const stockWing=buildPcStockWingTooltip(item,attr,globalText,character);
+  if(stockWing)return stockWing;
   return buildPcStockItemTooltip(item,attr,globalText,character,advancedOwners,false,setRuntime);
 }
 function typeIsStaff(type){return type>=ITEM_STAFF&&type<ITEM_STAFF+G;}

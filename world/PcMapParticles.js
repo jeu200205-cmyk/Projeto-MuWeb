@@ -3,11 +3,13 @@ import { RemoteAssets } from '../data/RemoteAssets.js';
 import { MAP_SIZE } from './TerrainWorld.js';
 import { tryAcquirePcParticle, releasePcParticle } from './PcParticleBudget.js';
 import { pcIcarusCloudControllerContract } from './PcIcarusVisualContract.js';
+import { createPcThunderJoint, tickPcThunderJoint, disposePcThunderJoint } from './PcThunderJoint.js';
 
 const PATHS=Object.freeze({
   SMOKE:'Effect/smoke01.OZJ',
   RAIN_CIRCLE_1:'World10/rain03.OZT',
   CLOUD:'Effect/clouds.OZJ',
+  CLOUD_LIGHT:'Effect/cloudLight.OZJ',
 });
 const cache=new Map();
 const ri=(n)=>Math.floor(Math.random()*Math.max(1,n));
@@ -90,10 +92,10 @@ function updateSmoke(p,f,worldMs){
 export async function createPcMapParticleOwner(worldNum,serial,renderer,obj){
   const c=pcMapParticleContract(worldNum,serial);if(!c)return null;
   const group=new THREE.Group();group.name=`PcMapParticles_W${worldNum}_T${serial}`;group.userData.muPcOwner='ZzzObject.cpp::RenderObjectVisual/ZzzEffectParticle.cpp';
-  const particles=[];let disposed=false,lastMs=null,tickAcc=0,elapsedMs=0,initialBurstDone=false;
+  const particles=[];const thunderJoints=[];let disposed=false,lastMs=null,tickAcc=0,elapsedMs=0,initialBurstDone=false;
   const tmpA=new THREE.Vector3(),tmpB=new THREE.Vector3();
   if(c.kind==='icarusCloudController'){
-    const cloud=await loadBitmap(PATHS.CLOUD);if(!cloud)return null;
+    const [cloud,cloudLight]=await Promise.all([loadBitmap(PATHS.CLOUD),loadBitmap(PATHS.CLOUD_LIGHT)]);if(!cloud)return null;
     // ZzzObject.cpp::RenderObjectVisual/WD_10HEAVEN types 0..5: emit once
     // while HiddenMesh != -2, then the BMD is hidden forever for this object.
     renderer.addPresentationUpdate?.((worldMs=0)=>{
@@ -101,7 +103,34 @@ export async function createPcMapParticleOwner(worldNum,serial,renderer,obj){
       const ms=Math.max(0,Number(worldMs)||0);
       const safe=lastMs==null?0:Math.max(0,Math.min(.25,(ms-lastMs)/1000));lastMs=ms;
       if(!initialBurstDone){initialBurstDone=true;for(let i=0;i<c.count;i++){const p=newIcarusCloud(cloud,c.subtype,obj,i);if(p){particles.push(p);group.add(p.sprite);}}}
-      const f=Math.min(2.5,safe*25);for(let i=particles.length-1;i>=0;i--){const p=particles[i];if(!updateIcarusCloud(p,f)){destroy(group,p);particles.splice(i,1);}}
+      // ZzzObject.cpp::MoveObjectOnEffect WD_10HEAVEN: controllers 0..5
+      // randomly emit BITMAP_CLOUD+1 at scale .5 using the object's authored
+      // world position and a grayscale light in [0,.18].  This is a separate
+      // retained owner from the one-shot BITMAP_CLOUD burst above.
+      tickAcc+=safe*25;let steps=Math.min(6,Math.floor(tickAcc));tickAcc-=steps;
+      while(steps-->0){
+        if(cloudLight && ri(10)===0){
+          const q=makeSpriteParticle(cloudLight);
+          const lum=ri(10)*.02;
+          const base=pcWorldToThree([Number(obj?.x)||0,Number(obj?.y)||0,Number(obj?.z)||0],new THREE.Vector3());
+          if(q){
+            const p={...q,kind:'icarusCloudLight',life:2,scale:.5,light:[lum,lum,lum]};
+            p.sprite.position.copy(base);
+            p.mat.color.setRGB(lum,lum,lum);p.sprite.scale.set(cloudLight.width*.5,cloudLight.height*.5,1);
+            p.sprite.userData.muPcParticle='cloudLight:BITMAP_CLOUD+1';particles.push(p);group.add(p.sprite);
+          }
+          // MoveObjectOnEffect creates TWO BITMAP_JOINT_THUNDER subtype 6
+          // children in the same authored 1/10 branch.  ZzzEffectJoint subtype6
+          // creates 45 descending tails at MU Z -= 13 with scale rand()%20+10.
+          for(let k=0;k<2;k++){
+            const end=base.clone();end.y-=45*13;
+            const scale=ri(20)+10;
+            void createPcThunderJoint({group,camera:renderer?.camera,start:base,end,bitmapPlusOne:false,subtype:6,scale,light:[lum,lum,lum]}).then(j=>{if(j&&!disposed)thunderJoints.push(j);else if(j)disposePcThunderJoint(j);});
+          }
+        }
+      }
+      const f=Math.min(2.5,safe*25);for(let jt=0;jt<Math.floor(f);jt++)for(let j=thunderJoints.length-1;j>=0;j--){if(!tickPcThunderJoint(thunderJoints[j]))thunderJoints.splice(j,1);}
+      for(let i=particles.length-1;i>=0;i--){const p=particles[i];let live=true;if(p.kind==='icarusCloudLight'){p.life-=f;live=p.life>0;}else live=updateIcarusCloud(p,f);if(!live){destroy(group,p);particles.splice(i,1);}}
     });
   }else if(c.kind==='devilSquare2'){
     const rain=await loadBitmap(PATHS.RAIN_CIRCLE_1);if(!rain)return null;
@@ -146,7 +175,7 @@ export async function createPcMapParticleOwner(worldNum,serial,renderer,obj){
       for(let i=particles.length-1;i>=0;i--){const p=particles[i];if(!updateSmoke(p,f,ms)){destroy(group,p);particles.splice(i,1);}}
     });
   }
-  return {group,usesRendererTick:true,dispose(){if(disposed)return;disposed=true;for(const p of particles)destroy(group,p);particles.length=0;group.userData.update=null;group.clear();}};
+  return {group,usesRendererTick:true,dispose(){if(disposed)return;disposed=true;for(const p of particles)destroy(group,p);particles.length=0;for(const j of thunderJoints.splice(0))disposePcThunderJoint(j);group.userData.update=null;group.clear();}};
 }
 
 export const PC_MAP_PARTICLE_BITMAP_PATHS=PATHS;

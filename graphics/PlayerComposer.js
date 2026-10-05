@@ -75,7 +75,12 @@ export function accessoryAttachRule(input) {
         };
     }
     if (!key) return { bone: 47, offset: [0, 0, 15], rotYDeg: 0, playSpeed: 0.25 };
-    if (key === 'WING:40') return { bone: 19, offset: [0, 0, 15], rotYDeg: 0, playSpeed: 0.25 };
+    // PC ZzzCharacter.cpp::RenderLinkObject: WING+40 is a linked cape, not a
+    // generic wing. LinkBone=19 and the local matrix is Angle(0,90,0) with
+    // translation (-47,-7,0). The old Web (0,0,15) rule misplaced it.
+    if (key === 'WING:40') return { bone: 19, offset: [-47, -7, 0], anglesDeg: [0, 90, 0], playSpeed: 0.25, stockCape: true };
+    // RenderLinkObject switch(Type): MODEL_WING+39 owns 0.15 play speed.
+    if (key === 'WING:39') return { bone: 47, offset: [0, 0, 15], rotYDeg: 0, playSpeed: 0.15 };
     if (key === 'HELPER:30') return { bone: 47, offset: [0, 0, 15], rotYDeg: 0, playSpeed: 0.25 };
     if (key === 'HELPER:1') return { bone: 34, offset: [20, 0, 0], rotYDeg: 0, playSpeed: 0.5 };
     return { bone: 47, offset: [0, 0, 15], rotYDeg: 0, playSpeed: 0.25 };
@@ -665,10 +670,6 @@ async function attachLuaSpritePlans(renderer, plans, ownerKey) {
     if (!renderer || !Array.isArray(plans) || !plans.length) return { owners: [], unresolved: [] };
     const owners = [], unresolved = [];
     for (const plan of plans) {
-        if (plan?.kind !== 'sprite') {
-            unresolved.push(Object.freeze({ ...plan, reason: `${plan?.kind || 'unknown'}-renderer-owner-pending` }));
-            continue;
-        }
         const bitmap = Number.isFinite(plan.bitmap) ? plan.bitmap : plan.effectId;
         const map = await pcBitmapTexture(bitmap).catch(() => null);
         if (!map?.isTexture) {
@@ -676,14 +677,26 @@ async function attachLuaSpritePlans(renderer, plans, ownerKey) {
             continue;
         }
         const offset = Array.isArray(plan.offset) ? new THREE.Vector3(...plan.offset) : null;
-        const owner = renderer.createBoneSprite?.({
+        const common = {
             boneIndex: Number(plan.bone), map, offset, scale: Number(plan.scale) || 0,
             color: new THREE.Color(Number(plan.r) || 0, Number(plan.g) || 0, Number(plan.b) || 0),
-        });
+        };
+        let owner = null;
+        if (plan?.kind === 'sprite') owner = renderer.createBoneSprite?.(common);
+        else if (plan?.kind === 'particle') owner = renderer.createBoneParticle?.({ ...common, subtype:Number(plan.subtype ?? plan.effectLv) || 0, emitMs:40 });
+        else if (plan?.kind === 'skill') {
+            // CharacterSetEffect CreateSkill is a bitmap/effect child emitted from the authored bone.
+            // Keep EffectLv and the fixed 40ms FX clock; do not substitute a generic magic effect.
+            owner = renderer.createBoneParticle?.({ ...common, subtype:Number(plan.effectLv)||0, emitMs:40, poolSize:6 });
+        } else {
+            unresolved.push(Object.freeze({ ...plan, reason: `${plan?.kind || 'unknown'}-unsupported` }));
+            continue;
+        }
         if (!owner) {
             unresolved.push(Object.freeze({ ...plan, reason: 'bone-or-bitmap-invalid' }));
             continue;
         }
+        owner.muLuaPlan = Object.freeze({ ...plan });
         owners.push(owner);
     }
     if (!renderer.userData) renderer.userData = {};
@@ -696,8 +709,8 @@ async function attachLuaSpritePlans(renderer, plans, ownerKey) {
  * PC authority calls CharacterItensEffect for each item MODEL type and invokes
  * CreateEffectSetPlayer with the BOOTS model type every character render. In this
  * client CheckFullSet() returns 0 before its legacy body, so EquipmentLevelSet is
- * exactly 0 for this source. Particle/skill rows remain explicitly unresolved until
- * the exact PC particle/effect update owner is ported; no generic emitter is used. */
+ * exactly 0 for this source. FIX54 consumes sprite, particle and skill child lanes
+ * from their authored bone using the fixed 40 ms FX clock and pooled allocations. */
 export async function applyPcCharacterLuaSpritePresentation(renderer, attach) {
     if (!renderer || !attach) return { owners: [], unresolved: [] };
     const allOwners = [], allUnresolved = [];

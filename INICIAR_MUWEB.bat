@@ -1,23 +1,14 @@
 @echo off
-setlocal DisableDelayedExpansion
-pushd "%~dp0" >nul 2>&1
-if errorlevel 1 exit /b 9
-title MUWEB R90 FIX53 - Element Pets Helper Movement Summoner Skills
-where node.exe >nul 2>&1
-if errorlevel 1 goto :fail_node
-if exist "node_modules\three\build\three.module.js" if exist "node_modules\ws\index.js" goto :deps_ok
-call "%~dp0INSTALAR_DEPENDENCIAS_R90.bat"
-if errorlevel 1 goto :fail_deps
-:deps_ok
-node.exe "%~dp0tools\start-r90-fix53-safe.cjs"
-set "MUWEB_FIX53_RC=%ERRORLEVEL%"
-popd
-endlocal & exit /b %MUWEB_FIX53_RC%
-:fail_node
-echo [FALHA] node.exe nao foi encontrado no PATH.
-popd
-endlocal & exit /b 10
-:fail_deps
-echo [FALHA] Dependencias incompletas.
-popd
-endlocal & exit /b 20
+setlocal EnableExtensions
+cd /d "%~dp0"
+title MUWEB R90 FIX57 - Cape Link Matrix + Wing Presentation
+echo ================================================================
+echo  MUWEB R90 FIX57 - autoridade segura
+echo ================================================================
+where node >nul 2>nul || (echo [ERRO] Node.js nao encontrado.& pause & exit /b 1)
+if not exist node_modules\three (
+  echo [R90] Instalando dependencias exatas do package-lock.json...
+  call npm ci --ignore-scripts --no-audit --no-fund || (echo [ERRO] npm ci falhou.& pause & exit /b 1)
+)
+node tools\start-r90-fix57-safe.cjs
+if errorlevel 1 pause

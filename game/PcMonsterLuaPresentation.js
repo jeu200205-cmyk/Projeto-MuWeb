@@ -20,10 +20,15 @@ export async function attachPcMonsterLuaPresentation(renderer,monsterClass){
     const pass=renderer.createOverlayPass?.(glow.flags,{color:new THREE.Color(...glow.color),meshFilter:(mesh)=>Number(mesh?.userData?.muMeshIndex)===glow.layer,passOrder:2});
     if(pass)owners.push({kind:'glow',owner:pass,plan:glow});
   }
-  const effects=pcMonsterEffectPlan(monsterClass); const spriteRows=[]; const unresolved=[];
+  const effects=pcMonsterEffectPlan(monsterClass); const spriteRows=[]; const particleRows=[]; const unresolved=[];
   for(const rule of effects){
-    if(rule.type!==0){unresolved.push(Object.freeze({...rule,reason:'particle-update-owner-not-yet-exact'}));continue;}
     const map=await pcBitmapTexture(rule.effectId); if(!map){unresolved.push(Object.freeze({...rule,reason:'bitmap-id-unresolved'}));continue;}
+    if(rule.type===1){
+      const particle=renderer.createBoneParticle?.({boneIndex:rule.bone,map,scale:rule.size,color:new THREE.Color(rule.r,rule.g,rule.b),subtype:rule.effectLv,emitMs:40,poolSize:5});
+      if(!particle){unresolved.push(Object.freeze({...rule,reason:'bone-or-bitmap-invalid'}));continue;}
+      particleRows.push({particle,rule}); owners.push({kind:'particle',owner:particle,plan:rule});
+      continue;
+    }
     const sprite=renderer.createBoneSprite?.({boneIndex:rule.bone,map,scale:rule.size,color:new THREE.Color(rule.r,rule.g,rule.b)});
     if(!sprite){unresolved.push(Object.freeze({...rule,reason:'bone-or-bitmap-invalid'}));continue;}
     // MonsterEffect.cpp passes Black as CreateSprite rotation.
@@ -34,6 +39,10 @@ export async function attachPcMonsterLuaPresentation(renderer,monsterClass){
     for(const row of spriteRows){
       const chance=row.rule.randTime===100?true:(Math.floor(Math.random()*100)<=row.rule.randTime);
       row.sprite.sprite.visible=chance;
+    }
+    for(const row of particleRows){
+      const chance=row.rule.randTime===100?true:(Math.floor(Math.random()*100)<=row.rule.randTime);
+      for(const p of row.particle.particles||[]) if(!chance) p.sprite.visible=false;
     }
   };
   return {owners:Object.freeze(owners),unresolved:Object.freeze(unresolved),update,dispose(){for(const x of owners)x.owner?.dispose?.();}};
