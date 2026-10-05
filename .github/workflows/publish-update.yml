@@ -1,0 +1,141 @@
+name: Publicar atualização MuWeb
+
+on:
+  workflow_dispatch:
+    inputs:
+      title:
+        description: 'Título público opcional da atualização'
+        required: false
+        type: string
+      summary:
+        description: 'Resumo público opcional das principais mudanças'
+        required: false
+        type: string
+      create_release:
+        description: 'Criar GitHub Release e tag pública'
+        required: true
+        default: true
+        type: boolean
+
+permissions:
+  contents: write
+
+concurrency:
+  group: muweb-publication
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout completo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Configurar Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Validar árvore pública
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f README.md
+          test -f package.json
+          test -f INICIAR_MUWEB.bat
+          test -f INSTALAR_DEPENDENCIAS.bat
+          test -f PARAR_MUWEB.bat
+          test -f tools/generate-public-changelog.mjs
+
+          if grep -RniE '\b(MUWEB[_-]?)?R?[0-9]*[_-]?FIX[0-9]+\b|\bFIX[[:space:]]*[0-9]+\b|\bHOTFIX\b|\bcheckpoint\b' \
+            README.md docs core world graphics scenes ui ui2 assets tools network database 2>/dev/null; then
+            echo 'ERRO: nomenclatura interna encontrada na árvore pública.' >&2
+            exit 1
+          fi
+
+          if grep -RniE 'C:[/\\]Users[/\\]|E:[/\\]Users[/\\]|/jeu/|\\jeu\\|muonline123|MuEMU_.*_Key_2024' \
+            README.md docs core world graphics scenes ui ui2 assets tools network database 2>/dev/null; then
+            echo 'ERRO: possível caminho local, segredo ou dado privado encontrado.' >&2
+            exit 1
+          fi
+
+      - name: Instalar dependências
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -f package-lock.json ]; then
+            npm ci
+          else
+            npm install --ignore-scripts
+          fi
+
+      - name: Executar validação do projeto
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm test --if-present
+          npm run build --if-present
+
+      - name: Gerar changelog público
+        id: changelog
+        shell: bash
+        env:
+          INPUT_TITLE: ${{ inputs.title }}
+          INPUT_SUMMARY: ${{ inputs.summary }}
+        run: |
+          set -euo pipefail
+          DATE="$(date -u +%F)"
+          TITLE="${INPUT_TITLE:-Atualização $DATE}"
+          SUMMARY="${INPUT_SUMMARY:-Atualização da source pública com melhorias, correções e avanços acumulados do Projeto MuWeb.}"
+          node tools/generate-public-changelog.mjs \
+            --date="$DATE" \
+            --title="$TITLE" \
+            --summary="$SUMMARY"
+          echo "date=$DATE" >> "$GITHUB_OUTPUT"
+          echo "title=$TITLE" >> "$GITHUB_OUTPUT"
+
+      - name: Commitar changelog
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add CHANGELOG.md
+          if ! git diff --cached --quiet; then
+            git commit -m "Atualiza changelog público"
+            git push origin HEAD:main
+          fi
+
+      - name: Criar tag e GitHub Release
+        if: ${{ inputs.create_release }}
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TITLE: ${{ steps.changelog.outputs.title }}
+          RELEASE_DATE: ${{ steps.changelog.outputs.date }}
+        run: |
+          set -euo pipefail
+          git fetch origin main --tags
+          git checkout main
+          git pull --ff-only origin main
+          TAG="update-${RELEASE_DATE}-$(date -u +%H%M%S)"
+          git tag "$TAG"
+          git push origin "$TAG"
+
+          NOTES_FILE="$(mktemp)"
+          awk 'BEGIN{found=0} /^## /{if(found) exit; found=1} found{print}' CHANGELOG.md > "$NOTES_FILE"
+          gh release create "$TAG" \
+            --title "$RELEASE_TITLE" \
+            --notes-file "$NOTES_FILE" \
+            --target main
+
+      - name: Resumo
+        shell: bash
+        run: |
+          echo '### Publicação concluída' >> "$GITHUB_STEP_SUMMARY"
+          echo '- Branch: `main`' >> "$GITHUB_STEP_SUMMARY"
+          echo '- Changelog público atualizado' >> "$GITHUB_STEP_SUMMARY"
+          echo '- Validação contra nomes internos e dados locais executada' >> "$GITHUB_STEP_SUMMARY"
+          echo '- Release: `${{ inputs.create_release }}`' >> "$GITHUB_STEP_SUMMARY"
