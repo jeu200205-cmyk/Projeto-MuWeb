@@ -1,6 +1,6 @@
 # Projeto MuWeb
 
-Cliente/engine Web experimental inspirado no **MU Online Main 5.2**, desenvolvido em JavaScript/WebGL.
+Cliente/engine Web experimental desenvolvido a partir da base **MU Online Main 5.2 do Dinho**, com adaptação progressiva dos sistemas originais para JavaScript/WebGL.
 
 O repositório publica a **source de desenvolvimento atual** do projeto para estudo e continuação. Ele ainda não representa uma portabilidade completa do cliente de PC e vários sistemas continuam em evolução.
 
@@ -43,6 +43,13 @@ node tools/dev-web-server.cjs 8080
 ```
 
 Depois abra `http://127.0.0.1:8080/`.
+
+## Atualizações
+
+O projeto possui um fluxo público de publicação que pode gerar automaticamente changelog, tag e GitHub Release depois que a source nova é sincronizada com a branch `main`.
+
+- [Changelog público](CHANGELOG.md)
+- [Como publicar uma atualização](PUBLICAR_ATUALIZACAO.md)
 
 ## Documentação
 
