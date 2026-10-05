@@ -1,6 +1,11 @@
 name: Publicar atualização MuWeb
 
 on:
+  push:
+    branches:
+      - main
+    paths-ignore:
+      - 'CHANGELOG.md'
   workflow_dispatch:
     inputs:
       title:
@@ -26,6 +31,7 @@ concurrency:
 
 jobs:
   publish:
+    if: ${{ github.actor != 'github-actions[bot]' }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout completo
@@ -49,8 +55,6 @@ jobs:
           test -f PARAR_MUWEB.bat
           test -f tools/generate-public-changelog.mjs
 
-          # Bloqueia identificadores internos numerados, mas permite palavras
-          # genéricas como "checkpoint" quando usadas na documentação pública.
           if grep -RniE '\b(MUWEB[_-]?)?R?[0-9]*[_-]?FIX[0-9]+\b|\bFIX[[:space:]]*[0-9]+\b' \
             README.md docs core world graphics scenes ui ui2 assets network database 2>/dev/null; then
             echo 'ERRO: identificador interno numerado encontrado na árvore pública.' >&2
@@ -84,8 +88,8 @@ jobs:
         id: changelog
         shell: bash
         env:
-          INPUT_TITLE: ${{ inputs.title }}
-          INPUT_SUMMARY: ${{ inputs.summary }}
+          INPUT_TITLE: ${{ github.event_name == 'workflow_dispatch' && inputs.title || '' }}
+          INPUT_SUMMARY: ${{ github.event_name == 'workflow_dispatch' && inputs.summary || '' }}
         run: |
           set -euo pipefail
           DATE="$(date -u +%F)"
@@ -111,7 +115,7 @@ jobs:
           fi
 
       - name: Criar tag e GitHub Release
-        if: ${{ inputs.create_release }}
+        if: ${{ github.event_name == 'push' || inputs.create_release }}
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -140,4 +144,4 @@ jobs:
           echo '- Branch: `main`' >> "$GITHUB_STEP_SUMMARY"
           echo '- Changelog público atualizado' >> "$GITHUB_STEP_SUMMARY"
           echo '- Validação contra identificadores internos e dados locais executada' >> "$GITHUB_STEP_SUMMARY"
-          echo '- Release: `${{ inputs.create_release }}`' >> "$GITHUB_STEP_SUMMARY"
+          echo '- Release automática criada para pushes na main' >> "$GITHUB_STEP_SUMMARY"
