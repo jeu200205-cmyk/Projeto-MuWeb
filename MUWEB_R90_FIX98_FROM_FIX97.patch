@@ -1,0 +1,313 @@
+diff -ruN '--exclude=R90_FIX97_SOURCE_HASHES.json' '--exclude=R90_FIX98_SOURCE_HASHES.json' '--exclude=MUWEB_R90_FIX98_FROM_FIX97.patch' /mnt/data/MUWEB_R90_FIX97_CHARACTER_VISIBILITY_PARSE_OWNER_2026-10-05/CURRENT_AUTHORITY.txt /mnt/data/MUWEB_R90_FIX98_EQUIPMENT_RAW_BMD_REATTACH_2026-10-05/CURRENT_AUTHORITY.txt
+--- /mnt/data/MUWEB_R90_FIX97_CHARACTER_VISIBILITY_PARSE_OWNER_2026-10-05/CURRENT_AUTHORITY.txt	2026-10-06 00:37:30.094802638 +0000
++++ /mnt/data/MUWEB_R90_FIX98_EQUIPMENT_RAW_BMD_REATTACH_2026-10-05/CURRENT_AUTHORITY.txt	2026-10-06 00:50:44.507038055 +0000
+@@ -1,7 +1,6 @@
+-MUWEB central authority: MUWEB_R90_FIX97_CHARACTER_VISIBILITY_PARSE_OWNER_2026-10-05_FULL.zip
+-Parent: MUWEB_R90_FIX96_HELPER_EFFECTS_DINORANT_BOOT_2026-10-05_FULL.zip
+-FIX97: restaura visibilidade de personagens. PlayerComposer volta a importar o parseBMD bruto usado pelas cinco peças Class, eliminando ReferenceError que zerava Helm/Armor/Pant/Glove/Boot.
+-FIX97: Player.bmd continua em MUAssets.loadBMD; peças de classe continuam BMD bruto + extractPartMeshes contra Player.bones, preservando ownership PC RenderPartObject.
+-FIX96 preservado: RemoteAssets/THREE boot fix, CharacterHelper table/effects, Dinorant routing, wings/ATT/DarkSpirit.
+-Data authority: C:\clientepromax\Nova pasta\MuPromax 1.0.1\Data ONLY.
+-No placeholders/fake meshes.
++MUWEB central authority: MUWEB_R90_FIX98_EQUIPMENT_RAW_BMD_REATTACH_2026-10-05_FULL.zip
++Parent: MUWEB_R90_FIX97_CHARACTER_VISIBILITY_PARSE_OWNER_2026-10-05_FULL.zip
++FIX98: equipment and body attachments use an explicit raw-BMD owner (MUAssets.loadBMDRaw) so Triangle_t2/Vertex_t are never confused with Three.js-adapted render-data.
++FIX98: MUAssetLoader caches raw BMD separately and loadBMD adapts from the same authority-scoped raw parse.
++FIX98: fixes staged F3:13 reattach failures `m.triangles is not iterable` / downstream undefined.map for equipped body, weapons and wings.
++Data authority remains C:\clientepromax\Nova pasta\MuPromax 1.0.1\Data ONLY.
+diff -ruN '--exclude=R90_FIX97_SOURCE_HASHES.json' '--exclude=R90_FIX98_SOURCE_HASHES.json' '--exclude=MUWEB_R90_FIX98_FROM_FIX97.patch' /mnt/data/MUWEB_R90_FIX97_CHARACTER_VISIBILITY_PARSE_OWNER_2026-10-05/LIGAR_WEB_R90_FIX97.bat /mnt/data/MUWEB_R90_FIX98_EQUIPMENT_RAW_BMD_REATTACH_2026-10-05/LIGAR_WEB_R90_FIX97.bat
+--- /mnt/data/MUWEB_R90_FIX97_CHARACTER_VISIBILITY_PARSE_OWNER_2026-10-05/LIGAR_WEB_R90_FIX97.bat	2026-10-06 00:35:29.025091163 +0000
++++ /mnt/data/MUWEB_R90_FIX98_EQUIPMENT_RAW_BMD_REATTACH_2026-10-05/LIGAR_WEB_R90_FIX97.bat	1970-01-01 00:00:00.000000000 +0000
+@@ -1,11 +0,0 @@
+-@echo off
+-setlocal
+-cd /d "%~dp0"
+-where node >nul 2>nul || (echo [R90 FIX97] Node.js nao encontrado.& pause & exit /b 1)
+-if not exist node_modules\three (
+-  echo Dependencias ausentes. Instalando pelo lockfile...
+-  call npm ci --omit=dev || (echo [R90 FIX97] Falha ao instalar dependencias.& pause & exit /b 1)
+-)
+-node tools\start-r90-fix97-safe.cjs
+-if errorlevel 1 pause
+-endlocal
+diff -ruN '--exclude=R90_FIX97_SOURCE_HASHES.json' '--exclude=R90_FIX98_SOURCE_HASHES.json' '--exclude=MUWEB_R90_FIX98_FROM_FIX97.patch' /mnt/data/MUWEB_R90_FIX97_CHARACTER_VISIBILITY_PARSE_OWNER_2026-10-05/LIGAR_WEB_R90_FIX98.bat /mnt/data/MUWEB_R90_FIX98_EQUIPMENT_RAW_BMD_REATTACH_2026-10-05/LIGAR_WEB_R90_FIX98.bat
+--- /mnt/data/MUWEB_R90_FIX97_CHARACTER_VISIBILITY_PARSE_OWNER_2026-10-05/LIGAR_WEB_R90_FIX98.bat	1970-01-01 00:00:00.000000000 +0000
++++ /mnt/data/MUWEB_R90_FIX98_EQUIPMENT_RAW_BMD_REATTACH_2026-10-05/LIGAR_WEB_R90_FIX98.bat	2026-10-06 00:50:45.204704235 +0000
+@@ -0,0 +1,10 @@
++@echo off
++setlocal
++cd /d "%~dp0"
++where node >nul 2>nul || (echo [R90 FIX98] Node.js nao encontrado.& pause & exit /b 1)
++if not exist node_modules\three\package.json (
++  echo [R90 FIX98] Instalando dependencias...
++  call npm ci --omit=dev || (echo [R90 FIX98] Falha ao instalar dependencias.& pause & exit /b 1)
++)
++node tools\start-r90-fix98-safe.cjs
++if errorlevel 1 pause
+diff -ruN '--exclude=R90_FIX97_SOURCE_HASHES.json' '--exclude=R90_FIX98_SOURCE_HASHES.json' '--exclude=MUWEB_R90_FIX98_FROM_FIX97.patch' /mnt/data/MUWEB_R90_FIX97_CHARACTER_VISIBILITY_PARSE_OWNER_2026-10-05/MUWEB_R90_FIX98_PORTABILITY.md /mnt/data/MUWEB_R90_FIX98_EQUIPMENT_RAW_BMD_REATTACH_2026-10-05/MUWEB_R90_FIX98_PORTABILITY.md
+--- /mnt/data/MUWEB_R90_FIX97_CHARACTER_VISIBILITY_PARSE_OWNER_2026-10-05/MUWEB_R90_FIX98_PORTABILITY.md	1970-01-01 00:00:00.000000000 +0000
++++ /mnt/data/MUWEB_R90_FIX98_EQUIPMENT_RAW_BMD_REATTACH_2026-10-05/MUWEB_R90_FIX98_PORTABILITY.md	2026-10-06 00:50:44.507108922 +0000
+@@ -0,0 +1,17 @@
++# MUWEB R90 FIX98 — Equipment Raw-BMD/Reattach
++
++Parent: FIX97 Character Visibility Parse Owner.
++
++## Closed
++- Split BMD contracts in MUAssetLoader: `loadBMDRaw()` owns parser structures (`meshes[].triangles/vertices/normals`); `loadBMD()` owns adapted Three.js render-data.
++- `buildEquipmentAttach()` now loads weapons, body replacements, wings and attachable helpers through `loadBMDRaw()`.
++- Base class Helm/Armor/Pant/Glove/Boot use the same raw cache instead of reparsing independently.
++- Adapted render BMD is derived from the authority-scoped raw parse, preserving one parser owner and avoiding the FIX88 type-confusion regression.
++
++## Symptoms fixed
++- `m.triangles is not iterable` during F3:13 staged reattach.
++- Follow-on `Cannot read properties of undefined (reading 'map')` when accessory/body candidate was built from incomplete adapted data.
++- Equipped items visible in inventory but absent on character due to failed reattach.
++
++## Not claimed
++Custom item-specific missing assets/model mappings remain fail-closed if the physical BMD itself is absent or invalid.
+diff -ruN '--exclude=R90_FIX97_SOURCE_HASHES.json' '--exclude=R90_FIX98_SOURCE_HASHES.json' '--exclude=MUWEB_R90_FIX98_FROM_FIX97.patch' /mnt/data/MUWEB_R90_FIX97_CHARACTER_VISIBILITY_PARSE_OWNER_2026-10-05/assets/MUAssetLoader.js /mnt/data/MUWEB_R90_FIX98_EQUIPMENT_RAW_BMD_REATTACH_2026-10-05/assets/MUAssetLoader.js
+--- /mnt/data/MUWEB_R90_FIX97_CHARACTER_VISIBILITY_PARSE_OWNER_2026-10-05/assets/MUAssetLoader.js	2026-10-05 02:05:09.000000000 +0000
++++ /mnt/data/MUWEB_R90_FIX98_EQUIPMENT_RAW_BMD_REATTACH_2026-10-05/assets/MUAssetLoader.js	2026-10-06 00:49:23.256459633 +0000
+@@ -589,6 +589,13 @@
+         // In-memory caches
+         this._bmdCache = new Map();
+         this._bmdInflight = new Map();
++        // FIX98: raw BMD authority cache. Equipment/body attachments require
++        // Vertex_t/Normal_t/Triangle_t2, while MUModelRenderer consumes the
++        // adapted flat render-data. Keep both contracts explicit and derive
++        // adapted data from the same raw parse so equip never receives a
++        // render-data object with no m.triangles.
++        this._bmdRawCache = new Map();
++        this._bmdRawInflight = new Map();
+         this._bmdAuthority = this.remoteAssets.authorityKey;
+         this._bmdEpoch = 0;
+         this._textureCache = new Map();
+@@ -637,6 +644,48 @@
+      * @param {string} relPath - e.g. 'Player/Knight.bmd' or 'Monster/bullfighter01.bmd'
+      * @returns {Promise<Object>} { meshes, bones, actions, version, source }
+      */
++    async loadBMDRaw(relPath) {
++        const authority = this.remoteAssets.authorityKey;
++        if (authority !== this._bmdAuthority) {
++            this._bmdAuthority = authority;
++            this._bmdEpoch++;
++            this._bmdCache.clear();
++            this._bmdInflight.clear();
++            this._bmdRawCache.clear();
++            this._bmdRawInflight.clear();
++        }
++        if (this._bmdRawCache.has(relPath)) return this._bmdRawCache.get(relPath);
++        if (this._bmdRawInflight.has(relPath)) return this._bmdRawInflight.get(relPath);
++        const epoch = this._bmdEpoch;
++        const assertCurrent = () => {
++            if (epoch !== this._bmdEpoch || authority !== this.remoteAssets.authorityKey) {
++                const error = new Error(`BMD raw load superseded: ${relPath}`);
++                error.code = 'MUWEB_STALE_ASSET_LOAD';
++                throw error;
++            }
++        };
++        const job = (async () => {
++            const buf = await this.remoteAssets.fetchBinary(relPath);
++            assertCurrent();
++            if (!buf) throw new Error(`Failed to fetch BMD raw: ${relPath}`);
++            const fmt = detectBMDFormat(buf);
++            if (fmt !== 'v12' && fmt !== 'v10') {
++                throw new Error(`BMD raw contract unsupported (${fmt}): ${relPath}`);
++            }
++            const raw = parseBMD(buf);
++            assertCurrent();
++            if (!raw || !Array.isArray(raw.meshes) || !Array.isArray(raw.bones)) {
++                throw new Error(`BMD raw inválido: ${relPath}`);
++            }
++            this._bmdRawCache.set(relPath, raw);
++            return raw;
++        })().finally(() => {
++            if (this._bmdRawInflight.get(relPath) === job) this._bmdRawInflight.delete(relPath);
++        });
++        this._bmdRawInflight.set(relPath, job);
++        return job;
++    }
++
+     async loadBMD(relPath) {
+         const authority = this.remoteAssets.authorityKey;
+         if (authority !== this._bmdAuthority) {
+@@ -644,6 +693,8 @@
+             this._bmdEpoch++;
+             this._bmdCache.clear();
+             this._bmdInflight.clear();
++            this._bmdRawCache.clear();
++            this._bmdRawInflight.clear();
+         }
+         // Check memory cache
+         if (this._bmdCache.has(relPath)) return this._bmdCache.get(relPath);
+@@ -689,12 +740,11 @@
+         let parsed;
+ 
+         if (fmt === 'v12' || fmt === 'v10') {
+-            // REAL — Main 5.2 BMD v12: decrypt MapFileDecrypt
+-            // (ZzzLodTerrain.h:150) + layout BMD::Open2 (ZzzBMD.cpp:2876).
+-            // v10: MESMO layout, payload LIMPO do offset 4 (sem decrypt) —
+-            // ZzzBMD.cpp:17924-17932; provado em Monster01/03/10 + peças MG
+-            // Class04 (probe .port_scratch/probe-bmd-v10-layout.mjs).
+-            const model = parseBMD(buf);
++            // FIX98: renderer and equipment share one authority-scoped raw
++            // parse. loadBMDRaw() owns Triangle_t2/Vertex_t structures; this
++            // lane only adapts them for Three.js.
++            const model = await this.loadBMDRaw(relPath);
++            assertCurrent();
+             parsed = bmdToRenderData(model, relPath);
+         } else if (fmt === 'old') {
+             parsed = this.useWorkers ? await runWorker('parseBMD', buf, relPath)
+diff -ruN '--exclude=R90_FIX97_SOURCE_HASHES.json' '--exclude=R90_FIX98_SOURCE_HASHES.json' '--exclude=MUWEB_R90_FIX98_FROM_FIX97.patch' /mnt/data/MUWEB_R90_FIX97_CHARACTER_VISIBILITY_PARSE_OWNER_2026-10-05/core/GameApp.js /mnt/data/MUWEB_R90_FIX98_EQUIPMENT_RAW_BMD_REATTACH_2026-10-05/core/GameApp.js
+--- /mnt/data/MUWEB_R90_FIX97_CHARACTER_VISIBILITY_PARSE_OWNER_2026-10-05/core/GameApp.js	2026-10-06 00:35:28.811577577 +0000
++++ /mnt/data/MUWEB_R90_FIX98_EQUIPMENT_RAW_BMD_REATTACH_2026-10-05/core/GameApp.js	2026-10-06 00:50:44.506871273 +0000
+@@ -120,7 +120,7 @@
+ export const MUWEB_R90_FIX15_REVISION = 'MUWEB_R90_FIX15_BMD_INFLIGHT_MAP_CANCEL_2026-10-03_A';
+ export const MUWEB_R90_FIX46_REVISION = 'MUWEB_R90_FIX46_DARKSPIRIT_MONSTER_LUA_CONTRACTS_2026-10-04_A';
+ export const MUWEB_R90_FIX47_REVISION = 'MUWEB_R90_FIX47_CHARACTER_LUA_MONSTER_PRESENTATION_2026-10-04_A';
+-export const MUWEB_SOURCE_REVISION = 'MUWEB_R90_FIX97_CHARACTER_VISIBILITY_COMPOSER_CACHE_2026-10-05';
++export const MUWEB_SOURCE_REVISION = 'MUWEB_R90_FIX98_EQUIPMENT_RAW_BMD_REATTACH_2026-10-05';
+ export const MUWEB_PREVIOUS_SOURCE_REVISION = 'MUWEB_R78_ITEMVIEW_WORLDENTRY_ANIMATION_CHARSELECT_RECOVERY_2026-09-30_A';
+ export const MUWEB_R77_BASE_REVISION = 'MUWEB_R77_CANONICAL_WORLD_ROUTING_CUSTOMMOVE_PREFETCH_UTF8_2026-09-30_A';
+ 
+diff -ruN '--exclude=R90_FIX97_SOURCE_HASHES.json' '--exclude=R90_FIX98_SOURCE_HASHES.json' '--exclude=MUWEB_R90_FIX98_FROM_FIX97.patch' /mnt/data/MUWEB_R90_FIX97_CHARACTER_VISIBILITY_PARSE_OWNER_2026-10-05/graphics/PlayerComposer.js /mnt/data/MUWEB_R90_FIX98_EQUIPMENT_RAW_BMD_REATTACH_2026-10-05/graphics/PlayerComposer.js
+--- /mnt/data/MUWEB_R90_FIX97_CHARACTER_VISIBILITY_PARSE_OWNER_2026-10-05/graphics/PlayerComposer.js	2026-10-06 00:37:30.094508002 +0000
++++ /mnt/data/MUWEB_R90_FIX98_EQUIPMENT_RAW_BMD_REATTACH_2026-10-05/graphics/PlayerComposer.js	2026-10-06 00:49:23.841726437 +0000
+@@ -20,7 +20,7 @@
+ 
+ import * as THREE from 'three';
+ import { RemoteAssets } from '../data/RemoteAssets.js';
+-import { angleQuaternion, parseBMD } from './BmdParser.js';
++import { angleQuaternion } from './BmdParser.js';
+ import { MUAssets } from '../assets/MUAssetLoader.js';
+ import { extractPartMeshes, extractRigidAttachment, buildBindWorldTransforms } from './BmdAdapter.js';
+ import { decodeCharacterEquipment } from '../data/CharacterEquipmentCodec.js';
+@@ -498,7 +498,7 @@
+                         // icons, ground items, previews and equipment now share the same
+                         // parsed BMD object instead of PlayerComposer doing a second
+                         // fetchBinary+parseBMD on the equip hot path.
+-                        const parsed = await MUAssets.loadBMD(entry.path);
++                        const parsed = await MUAssets.loadBMDRaw(entry.path);
+                         assertCharacterAuthority(io, authority, epoch);
+                         _equipmentModelCache.set(modelKey, parsed);
+                         return parsed;
+@@ -1222,9 +1222,7 @@
+   const basePartResults = await Promise.all(prefixes.map(async (prefix) => {
+     const file = partFileName(prefix, skinIndex);
+     try {
+-      const buf = await fetchBinary(file);
+-      if (!buf) return { prefix, file, missing:true };
+-      const partModel = parseBMD(buf instanceof Uint8Array ? buf : new Uint8Array(buf));
++      const partModel = await MUAssets.loadBMDRaw(file);
+       if (!partModel || !Array.isArray(partModel.meshes)) return { prefix, file, missing:true, error:new Error('BMD bruto sem meshes') };
+       const partMeshes = extractPartMeshes(partModel, prefix.toLowerCase(), playerBoneCount, player.bones);
+       return { prefix, file, partMeshes };
+diff -ruN '--exclude=R90_FIX97_SOURCE_HASHES.json' '--exclude=R90_FIX98_SOURCE_HASHES.json' '--exclude=MUWEB_R90_FIX98_FROM_FIX97.patch' /mnt/data/MUWEB_R90_FIX97_CHARACTER_VISIBILITY_PARSE_OWNER_2026-10-05/test-r90-fix86-large-port-regression-gate.mjs /mnt/data/MUWEB_R90_FIX98_EQUIPMENT_RAW_BMD_REATTACH_2026-10-05/test-r90-fix86-large-port-regression-gate.mjs
+--- /mnt/data/MUWEB_R90_FIX97_CHARACTER_VISIBILITY_PARSE_OWNER_2026-10-05/test-r90-fix86-large-port-regression-gate.mjs	2026-10-05 23:01:39.000000000 +0000
++++ /mnt/data/MUWEB_R90_FIX98_EQUIPMENT_RAW_BMD_REATTACH_2026-10-05/test-r90-fix86-large-port-regression-gate.mjs	2026-10-06 00:52:04.532223109 +0000
+@@ -17,5 +17,5 @@
+ assert(particles.includes('muPcStandaloneController') || obj.includes('createPcIcarusCloudField'),'standalone/merged particle owner missing');
+ assert(cape.includes('expandCustomCapeLuaIncludes'),'CustomCape OpenFolder/OpenFile include bridge missing');
+ assert(cape.includes('OpenFile/OpenFolder includes resolvidos'),'CustomCape include diagnostic missing');
+-assert(/MUWEB_R90_FIX(?:86|87|88|89|90|91|92|92)_/.test(app),'runtime revision stale');
++assert(/MUWEB_R90_FIX(?:86|87|88|89|90|91|92|93|94|95|96|97|98)_/.test(app),'runtime revision stale');
+ console.log('PASS FIX86 large port gate: body material hot-swap + Icarus hidden-controller renderer removal');
+diff -ruN '--exclude=R90_FIX97_SOURCE_HASHES.json' '--exclude=R90_FIX98_SOURCE_HASHES.json' '--exclude=MUWEB_R90_FIX98_FROM_FIX97.patch' /mnt/data/MUWEB_R90_FIX97_CHARACTER_VISIBILITY_PARSE_OWNER_2026-10-05/test-r90-fix88-large-runtime-port.mjs /mnt/data/MUWEB_R90_FIX98_EQUIPMENT_RAW_BMD_REATTACH_2026-10-05/test-r90-fix88-large-runtime-port.mjs
+--- /mnt/data/MUWEB_R90_FIX97_CHARACTER_VISIBILITY_PARSE_OWNER_2026-10-05/test-r90-fix88-large-runtime-port.mjs	2026-10-05 23:01:39.000000000 +0000
++++ /mnt/data/MUWEB_R90_FIX98_EQUIPMENT_RAW_BMD_REATTACH_2026-10-05/test-r90-fix88-large-runtime-port.mjs	2026-10-06 00:51:46.181728406 +0000
+@@ -6,7 +6,7 @@
+ const env=read('./world/PcIcarusEnvironment.js');
+ const joint=read('./world/PcThunderJoint.js');
+ const app=read('./core/GameApp.js');
+-assert.match(player,/MUAssets\.loadBMD\(entry\.path\)/,'equipment uses engine-wide BMD cache');
++assert.match(player,/MUAssets\.loadBMDRaw\(entry\.path\)/,'equipment uses engine-wide raw BMD cache');
+ assert.doesNotMatch(player,/const buf = await io\.fetchBinary\(entry\.path\)/,'duplicate equipment fetch/parse lane removed');
+ assert.match(pet,/finiteOr\(helperInfo\?\.size, 0\.7\)/,'helper finite-zero scale owner');
+ assert.match(pet,/this\._sparkPool = \[\]/,'pet/helper spark pools present');
+@@ -15,5 +15,5 @@
+ assert.match(env,/bitmapPlusOne:true,subtype:0,maxJoints:96/,'Icarus +1 subtype0 batch exact family');
+ assert.doesNotMatch(env,/createPcThunderJoint\(/,'Icarus environment no longer allocates one mesh per thunder joint');
+ assert.match(joint,/owner\._scratch\|\|/,'standalone thunder vector scratch retained');
+-assert.match(app,/MUWEB_R90_FIX(?:88|89|90|91|92)_/,'runtime identity FIX88+');
++assert.match(app,/MUWEB_R90_FIX(?:88|89|90|91|92|93|94|95|96|97|98)_/,'runtime identity FIX88+');
+ console.log('PASS FIX88 large runtime port: shared equipment BMD cache + helper zero semantics + pet pools + Icarus thunder batch');
+diff -ruN '--exclude=R90_FIX97_SOURCE_HASHES.json' '--exclude=R90_FIX98_SOURCE_HASHES.json' '--exclude=MUWEB_R90_FIX98_FROM_FIX97.patch' /mnt/data/MUWEB_R90_FIX97_CHARACTER_VISIBILITY_PARSE_OWNER_2026-10-05/test-r90-fix97-character-visibility-cache.mjs /mnt/data/MUWEB_R90_FIX98_EQUIPMENT_RAW_BMD_REATTACH_2026-10-05/test-r90-fix97-character-visibility-cache.mjs
+--- /mnt/data/MUWEB_R90_FIX97_CHARACTER_VISIBILITY_PARSE_OWNER_2026-10-05/test-r90-fix97-character-visibility-cache.mjs	2026-10-06 00:37:30.094909346 +0000
++++ /mnt/data/MUWEB_R90_FIX98_EQUIPMENT_RAW_BMD_REATTACH_2026-10-05/test-r90-fix97-character-visibility-cache.mjs	2026-10-06 00:51:25.506400537 +0000
+@@ -3,13 +3,16 @@
+ const pc=fs.readFileSync(new URL('./graphics/PlayerComposer.js',import.meta.url),'utf8');
+ const preview=fs.readFileSync(new URL('./graphics/CharacterPreview.js',import.meta.url),'utf8');
+ const scene=fs.readFileSync(new URL('./graphics/Scene.js',import.meta.url),'utf8');
+-assert.match(pc,/import \{ angleQuaternion, parseBMD \} from '\.\/BmdParser\.js';/);
++const assets=fs.readFileSync(new URL('./assets/MUAssetLoader.js',import.meta.url),'utf8');
+ assert.match(pc,/const \{ loadBMD, fetchBinary \} = io;/);
+ assert.match(pc,/await loadBMD\('Player\/Player\.bmd'\)/);
+-assert.match(pc,/const buf = await fetchBinary\(file\)/);
+-assert.match(pc,/const partModel = parseBMD\(/);
++// FIX98 moves the raw parser owner into MUAssetLoader so class parts and
++// equipment share one authority-scoped Triangle_t2/Vertex_t parse.
++assert.match(assets,/async loadBMDRaw\(relPath\)/);
++assert.match(assets,/const raw = parseBMD\(buf\)/);
++assert.match(pc,/const partModel = await MUAssets\.loadBMDRaw\(file\)/);
+ assert.match(pc,/extractPartMeshes\(partModel, prefix\.toLowerCase\(\), playerBoneCount, player\.bones\)/);
+ assert.match(preview,/loadBMD:\s*\(p\)\s*=>\s*MUAssets\.loadBMD\(p\)/);
+ assert.match(preview,/fetchBinary:\s*\(p\)\s*=>\s*RemoteAssets\.fetchBinary\(p\)/);
+ assert.match(scene,/loadBMD:\s*\(p\)\s*=>\s*MUAssets\.loadBMD\(p\)/);
+-console.log('PASS FIX97 character visibility: parseBMD owner restored for 5 raw class parts; Player skeleton remains MUAssets-owned');
++console.log('PASS FIX97 visibility preserved under FIX98 raw-BMD authority owner');
+diff -ruN '--exclude=R90_FIX97_SOURCE_HASHES.json' '--exclude=R90_FIX98_SOURCE_HASHES.json' '--exclude=MUWEB_R90_FIX98_FROM_FIX97.patch' /mnt/data/MUWEB_R90_FIX97_CHARACTER_VISIBILITY_PARSE_OWNER_2026-10-05/test-r90-fix98-equipment-raw-bmd-gate.mjs /mnt/data/MUWEB_R90_FIX98_EQUIPMENT_RAW_BMD_REATTACH_2026-10-05/test-r90-fix98-equipment-raw-bmd-gate.mjs
+--- /mnt/data/MUWEB_R90_FIX97_CHARACTER_VISIBILITY_PARSE_OWNER_2026-10-05/test-r90-fix98-equipment-raw-bmd-gate.mjs	1970-01-01 00:00:00.000000000 +0000
++++ /mnt/data/MUWEB_R90_FIX98_EQUIPMENT_RAW_BMD_REATTACH_2026-10-05/test-r90-fix98-equipment-raw-bmd-gate.mjs	2026-10-06 00:50:45.206771451 +0000
+@@ -0,0 +1,18 @@
++import fs from 'node:fs';
++const root = new URL('./', import.meta.url);
++const read = (p) => fs.readFileSync(new URL(p, root), 'utf8');
++const assets = read('assets/MUAssetLoader.js');
++const composer = read('graphics/PlayerComposer.js');
++const app = read('core/GameApp.js');
++const must = (v, m) => { if (!v) throw new Error(m); };
++must(assets.includes('async loadBMDRaw(relPath)'), 'MUAssetLoader.loadBMDRaw ausente');
++must(assets.includes('this._bmdRawCache = new Map()'), 'raw BMD cache ausente');
++must(assets.includes('const raw = parseBMD(buf)'), 'raw owner nao usa parser BMD');
++must(assets.includes('const model = await this.loadBMDRaw(relPath)'), 'loadBMD nao deriva do raw owner');
++must(composer.includes('const parsed = await MUAssets.loadBMDRaw(entry.path);'), 'equipment ainda nao usa raw BMD');
++must(composer.includes('const partModel = await MUAssets.loadBMDRaw(file);'), 'class base parts ainda nao usam raw cache');
++must(!composer.includes('const parsed = await MUAssets.loadBMD(entry.path);'), 'regressao: buildItem usa render-data adaptado');
++must(composer.includes('extractRigidAttachment(built.model'), 'weapon raw extraction ausente');
++must(composer.includes('extractPartMeshes(built.model'), 'body raw extraction ausente');
++must(app.includes('MUWEB_R90_FIX98_EQUIPMENT_RAW_BMD_REATTACH_2026-10-05'), 'runtime revision nao e FIX98');
++console.log('PASS FIX98 equipment raw-BMD staged reattach gate');
+diff -ruN '--exclude=R90_FIX97_SOURCE_HASHES.json' '--exclude=R90_FIX98_SOURCE_HASHES.json' '--exclude=MUWEB_R90_FIX98_FROM_FIX97.patch' /mnt/data/MUWEB_R90_FIX97_CHARACTER_VISIBILITY_PARSE_OWNER_2026-10-05/tools/start-r90-fix98-safe.cjs /mnt/data/MUWEB_R90_FIX98_EQUIPMENT_RAW_BMD_REATTACH_2026-10-05/tools/start-r90-fix98-safe.cjs
+--- /mnt/data/MUWEB_R90_FIX97_CHARACTER_VISIBILITY_PARSE_OWNER_2026-10-05/tools/start-r90-fix98-safe.cjs	1970-01-01 00:00:00.000000000 +0000
++++ /mnt/data/MUWEB_R90_FIX98_EQUIPMENT_RAW_BMD_REATTACH_2026-10-05/tools/start-r90-fix98-safe.cjs	2026-10-06 00:50:45.085451747 +0000
+@@ -0,0 +1,30 @@
++const fs = require('node:fs');
++const path = require('node:path');
++const crypto = require('node:crypto');
++const root = path.resolve(__dirname, '..');
++const MUTABLE_RUNTIME = new Set(['runtime-config.js']);
++function sha256(p){return crypto.createHash('sha256').update(fs.readFileSync(p)).digest('hex');}
++function verifyBuild(){
++  const manifestPath = path.join(root, 'R90_FIX98_SOURCE_HASHES.json');
++  if(!fs.existsSync(manifestPath)) throw new Error('R90_FIX98_SOURCE_HASHES.json ausente');
++  const m = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
++  let n=0;
++  for(const [rel, expected] of Object.entries(m.files || {})){
++    if(MUTABLE_RUNTIME.has(rel)) continue;
++    const p = path.join(root, rel);
++    if(!fs.existsSync(p)) throw new Error(`FIX98 arquivo ausente: ${rel}`);
++    const actual = sha256(p);
++    if(actual !== expected) throw new Error(`FIX98 arquivo modificado/incompleto: ${rel}`);
++    n++;
++  }
++  console.log(`[R90 FIX98] ${m.build}: ${n} arquivos imutaveis verificados.`);
++  return m;
++}
++module.exports={verifyBuild};
++if(require.main===module){
++  try{
++    verifyBuild();
++    if(process.argv.includes('--verify-only')) process.exit(0);
++    require('./start-r90-safe.cjs').main().catch(e=>{console.error('[R90 FIX98] FALHA:', e.message); process.exitCode=1;});
++  }catch(e){console.error('[R90 FIX98] FALHA:', e.message); process.exitCode=1;}
++}

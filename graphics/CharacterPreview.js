@@ -37,6 +37,7 @@
 
 import * as THREE from 'three';
 import { composeCharacter, buildEquipmentAttach, buildAccessoryRenderer, buildLinkedWeaponRenderer, buildAnimationControl, playerActionPlaySpeed, mergeEquipmentBodyRenderData, applyBodyEquipmentPresentation, pcCharacterScale, getPcTextureSkinIndex, playerVisualLoadIssues, unresolvedClassParts } from './PlayerComposer.js';
+import { attachCapeCloth } from './PcCapeCloth.js';
 import { applyMuUpAxis, bmdToRenderData } from './BmdAdapter.js';
 import { MUModelRenderer } from '../assets/MUModelRenderer.js';
 import { MUAssets } from '../assets/MUAssetLoader.js';
@@ -63,7 +64,7 @@ function muToThree(v, out) {
 }
 
 // io do composeCharacter: esqueleto via MUAssets (render-data com bones/actions),
-// peças via fetchBinary + parseBMD puro (PlayerComposer.js:92 contrato)
+// Player.bmd via MUAssets; peças base via fetchBinary + parseBMD bruto para remap ao esqueleto Player
 const composerIO = {
     loadBMD: (p) => MUAssets.loadBMD(p),
     fetchBinary: (p) => RemoteAssets.fetchBinary(p),
@@ -160,7 +161,7 @@ export class CharacterPreview {
                 let attach = null;
                 if (c.charset) {
                     try {
-                        attach = await buildEquipmentAttach(c.charset, composerIO, renderData.bones, renderData.bones.length, { customPreview: c.customPreview || null });
+                        attach = await buildEquipmentAttach(c.charset, composerIO, renderData.bones, renderData.bones.length, { customPreview: c.customPreview || null, classId: c.classId });
                         finalData = mergeEquipmentBodyRenderData(renderData, attach);
                         if (attach.weaponRenderMode !== 'render-link-object' && attach.meshes.length) {
                             finalData = {
@@ -272,6 +273,16 @@ export class CharacterPreview {
                     }
                 }
 
+                if (attach?.wing?.itemModelType != null) {
+                    try {
+                        await attachCapeCloth(renderer, {
+                            itemModelType: attach.wing.itemModelType,
+                            classId: c.classId,
+                            custom: Boolean(attach.wing.customWing && attach.wing.isCape),
+                        });
+                    } catch (e) { loadIssues.push(`cape-cloth:${e.message}`); }
+                }
+
                 // Weapons keep their own BMD hierarchy under hand bones, just as
                 // RenderLinkObject. This fixes the preview holding pose/geometry
                 // instead of baking the weapon into Player.bmd skinning.
@@ -306,7 +317,7 @@ export class CharacterPreview {
                         const previewOwner = { position: outer.position, mesh: outer, isAlive: () => true };
                         const mount = new MountCompanion(
                             previewOwner, this.gameScene.scene, previewMount.petModelPath, previewMount.option,
-                            { safeZone: () => false },
+                            { safeZone: () => false, species: previewMount.species, behaviorSpecies: previewMount.behaviorSpecies, presentation: previewMount.presentation || null, scale: previewMount.sizeCharList ?? previewMount.size },
                         );
                         await mount.init();
                         slot.mount = mount;
@@ -329,6 +340,7 @@ export class CharacterPreview {
                         const previewOwner = {
                             position: outer.position, // referência viva (slot anda → bug segue)
                             isAlive: () => true,
+                            safeZone: () => false,
                         };
                         const helperInfo = attach?.customHelper || null;
                         const hc = new HelperCompanion(previewOwner, this.gameScene.scene, 1.2, helperInfo);

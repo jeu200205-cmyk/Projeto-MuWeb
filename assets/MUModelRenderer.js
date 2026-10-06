@@ -1608,9 +1608,10 @@ export class MUModelRenderer {
         }
         const owner = {
             particles, boneIndex:Number(boneIndex), subtype:Number(subtype)||0, emitMs:Math.max(16,Number(emitMs)||40),
-            lastEmit:-Infinity, cursor:0, disposed:false,
+            lastEmit:-Infinity, cursor:0, disposed:false, enabled:true,
             update:(nowMs)=>{
                 if (owner.disposed) return;
+                if (!owner.enabled) { for (const p of particles) p.sprite.visible=false; return; }
                 const now=Number(nowMs)||0;
                 if (now-owner.lastEmit >= owner.emitMs) {
                     owner.lastEmit=now;
@@ -1626,6 +1627,7 @@ export class MUModelRenderer {
                 }
             },
             setColor:(next)=>{ for(const p of particles)p.material.color.copy(next?.isColor?next:new THREE.Color(next??0xffffff)); },
+            setEnabled:(next)=>{ owner.enabled=!!next; if(!owner.enabled) for(const p of particles)p.sprite.visible=false; },
             dispose:()=>{ if(owner.disposed)return; owner.disposed=true; for(const p of particles){p.sprite.parent?.remove(p.sprite);p.material.dispose();} },
         };
         this._presentationUpdates.push(owner.update);

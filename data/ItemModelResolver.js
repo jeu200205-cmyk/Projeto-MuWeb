@@ -18,7 +18,7 @@
 
 import { ITEM_MODEL_MAP } from './ItemModelMap.js';
 import { customItemModelForType } from './CustomItemModelMap.js';
-import { characterHelperRule } from './CharacterHelperLua.js';
+import { characterHelperRule, characterHelperRenderRule } from './CharacterHelperLua.js';
 import { darkSpiritRule } from './DarkSpiritLua.js';
 import { resolvePcPlayerBodyModel } from './PcPlayerBodyModelMap.js';
 import { NO_EQUIPMENT_12BIT } from './CharacterEquipmentCodec.js';
@@ -105,10 +105,11 @@ export function resolveAccessoryModel(entry) {
   const itemType = (entry.family === 'helper' ? 13 : 12) * 512 + Number(entry.offset || 0);
   const custom = customItemModelForType(itemType);
   const helper = entry.family === 'helper' ? characterHelperRule(itemType) : null;
+  const helperPresentation = entry.family === 'helper' ? characterHelperRenderRule(itemType) : null;
   const darkSpirit = entry.family === 'helper' ? darkSpiritRule(itemType) : null;
-  const path = custom?.path || darkSpirit?.modelPath || helper?.modelPath || ITEM_MODEL_MAP[key] || null;
+  const path = custom?.path || darkSpirit?.modelPath || helper?.renderModelPath || helper?.modelPath || ITEM_MODEL_MAP[key] || null;
   return {
-    path, key, custom: custom || null, helper: helper || null, darkSpirit: darkSpirit || null, color: custom?.color || null,
+    path, key, custom: custom || null, helper: helper || null, helperPresentation: helperPresentation || null, darkSpirit: darkSpirit || null, color: custom?.color || null,
     effectType: custom?.effectType ?? 0,
     missing: path ? null : `sem-registro-PC/Lua:${key}`,
     kind: entry.kind || null, option: entry.option, itemType,

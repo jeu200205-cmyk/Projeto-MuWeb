@@ -34,3 +34,7 @@ WHEEL2 aplica o pipeline existente de materiais da arma com tipo/nível/opções
 
 
 `graphics/PcItemChromeColors.js` contém as paletas item-domain de PartObjectColor/2 do PC. O pipeline stock usa esses RGBs para chrome/metal e respeita a ordem dos passes por nível; RenderModel.lua permanece com precedência.
+## FIX99 — ItemEffects e limites de lifecycle
+
+`LoadEffect` de `ItemEffects.lua` foi conectado ao owner de item no chão, não ao personagem equipado. `LoadRunneEffect` continua no `PcRuneAura`. `LoadCustomLightEffect` permanece parseado, porém o source PC o usa no `BITMAP_JOINT_SPIRIT` de Evil Spirit (subtypes 0/3); não é equivalente ao emitter genérico de skill e fica fail-closed até esse joint ser portado. CharacterSet `CreateSkill` continua com o child `CreateEffect` nativo explicitamente pendente.
+

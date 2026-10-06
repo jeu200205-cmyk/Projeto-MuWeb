@@ -1,0 +1,1474 @@
+diff -ruN /mnt/data/fix74_src/MUWEB_R90_FIX73_F352_MASTER_SKILL_INTEGRATED_2026-10-05/CURRENT_AUTHORITY.txt /mnt/data/MUWEB_R90_FIX74_ICARUS_SPEAR_JOINT_LORENCIA_2026-10-05/CURRENT_AUTHORITY.txt
+--- /mnt/data/fix74_src/MUWEB_R90_FIX73_F352_MASTER_SKILL_INTEGRATED_2026-10-05/CURRENT_AUTHORITY.txt	2026-10-05 16:01:21.000000000 +0000
++++ /mnt/data/MUWEB_R90_FIX74_ICARUS_SPEAR_JOINT_LORENCIA_2026-10-05/CURRENT_AUTHORITY.txt	2026-10-05 16:27:09.868129207 +0000
+@@ -1,6 +1,5 @@
+-MUWEB_R90_FIX73_F352_MASTER_SKILL_INTEGRATED_2026-10-05_FULL.zip
+-Parent: MUWEB_R90_FIX72_ICARUS_DRAGON_LORENCIA_2026-10-05_FULL.zip
+-Integrated: SKILLS_PROTOCOL FIX73 F3:52 exact wire parser only
+-Preserved: FIX72 cape callback memoization + Icarus dragons/scratch + FIX70 map parity + prior central history
+-Open: F3:52 semantic Skill[] consumer; 10 Icarus MODEL_SPEARSKILL/CreateJoint subtype1 boids; physical Icarus/Lorencia validation; RenderCapeModel GPU residual
+-Packaging gate: exactly 3 BATs; FIX73 launcher; verify-only PASS required
++MUWEB_R90_FIX74_ICARUS_SPEAR_JOINT_LORENCIA_2026-10-05_FULL.zip
++Parent: MUWEB_R90_FIX73_F352_MASTER_SKILL_INTEGRATED_2026-10-05_FULL.zip
++Integrated: ITEMS_LUA FIX74 BodyLight RenderCapeModel branch + Icarus 10 MODEL_SPEARSKILL subtype1 boids
++Preserved: FIX73 F3:52 + FIX72 dragons + M71 scratch + prior history
++Packaging gate: exactly 3 BATs; FIX74 launcher; verify-only PASS required
+diff -ruN /mnt/data/fix74_src/MUWEB_R90_FIX73_F352_MASTER_SKILL_INTEGRATED_2026-10-05/FIX74_BAT_INVENTORY.txt /mnt/data/MUWEB_R90_FIX74_ICARUS_SPEAR_JOINT_LORENCIA_2026-10-05/FIX74_BAT_INVENTORY.txt
+--- /mnt/data/fix74_src/MUWEB_R90_FIX73_F352_MASTER_SKILL_INTEGRATED_2026-10-05/FIX74_BAT_INVENTORY.txt	1970-01-01 00:00:00.000000000 +0000
++++ /mnt/data/MUWEB_R90_FIX74_ICARUS_SPEAR_JOINT_LORENCIA_2026-10-05/FIX74_BAT_INVENTORY.txt	2026-10-05 16:27:09.984366461 +0000
+@@ -0,0 +1,3 @@
++DESLIGAR_WEB_R90.bat
++INSTALAR_DEPENDENCIAS_R90.bat
++LIGAR_WEB_R90_FIX74.bat
+diff -ruN /mnt/data/fix74_src/MUWEB_R90_FIX73_F352_MASTER_SKILL_INTEGRATED_2026-10-05/LIGAR_WEB_R90_FIX73.bat /mnt/data/MUWEB_R90_FIX74_ICARUS_SPEAR_JOINT_LORENCIA_2026-10-05/LIGAR_WEB_R90_FIX73.bat
+--- /mnt/data/fix74_src/MUWEB_R90_FIX73_F352_MASTER_SKILL_INTEGRATED_2026-10-05/LIGAR_WEB_R90_FIX73.bat	2026-10-05 16:01:21.000000000 +0000
++++ /mnt/data/MUWEB_R90_FIX74_ICARUS_SPEAR_JOINT_LORENCIA_2026-10-05/LIGAR_WEB_R90_FIX73.bat	1970-01-01 00:00:00.000000000 +0000
+@@ -1,18 +0,0 @@
+-@echo off
+-setlocal EnableExtensions
+-cd /d "%~dp0"
+-title MUWEB R90 FIX73 - F3:52 Master Skill Integrated
+-
+-echo ================================================================
+-echo  MUWEB R90 FIX73 - F3:52 MASTER SKILL INTEGRATED
+-echo ================================================================
+-
+-where node.exe >nul 2>&1 || (echo [ERRO] Node.js nao encontrado no PATH.& pause & exit /b 1)
+-if not exist "node_modules\three\build\three.module.js" (
+-  echo [R90] Dependencias ausentes. Instalando pelo package-lock.json...
+-  call "%~dp0INSTALAR_DEPENDENCIAS_R90.bat"
+-  if errorlevel 1 (echo [ERRO] Falha ao instalar dependencias.& pause & exit /b 1)
+-)
+-node.exe "%~dp0tools\start-r90-fix73-safe.cjs"
+-if errorlevel 1 pause
+-endlocal
+diff -ruN /mnt/data/fix74_src/MUWEB_R90_FIX73_F352_MASTER_SKILL_INTEGRATED_2026-10-05/LIGAR_WEB_R90_FIX74.bat /mnt/data/MUWEB_R90_FIX74_ICARUS_SPEAR_JOINT_LORENCIA_2026-10-05/LIGAR_WEB_R90_FIX74.bat
+--- /mnt/data/fix74_src/MUWEB_R90_FIX73_F352_MASTER_SKILL_INTEGRATED_2026-10-05/LIGAR_WEB_R90_FIX74.bat	1970-01-01 00:00:00.000000000 +0000
++++ /mnt/data/MUWEB_R90_FIX74_ICARUS_SPEAR_JOINT_LORENCIA_2026-10-05/LIGAR_WEB_R90_FIX74.bat	2026-10-05 16:27:09.868240592 +0000
+@@ -0,0 +1,18 @@
++@echo off
++setlocal EnableExtensions
++cd /d "%~dp0"
++title MUWEB R90 FIX74 - Icarus Spear Joint + Cape BodyLight
++
++echo ================================================================
++echo  MUWEB R90 FIX74 - ICARUS SPEAR JOINT + CAPE BODYLIGHT
++echo ================================================================
++
++where node.exe >nul 2>&1 || (echo [ERRO] Node.js nao encontrado no PATH.& pause & exit /b 1)
++if not exist "node_modules\three\build\three.module.js" (
++  echo [R90] Dependencias ausentes. Instalando pelo package-lock.json...
++  call "%~dp0INSTALAR_DEPENDENCIAS_R90.bat"
++  if errorlevel 1 (echo [ERRO] Falha ao instalar dependencias.& pause & exit /b 1)
++)
++node.exe "%~dp0tools\start-r90-fix74-safe.cjs"
++if errorlevel 1 pause
++endlocal
+diff -ruN /mnt/data/fix74_src/MUWEB_R90_FIX73_F352_MASTER_SKILL_INTEGRATED_2026-10-05/MUWEB_R90_FIX74_FROM_FIX73.patch /mnt/data/MUWEB_R90_FIX74_ICARUS_SPEAR_JOINT_LORENCIA_2026-10-05/MUWEB_R90_FIX74_FROM_FIX73.patch
+--- /mnt/data/fix74_src/MUWEB_R90_FIX73_F352_MASTER_SKILL_INTEGRATED_2026-10-05/MUWEB_R90_FIX74_FROM_FIX73.patch	1970-01-01 00:00:00.000000000 +0000
++++ /mnt/data/MUWEB_R90_FIX74_ICARUS_SPEAR_JOINT_LORENCIA_2026-10-05/MUWEB_R90_FIX74_FROM_FIX73.patch	2026-10-05 16:28:08.126134654 +0000
+@@ -0,0 +1,451 @@
++diff -ruN /mnt/data/fix74_src/MUWEB_R90_FIX73_F352_MASTER_SKILL_INTEGRATED_2026-10-05/CURRENT_AUTHORITY.txt /mnt/data/MUWEB_R90_FIX74_ICARUS_SPEAR_JOINT_LORENCIA_2026-10-05/CURRENT_AUTHORITY.txt
++--- /mnt/data/fix74_src/MUWEB_R90_FIX73_F352_MASTER_SKILL_INTEGRATED_2026-10-05/CURRENT_AUTHORITY.txt	2026-10-05 16:01:21.000000000 +0000
+++++ /mnt/data/MUWEB_R90_FIX74_ICARUS_SPEAR_JOINT_LORENCIA_2026-10-05/CURRENT_AUTHORITY.txt	2026-10-05 16:27:09.868129207 +0000
++@@ -1,6 +1,5 @@
++-MUWEB_R90_FIX73_F352_MASTER_SKILL_INTEGRATED_2026-10-05_FULL.zip
++-Parent: MUWEB_R90_FIX72_ICARUS_DRAGON_LORENCIA_2026-10-05_FULL.zip
++-Integrated: SKILLS_PROTOCOL FIX73 F3:52 exact wire parser only
++-Preserved: FIX72 cape callback memoization + Icarus dragons/scratch + FIX70 map parity + prior central history
++-Open: F3:52 semantic Skill[] consumer; 10 Icarus MODEL_SPEARSKILL/CreateJoint subtype1 boids; physical Icarus/Lorencia validation; RenderCapeModel GPU residual
++-Packaging gate: exactly 3 BATs; FIX73 launcher; verify-only PASS required
+++MUWEB_R90_FIX74_ICARUS_SPEAR_JOINT_LORENCIA_2026-10-05_FULL.zip
+++Parent: MUWEB_R90_FIX73_F352_MASTER_SKILL_INTEGRATED_2026-10-05_FULL.zip
+++Integrated: ITEMS_LUA FIX74 BodyLight RenderCapeModel branch + Icarus 10 MODEL_SPEARSKILL subtype1 boids
+++Preserved: FIX73 F3:52 + FIX72 dragons + M71 scratch + prior history
+++Packaging gate: exactly 3 BATs; FIX74 launcher; verify-only PASS required
++diff -ruN /mnt/data/fix74_src/MUWEB_R90_FIX73_F352_MASTER_SKILL_INTEGRATED_2026-10-05/FIX74_BAT_INVENTORY.txt /mnt/data/MUWEB_R90_FIX74_ICARUS_SPEAR_JOINT_LORENCIA_2026-10-05/FIX74_BAT_INVENTORY.txt
++--- /mnt/data/fix74_src/MUWEB_R90_FIX73_F352_MASTER_SKILL_INTEGRATED_2026-10-05/FIX74_BAT_INVENTORY.txt	1970-01-01 00:00:00.000000000 +0000
+++++ /mnt/data/MUWEB_R90_FIX74_ICARUS_SPEAR_JOINT_LORENCIA_2026-10-05/FIX74_BAT_INVENTORY.txt	2026-10-05 16:27:09.984366461 +0000
++@@ -0,0 +1,3 @@
+++DESLIGAR_WEB_R90.bat
+++INSTALAR_DEPENDENCIAS_R90.bat
+++LIGAR_WEB_R90_FIX74.bat
++diff -ruN /mnt/data/fix74_src/MUWEB_R90_FIX73_F352_MASTER_SKILL_INTEGRATED_2026-10-05/LIGAR_WEB_R90_FIX73.bat /mnt/data/MUWEB_R90_FIX74_ICARUS_SPEAR_JOINT_LORENCIA_2026-10-05/LIGAR_WEB_R90_FIX73.bat
++--- /mnt/data/fix74_src/MUWEB_R90_FIX73_F352_MASTER_SKILL_INTEGRATED_2026-10-05/LIGAR_WEB_R90_FIX73.bat	2026-10-05 16:01:21.000000000 +0000
+++++ /mnt/data/MUWEB_R90_FIX74_ICARUS_SPEAR_JOINT_LORENCIA_2026-10-05/LIGAR_WEB_R90_FIX73.bat	1970-01-01 00:00:00.000000000 +0000
++@@ -1,18 +0,0 @@
++-@echo off
++-setlocal EnableExtensions
++-cd /d "%~dp0"
++-title MUWEB R90 FIX73 - F3:52 Master Skill Integrated
++-
++-echo ================================================================
++-echo  MUWEB R90 FIX73 - F3:52 MASTER SKILL INTEGRATED
++-echo ================================================================
++-
++-where node.exe >nul 2>&1 || (echo [ERRO] Node.js nao encontrado no PATH.& pause & exit /b 1)
++-if not exist "node_modules\three\build\three.module.js" (
++-  echo [R90] Dependencias ausentes. Instalando pelo package-lock.json...
++-  call "%~dp0INSTALAR_DEPENDENCIAS_R90.bat"
++-  if errorlevel 1 (echo [ERRO] Falha ao instalar dependencias.& pause & exit /b 1)
++-)
++-node.exe "%~dp0tools\start-r90-fix73-safe.cjs"
++-if errorlevel 1 pause
++-endlocal
++diff -ruN /mnt/data/fix74_src/MUWEB_R90_FIX73_F352_MASTER_SKILL_INTEGRATED_2026-10-05/LIGAR_WEB_R90_FIX74.bat /mnt/data/MUWEB_R90_FIX74_ICARUS_SPEAR_JOINT_LORENCIA_2026-10-05/LIGAR_WEB_R90_FIX74.bat
++--- /mnt/data/fix74_src/MUWEB_R90_FIX73_F352_MASTER_SKILL_INTEGRATED_2026-10-05/LIGAR_WEB_R90_FIX74.bat	1970-01-01 00:00:00.000000000 +0000
+++++ /mnt/data/MUWEB_R90_FIX74_ICARUS_SPEAR_JOINT_LORENCIA_2026-10-05/LIGAR_WEB_R90_FIX74.bat	2026-10-05 16:27:09.868240592 +0000
++@@ -0,0 +1,18 @@
+++@echo off
+++setlocal EnableExtensions
+++cd /d "%~dp0"
+++title MUWEB R90 FIX74 - Icarus Spear Joint + Cape BodyLight
+++
+++echo ================================================================
+++echo  MUWEB R90 FIX74 - ICARUS SPEAR JOINT + CAPE BODYLIGHT
+++echo ================================================================
+++
+++where node.exe >nul 2>&1 || (echo [ERRO] Node.js nao encontrado no PATH.& pause & exit /b 1)
+++if not exist "node_modules\three\build\three.module.js" (
+++  echo [R90] Dependencias ausentes. Instalando pelo package-lock.json...
+++  call "%~dp0INSTALAR_DEPENDENCIAS_R90.bat"
+++  if errorlevel 1 (echo [ERRO] Falha ao instalar dependencias.& pause & exit /b 1)
+++)
+++node.exe "%~dp0tools\start-r90-fix74-safe.cjs"
+++if errorlevel 1 pause
+++endlocal
++diff -ruN /mnt/data/fix74_src/MUWEB_R90_FIX73_F352_MASTER_SKILL_INTEGRATED_2026-10-05/MUWEB_R90_FIX74_PORTABILITY.md /mnt/data/MUWEB_R90_FIX74_ICARUS_SPEAR_JOINT_LORENCIA_2026-10-05/MUWEB_R90_FIX74_PORTABILITY.md
++--- /mnt/data/fix74_src/MUWEB_R90_FIX73_F352_MASTER_SKILL_INTEGRATED_2026-10-05/MUWEB_R90_FIX74_PORTABILITY.md	1970-01-01 00:00:00.000000000 +0000
+++++ /mnt/data/MUWEB_R90_FIX74_ICARUS_SPEAR_JOINT_LORENCIA_2026-10-05/MUWEB_R90_FIX74_PORTABILITY.md	2026-10-05 16:27:29.563075148 +0000
++@@ -0,0 +1,15 @@
+++# MUWEB R90 FIX74 — Icarus spear-joint + cape BodyLight
+++
+++Parent exato: `MUWEB_R90_FIX73_F352_MASTER_SKILL_INTEGRATED_2026-10-05_FULL.zip`.
+++
+++## Integrado
+++- ITEMS/LUA FIX74 SAFE: `CustomCape.cpp::RenderModel` seleciona o programa Lua `RenderCapeModel(..., renderCharacter)` por `BMD::BodyLight`; branco exato escolhe false, demais luzes true, sem reexecutar Fengari no hot path.
+++- Icarus GOBoid slots 3..12: `MODEL_SPEARSKILL`, velocity 2.2, LifeTime 240*40, spawn Hero +/-512, `MoveHeavenBug`, descarte 1500 e gate 1/5120.
+++- Joint source: subtype 1, scale 25, `BITMAP_JOINT_SPIRIT` / `Effect/JointSpirit01.OZJ`, 30 tails, órbita e luz de `ZzzEffectJoint.cpp`.
+++- FIX72 três Monster32 dragons e M71 scratch reuse preservados.
+++
+++## Limite conhecido
+++O desktop usa o índice real do pool global `JOINT` na fase orbital. O Web ainda não possui um pool global unificado; FIX74 usa índice estável 0..9 para esses dez owners de Icarus. A geometria/clock/texture/light ficam source-proven, mas essa fase pode diferir do PC se outros joints ocuparem índices antes deles. Não é claim de Icarus 100%.
+++
+++## Próximo
+++Validação física em Icarus; Lorencia material/placement residual; unificação do joint pool; demais `ZzzEffectJoint` families.
++diff -ruN /mnt/data/fix74_src/MUWEB_R90_FIX73_F352_MASTER_SKILL_INTEGRATED_2026-10-05/core/GameApp.js /mnt/data/MUWEB_R90_FIX74_ICARUS_SPEAR_JOINT_LORENCIA_2026-10-05/core/GameApp.js
++--- /mnt/data/fix74_src/MUWEB_R90_FIX73_F352_MASTER_SKILL_INTEGRATED_2026-10-05/core/GameApp.js	2026-10-05 16:01:21.000000000 +0000
+++++ /mnt/data/MUWEB_R90_FIX74_ICARUS_SPEAR_JOINT_LORENCIA_2026-10-05/core/GameApp.js	2026-10-05 16:27:09.867962014 +0000
++@@ -116,7 +116,7 @@
++ export const MUWEB_R90_FIX15_REVISION = 'MUWEB_R90_FIX15_BMD_INFLIGHT_MAP_CANCEL_2026-10-03_A';
++ export const MUWEB_R90_FIX46_REVISION = 'MUWEB_R90_FIX46_DARKSPIRIT_MONSTER_LUA_CONTRACTS_2026-10-04_A';
++ export const MUWEB_R90_FIX47_REVISION = 'MUWEB_R90_FIX47_CHARACTER_LUA_MONSTER_PRESENTATION_2026-10-04_A';
++-export const MUWEB_SOURCE_REVISION = 'MUWEB_R90_FIX73_F352_MASTER_SKILL_INTEGRATED_2026-10-05';
+++export const MUWEB_SOURCE_REVISION = 'MUWEB_R90_FIX74_ICARUS_SPEAR_JOINT_LORENCIA_2026-10-05';
++ export const MUWEB_PREVIOUS_SOURCE_REVISION = 'MUWEB_R78_ITEMVIEW_WORLDENTRY_ANIMATION_CHARSELECT_RECOVERY_2026-09-30_A';
++ export const MUWEB_R77_BASE_REVISION = 'MUWEB_R77_CANONICAL_WORLD_ROUTING_CUSTOMMOVE_PREFETCH_UTF8_2026-09-30_A';
++ 
++diff -ruN /mnt/data/fix74_src/MUWEB_R90_FIX73_F352_MASTER_SKILL_INTEGRATED_2026-10-05/graphics/PlayerComposer.js /mnt/data/MUWEB_R90_FIX74_ICARUS_SPEAR_JOINT_LORENCIA_2026-10-05/graphics/PlayerComposer.js
++--- /mnt/data/fix74_src/MUWEB_R90_FIX73_F352_MASTER_SKILL_INTEGRATED_2026-10-05/graphics/PlayerComposer.js	2026-10-05 14:27:00.000000000 +0000
+++++ /mnt/data/MUWEB_R90_FIX74_ICARUS_SPEAR_JOINT_LORENCIA_2026-10-05/graphics/PlayerComposer.js	2026-10-05 16:24:24.328415327 +0000
++@@ -517,8 +517,15 @@
++             // PC CustomCape::RenderCape calls RenderCapeModel(BMD,Object,Type,RenderCharacter).
++             // Keep the exact authored callback plan beside the equipped model; consumers may
++             // execute only operations the renderer actually implements (never synthesize FX).
++-            renderCapePlan: (resolved.wing.custom?.customWing && resolved.wing.custom?.isCape)
++-                ? customCapeRenderPlan(PC_MODEL_ITEM + resolved.wing.itemType, true) : Object.freeze([]),
+++            // PC CustomCape::RenderModel derives RenderCharacter from BMD::BodyLight:
+++            // exact white (1,1,1) => 0, any other BodyLight => 1.  Keep both
+++            // immutable Lua-authored programs because terrain lighting can change after
+++            // equip; selecting one must not re-enter Fengari in the render hot path.
+++            renderCapePlans: (resolved.wing.custom?.customWing && resolved.wing.custom?.isCape)
+++                ? Object.freeze({
+++                    white: customCapeRenderPlan(PC_MODEL_ITEM + resolved.wing.itemType, false),
+++                    lit: customCapeRenderPlan(PC_MODEL_ITEM + resolved.wing.itemType, true),
+++                  }) : null,
++             classId: Number(opts?.classId ?? decoded.classByte ?? 0) & 7,
++             customColor: resolved.wing.color || null, effectType: resolved.wing.effectType || 0,
++         };
++@@ -906,6 +913,21 @@
++     }
++     if (wr.mixer?.clips?.has?.('action_0')) wr.playAction('action_0');
++     if (rule.playSpeed != null) wr.playSpeed = rule.playSpeed;
+++    // FIX74: mirror CustomCape.cpp exactly: RenderCharacter is zero only when
+++    // BMD::BodyLight is exactly white.  Selection is allocation-free and follows
+++    // later terrain-light updates; Lua execution itself remains memoized by FIX72.
+++    if (spec.renderCapePlans) {
+++        const chooseCapePlan = () => {
+++            const c = wr.bodyLight;
+++            const white = c?.r === 1 && c?.g === 1 && c?.b === 1;
+++            wr.userData ??= {};
+++            wr.userData.muRenderCapePlan = white ? spec.renderCapePlans.white : spec.renderCapePlans.lit;
+++            wr.userData.muRenderCapeCharacter = white ? 0 : 1;
+++        };
+++        chooseCapePlan();
+++        const setBodyLight = wr.setBodyLight.bind(wr);
+++        wr.setBodyLight = (color) => { const out=setBodyLight(color); chooseCapePlan(); return out; };
+++    }
++     // Wings/rigid helpers are items too. R53 applied RenderModel/+level/etc to
++     // body and held weapons but skipped these separate BMD renderers, making
++     // equipped character visuals diverge from inventory/current-client rules.
++diff -ruN /mnt/data/fix74_src/MUWEB_R90_FIX73_F352_MASTER_SKILL_INTEGRATED_2026-10-05/test-r90-fix72-icarus-dragons.mjs /mnt/data/MUWEB_R90_FIX74_ICARUS_SPEAR_JOINT_LORENCIA_2026-10-05/test-r90-fix72-icarus-dragons.mjs
++--- /mnt/data/fix74_src/MUWEB_R90_FIX73_F352_MASTER_SKILL_INTEGRATED_2026-10-05/test-r90-fix72-icarus-dragons.mjs	2026-10-05 15:22:46.000000000 +0000
+++++ /mnt/data/MUWEB_R90_FIX74_ICARUS_SPEAR_JOINT_LORENCIA_2026-10-05/test-r90-fix72-icarus-dragons.mjs	2026-10-05 16:27:57.170668618 +0000
++@@ -10,8 +10,8 @@
++ assert.match(s,/ri\(4000\) - 2000/);
++ assert.match(s,/hero\.z - 600/);
++ assert.match(s,/Math\.hypot\(d\.x - hero\.x, d\.y - hero\.y\) >= 4000/);
++-assert.match(s,/muPcUnresolvedSpearJointBoids = 10/);
+++assert.ok(/muPcUnresolvedSpearJointBoids = 10/.test(s) || /muPcSpearJointBoids = SPEAR_COUNT/.test(s));
++ const t=fs.readFileSync(new URL('./world/TerrainObjectWorld.js',import.meta.url),'utf8');
++ assert.match(t,/createPcIcarusBoidsOwner/);
++ assert.match(t,/3 Monster32 sky dragons/);
++-console.log('PASS FIX72 Icarus GOBoid CreateDragon Monster32 owner + fail-closed spear joints');
+++console.log('PASS FIX72 Icarus GOBoid CreateDragon Monster32 owner (spear lane may be closed by newer authority)');
++diff -ruN /mnt/data/fix74_src/MUWEB_R90_FIX73_F352_MASTER_SKILL_INTEGRATED_2026-10-05/test-r90-fix74-cape-bodylight-branch.mjs /mnt/data/MUWEB_R90_FIX74_ICARUS_SPEAR_JOINT_LORENCIA_2026-10-05/test-r90-fix74-cape-bodylight-branch.mjs
++--- /mnt/data/fix74_src/MUWEB_R90_FIX73_F352_MASTER_SKILL_INTEGRATED_2026-10-05/test-r90-fix74-cape-bodylight-branch.mjs	1970-01-01 00:00:00.000000000 +0000
+++++ /mnt/data/MUWEB_R90_FIX74_ICARUS_SPEAR_JOINT_LORENCIA_2026-10-05/test-r90-fix74-cape-bodylight-branch.mjs	2026-10-05 16:24:24.330336566 +0000
++@@ -0,0 +1,10 @@
+++import fs from 'node:fs';
+++import assert from 'node:assert/strict';
+++const s=fs.readFileSync(new URL('./graphics/PlayerComposer.js',import.meta.url),'utf8');
+++assert.match(s,/white: customCapeRenderPlan\([^\n]+false\)/);
+++assert.match(s,/lit: customCapeRenderPlan\([^\n]+true\)/);
+++assert.match(s,/c\?\.r === 1 && c\?\.g === 1 && c\?\.b === 1/);
+++assert.match(s,/muRenderCapeCharacter = white \? 0 : 1/);
+++assert.match(s,/wr\.setBodyLight = \(color\) =>/);
+++assert.doesNotMatch(s,/renderCapePlan: \(resolved\.wing/);
+++console.log('PASS FIX74 CustomCape RenderCharacter BodyLight branch + allocation-free plan selection');
++diff -ruN /mnt/data/fix74_src/MUWEB_R90_FIX73_F352_MASTER_SKILL_INTEGRATED_2026-10-05/test-r90-fix74-icarus-spear-joint.mjs /mnt/data/MUWEB_R90_FIX74_ICARUS_SPEAR_JOINT_LORENCIA_2026-10-05/test-r90-fix74-icarus-spear-joint.mjs
++--- /mnt/data/fix74_src/MUWEB_R90_FIX73_F352_MASTER_SKILL_INTEGRATED_2026-10-05/test-r90-fix74-icarus-spear-joint.mjs	1970-01-01 00:00:00.000000000 +0000
+++++ /mnt/data/MUWEB_R90_FIX74_ICARUS_SPEAR_JOINT_LORENCIA_2026-10-05/test-r90-fix74-icarus-spear-joint.mjs	2026-10-05 16:27:09.868492957 +0000
++@@ -0,0 +1,6 @@
+++import fs from 'node:fs';
+++import assert from 'node:assert/strict';
+++const s=fs.readFileSync(new URL('./world/PcIcarusBoids.js',import.meta.url),'utf8');
+++for(const x of ["SPEAR_COUNT = 10","SPEAR_TAILS = 30","SPEAR_SCALE = 25","Effect/JointSpirit01.OZJ","velocity: 2.2","240*40","ri(5120) === 0","Math.hypot(b.x-hero.x,b.y-hero.y) >= 1500","0.048 * 0.5","0.0613 * 0.5","0.1113 * 0.5","0.4 + 0.2 * sa","CreateJoint(MODEL_SPEARSKILL, subtype1, scale25)"]) assert.ok(s.includes(x),`missing ${x}`);
+++assert.ok(!s.includes('exact owner pending'),'legacy fail-closed spear marker remains');
+++console.log('PASS FIX74 Icarus 10 MODEL_SPEARSKILL MoveHeavenBug + CreateJoint subtype1 retained owner');
++diff -ruN /mnt/data/fix74_src/MUWEB_R90_FIX73_F352_MASTER_SKILL_INTEGRATED_2026-10-05/tools/start-r90-fix74-safe.cjs /mnt/data/MUWEB_R90_FIX74_ICARUS_SPEAR_JOINT_LORENCIA_2026-10-05/tools/start-r90-fix74-safe.cjs
++--- /mnt/data/fix74_src/MUWEB_R90_FIX73_F352_MASTER_SKILL_INTEGRATED_2026-10-05/tools/start-r90-fix74-safe.cjs	1970-01-01 00:00:00.000000000 +0000
+++++ /mnt/data/MUWEB_R90_FIX74_ICARUS_SPEAR_JOINT_LORENCIA_2026-10-05/tools/start-r90-fix74-safe.cjs	2026-10-05 16:27:09.868315966 +0000
++@@ -0,0 +1,30 @@
+++const fs = require('node:fs');
+++const path = require('node:path');
+++const crypto = require('node:crypto');
+++const root = path.resolve(__dirname, '..');
+++const MUTABLE_RUNTIME = new Set(['runtime-config.js']);
+++function sha256(p){return crypto.createHash('sha256').update(fs.readFileSync(p)).digest('hex');}
+++function verifyBuild(){
+++  const manifestPath = path.join(root, 'R90_FIX74_SOURCE_HASHES.json');
+++  if(!fs.existsSync(manifestPath)) throw new Error('R90_FIX74_SOURCE_HASHES.json ausente');
+++  const m = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+++  let n=0;
+++  for(const [rel, expected] of Object.entries(m.files || {})){
+++    if(MUTABLE_RUNTIME.has(rel)) continue;
+++    const p = path.join(root, rel);
+++    if(!fs.existsSync(p)) throw new Error(`FIX74 arquivo ausente: ${rel}`);
+++    const actual = sha256(p);
+++    if(actual !== expected) throw new Error(`FIX74 arquivo modificado/incompleto: ${rel}`);
+++    n++;
+++  }
+++  console.log(`[R90 FIX74] ${m.build}: ${n} arquivos imutaveis verificados.`);
+++  return m;
+++}
+++module.exports={verifyBuild};
+++if(require.main===module){
+++  try{
+++    verifyBuild();
+++    if(process.argv.includes('--verify-only')) process.exit(0);
+++    require('./start-r90-safe.cjs').main().catch(e=>{console.error('[R90 FIX74] FALHA:', e.message); process.exitCode=1;});
+++  }catch(e){console.error('[R90 FIX74] FALHA:', e.message); process.exitCode=1;}
+++}
++diff -ruN /mnt/data/fix74_src/MUWEB_R90_FIX73_F352_MASTER_SKILL_INTEGRATED_2026-10-05/world/PcIcarusBoids.js /mnt/data/MUWEB_R90_FIX74_ICARUS_SPEAR_JOINT_LORENCIA_2026-10-05/world/PcIcarusBoids.js
++--- /mnt/data/fix74_src/MUWEB_R90_FIX73_F352_MASTER_SKILL_INTEGRATED_2026-10-05/world/PcIcarusBoids.js	2026-10-05 15:21:06.000000000 +0000
+++++ /mnt/data/MUWEB_R90_FIX74_ICARUS_SPEAR_JOINT_LORENCIA_2026-10-05/world/PcIcarusBoids.js	2026-10-05 16:27:09.866702306 +0000
++@@ -1,21 +1,109 @@
++ // PcIcarusBoids.js — retained Main 5.2 GOBoid.cpp WD_10HEAVEN sky boids.
++-// FIX72 closes the three source-owned MODEL_MONSTER01+31 dragons only.
++-// Boid slots 3..12 are MODEL_SPEARSKILL joint owners and remain fail-closed
++-// until the exact ZzzEffectJoint subtype-1 renderer is ported.
+++// FIX72 closes the three source-owned MODEL_MONSTER01+31 dragons.
+++// FIX74 closes boid slots 3..12: MoveHeavenBug + MODEL_SPEARSKILL CreateJoint subtype1
+++// using the retained JointSpirit01 texture, 30-tail cross ribbon and authored light law.
++ import * as THREE from 'three';
++ import { MUAssets } from '../assets/MUAssetLoader.js';
++ import { MUModelRenderer, RenderFlags } from '../assets/MUModelRenderer.js';
++ import { applyMuUpAxis } from '../graphics/BmdAdapter.js';
+++import { RemoteAssets } from '../data/RemoteAssets.js';
+++import { tryAcquirePcParticle, releasePcParticle } from './PcParticleBudget.js';
++ 
++ const PC_HZ = 25;
++ const TICK = 1 / PC_HZ;
++ const DRAGON_COUNT = 3;
+++const SPEAR_COUNT = 10;
+++const SPEAR_TAILS = 30;
+++const SPEAR_SCALE = 25;
+++const SPEAR_TEXTURE = 'Effect/JointSpirit01.OZJ';
+++let spearTexturePromise = null;
++ const DRAGON_BMD = 'Monster/Monster32.bmd'; // OpenMonsterModel(31) => Type+1.
++ const DRAGON_ACTION = 'action_7'; // MONSTER01_DIE(6)+1.
++ const ri = (n) => Math.floor(Math.random() * Math.max(1, n));
++ const rad = (d) => d * Math.PI / 180;
++ const deg = (r) => r * 180 / Math.PI;
++ 
+++
+++async function loadSpearTexture() {
+++  if (spearTexturePromise) return spearTexturePromise;
+++  spearTexturePromise = (async () => {
+++    const d = await RemoteAssets.fetchDecodedImage(SPEAR_TEXTURE);
+++    if (!d?.image) return null;
+++    const t = new THREE.Texture(d.image);
+++    t.needsUpdate = true;
+++    t.colorSpace = THREE.SRGBColorSpace;
+++    t.wrapS = THREE.RepeatWrapping;
+++    t.wrapT = THREE.ClampToEdgeWrapping;
+++    t.minFilter = t.magFilter = THREE.LinearFilter;
+++    t.generateMipmaps = true;
+++    t.userData.muPcBitmapPath = SPEAR_TEXTURE;
+++    return t;
+++  })().catch(() => null);
+++  return spearTexturePromise;
+++}
+++function makeSpearRibbonGeometry() {
+++  const g = new THREE.BufferGeometry();
+++  // Two crossed retained faces, matching the 4 points authored by CreateTail.
+++  const samples = SPEAR_TAILS;
+++  const vertsPerSample = 4;
+++  g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(samples * vertsPerSample * 3), 3));
+++  const uv = new Float32Array(samples * vertsPerSample * 2);
+++  for (let i = 0; i < samples; i++) {
+++    const v = i / Math.max(1, SPEAR_TAILS - 1);
+++    const o = i * 8;
+++    uv[o] = 0; uv[o+1] = v; uv[o+2] = 1; uv[o+3] = v;
+++    uv[o+4] = 0; uv[o+5] = v; uv[o+6] = 1; uv[o+7] = v;
+++  }
+++  g.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
+++  const idx = [];
+++  for (let i = 0; i < samples - 1; i++) {
+++    const a=i*4,b=a+1,c=a+2,d=a+3,n=(i+1)*4;
+++    idx.push(a,b,n, b,n+1,n);       // horizontal face
+++    idx.push(c,d,n+2, d,n+3,n+2);   // vertical face
+++  }
+++  g.setIndex(idx);
+++  return g;
+++}
+++function spearOrbitMu(target, worldTick, jointIndex) {
+++  // ZzzEffectJoint.cpp MODEL_SPEARSKILL subtype 1.
+++  let iFrame = worldTick;
+++  iFrame = ((jointIndex % 2) ? iFrame : -iFrame) + jointIndex * 53731;
+++  const f0 = 0.048 * 0.5, f1 = 0.0613 * 0.5, f2 = 0.1113 * 0.5;
+++  const x0 = Math.sin((iFrame + 55555) * f0) * Math.cos(iFrame * f1);
+++  const y0 = Math.sin((iFrame + 55555) * f0) * Math.sin(iFrame * f1);
+++  const z0 = Math.cos((iFrame + 55555) * f0);
+++  const sa = Math.sin((iFrame + 11111) * f2), ca = Math.cos((iFrame + 11111) * f2);
+++  const vz = x0;
+++  const vy = sa * y0 + ca * z0;
+++  const vx = ca * y0 - sa * z0;
+++  return {
+++    x: target.x + vx * 70,
+++    y: target.y + vy * 70,
+++    z: target.z + 10 + vz * 140,
+++    light: [0.2, 0.2, 0.4 + 0.2 * sa],
+++  };
+++}
+++function updateSpearRibbon(owner) {
+++  const attr = owner.mesh.geometry.attributes.position;
+++  const a = attr.array;
+++  const half = SPEAR_SCALE * 0.5;
+++  // PC CreateTail stores four world-space corners per retained sample. The
+++  // joint angle is zero in CreateDragon, so its local X/Z cross is retained.
+++  for (let i = 0; i < SPEAR_TAILS; i++) {
+++    const p = owner.tails[i] || owner.tails[owner.tails.length-1] || owner.point;
+++    const x=p?.x||0, y=p?.z||0, z=-(p?.y||0); // MU -> Web
+++    const o=i*12;
+++    a[o]=x-half; a[o+1]=y; a[o+2]=z;
+++    a[o+3]=x+half; a[o+4]=y; a[o+5]=z;
+++    a[o+6]=x; a[o+7]=y-half; a[o+8]=z;
+++    a[o+9]=x; a[o+10]=y+half; a[o+11]=z;
+++  }
+++  attr.needsUpdate = true;
+++  owner.mesh.geometry.computeBoundingSphere();
+++  const l=owner.point.light;
+++  owner.mesh.material.color.setRGB(l[0],l[1],l[2]);
+++}
+++
++ function heroMu(gameScene) {
++   const p = gameScene?.mainObject?.position;
++   if (!p?.isVector3) return null;
++@@ -38,14 +126,20 @@
++   group.userData.muPcOwner = 'GOBoid.cpp::MoveBoids/CreateDragon/MoveBoidGroup';
++   group.userData.muPcDragonModel = DRAGON_BMD;
++   group.userData.muPcDragonCount = DRAGON_COUNT;
++-  group.userData.muPcUnresolvedSpearJointBoids = 10;
++-  group.userData.muPcUnresolvedReason = 'MODEL_SPEARSKILL CreateJoint subtype1 exact owner pending';
+++  group.userData.muPcSpearJointBoids = SPEAR_COUNT;
+++  group.userData.muPcSpearJointOwner = 'GOBoid.cpp::CreateDragon(index>=3)+MoveHeavenBug; ZzzEffectJoint MODEL_SPEARSKILL subtype1';
++ 
++   const dragons = Array.from({ length: DRAGON_COUNT }, (_, i) => ({
++     i, live: false, renderer: null, outer: null,
++     x: 0, y: 0, z: 0, angle: 0, velocity: 0.2, gravity: 0.5,
++     dirX: 0, dirY: 0, dirZ: 0, scale: 0.3, alpha: 1,
++   }));
+++  const spears = Array.from({ length: SPEAR_COUNT }, (_, j) => ({
+++    i: j + DRAGON_COUNT, jointIndex: j, live: false,
+++    x: 0, y: 0, z: 0, angle: 0, velocity: 2.2, lifeTime: 240*40,
+++    mesh: null, tails: [], point: {x:0,y:0,z:0,light:[.2,.2,.4]}, budget: false,
+++  }));
+++  let worldTick = 0;
++   let disposed = false, ready = false, acc = 0, elapsed = 0;
++ 
++   function spawn(d, hero) {
++@@ -94,9 +188,40 @@
++       d.angle = turnAngle(d.angle, target, d.gravity);
++     }
++   }
+++  function spawnSpear(b, hero) {
+++    b.velocity = 2.2;
+++    b.lifeTime = 240 * 40;
+++    b.angle = ri(360);
+++    b.x = hero.x + (ri(1024) - 512);
+++    b.y = hero.y + (ri(1024) - 512);
+++    b.z = hero.z;
+++    b.live = true;
+++    b.tails.length = 0;
+++  }
+++  function tickSpear(b, hero) {
+++    if (!b.live) { spawnSpear(b, hero); return; }
+++    // GOBoid.cpp::MoveHeavenBug, authored at the 25 Hz FX/world tick.
+++    const az = rad(b.angle);
+++    b.x += b.velocity * Math.sin(az);
+++    b.y -= b.velocity * Math.cos(az);
+++    const iFrame = worldTick;
+++    b.angle += 0.01 * Math.cos((34571 + iFrame + b.i * 41273) * 0.0003)
+++                    * Math.sin((17732 + iFrame + b.i * 5161) * 0.0003);
+++    b.lifeTime -= 1;
+++    if (Math.hypot(b.x-hero.x,b.y-hero.y) >= 1500 || ri(5120) === 0) {
+++      b.live = false; b.tails.length = 0; if (b.mesh) b.mesh.visible = false; return;
+++    }
+++    const q = spearOrbitMu(b, worldTick, b.jointIndex);
+++    b.point = q;
+++    b.tails.unshift({x:q.x,y:q.y,z:q.z});
+++    if (b.tails.length > SPEAR_TAILS) b.tails.length = SPEAR_TAILS;
+++    if (b.mesh) { b.mesh.visible = true; updateSpearRibbon(b); }
+++  }
+++
++   function tick() {
++     const hero = heroMu(gameScene);
++     if (!ready || !hero) return;
+++    worldTick++;
++     for (const d of dragons) {
++       if (!d.live) { spawn(d, hero); continue; }
++       steer(d); // ZzzAI.cpp::MoveBoid.
++@@ -115,6 +240,7 @@
++       d.outer.rotation.y = rad(d.angle);
++       d.outer.visible = true;
++     }
+++    for (const b of spears) tickSpear(b, hero);
++   }
++ 
++   void MUAssets.loadBMD(DRAGON_BMD).then(async (bmd) => {
++@@ -141,6 +267,29 @@
++     group.userData.muPcDragonMissing = `${DRAGON_BMD}: ${e?.message || e}`;
++   });
++ 
+++  void loadSpearTexture().then((texture) => {
+++    if (disposed || !texture) return;
+++    const hero = heroMu(gameScene);
+++    if (!hero) return;
+++    for (const b of spears) {
+++      if (!tryAcquirePcParticle()) { group.userData.muPcSpearBudgetDrops = (group.userData.muPcSpearBudgetDrops || 0) + 1; continue; }
+++      b.budget = true;
+++      const geometry = makeSpearRibbonGeometry();
+++      const material = new THREE.MeshBasicMaterial({
+++        map:texture, color:new THREE.Color(.2,.2,.4), transparent:true, opacity:1,
+++        depthTest:true, depthWrite:false, side:THREE.DoubleSide,
+++        blending:THREE.AdditiveBlending, toneMapped:false,
+++      });
+++      const mesh = new THREE.Mesh(geometry,material);
+++      mesh.frustumCulled = false; mesh.renderOrder = 6; mesh.visible = false;
+++      mesh.name = `Icarus_SpearJoint_${b.i}`;
+++      mesh.userData.muPcOwner = 'CreateJoint(MODEL_SPEARSKILL, subtype1, scale25)';
+++      mesh.userData.muPcTexType = 'BITMAP_JOINT_SPIRIT';
+++      mesh.userData.muPcMaxTails = SPEAR_TAILS;
+++      b.mesh = mesh; group.add(mesh); spawnSpear(b,hero);
+++    }
+++  }).catch((e)=>{ group.userData.muPcSpearTextureMissing = `${SPEAR_TEXTURE}: ${e?.message || e}`; });
+++
++   group.userData.update = (dt) => {
++     if (disposed) return;
++     const d = Math.max(0, Number(dt) || 0);
++@@ -153,6 +302,7 @@
++     }
++     for (const x of dragons) if (x.live) x.renderer?.update?.(d, elapsed);
++     group.userData.muPcLiveDragons = dragons.reduce((n, x) => n + (x.live ? 1 : 0), 0);
+++    group.userData.muPcLiveSpearBoids = spears.reduce((n, x) => n + (x.live ? 1 : 0), 0);
++   };
++ 
++   return {
++@@ -160,6 +310,12 @@
++     dispose() {
++       if (disposed) return; disposed = true;
++       for (const d of dragons) { try { d.renderer?.dispose?.(); } catch {} d.renderer = null; d.outer = null; }
+++      for (const b of spears) {
+++        b.live=false; b.tails.length=0;
+++        if (b.mesh) { try { b.mesh.geometry?.dispose?.(); b.mesh.material?.dispose?.(); } catch {} }
+++        if (b.budget) releasePcParticle();
+++        b.mesh=null; b.budget=false;
+++      }
++       group.clear();
++     },
++   };
+diff -ruN /mnt/data/fix74_src/MUWEB_R90_FIX73_F352_MASTER_SKILL_INTEGRATED_2026-10-05/MUWEB_R90_FIX74_PORTABILITY.md /mnt/data/MUWEB_R90_FIX74_ICARUS_SPEAR_JOINT_LORENCIA_2026-10-05/MUWEB_R90_FIX74_PORTABILITY.md
+--- /mnt/data/fix74_src/MUWEB_R90_FIX73_F352_MASTER_SKILL_INTEGRATED_2026-10-05/MUWEB_R90_FIX74_PORTABILITY.md	1970-01-01 00:00:00.000000000 +0000
++++ /mnt/data/MUWEB_R90_FIX74_ICARUS_SPEAR_JOINT_LORENCIA_2026-10-05/MUWEB_R90_FIX74_PORTABILITY.md	2026-10-05 16:30:21.433906823 +0000
+@@ -0,0 +1,15 @@
++# MUWEB R90 FIX74 — Icarus spear-joint + cape BodyLight
++
++Parent exato: `MUWEB_R90_FIX73_F352_MASTER_SKILL_INTEGRATED_2026-10-05_FULL.zip`.
++
++## Integrado
++- ITEMS/LUA FIX74 SAFE: `CustomCape.cpp::RenderModel` seleciona o programa Lua `RenderCapeModel(..., renderCharacter)` por `BMD::BodyLight`; branco exato escolhe false, demais luzes true, sem reexecutar Fengari no hot path.
++- MAPS_ENGINE M72 semantically integrated and corrected against source: Icarus GOBoid slots 3..12: `MODEL_SPEARSKILL`, velocity 2.2, LifeTime 240*40, spawn Hero +/-512, `MoveHeavenBug` with raw `Angle[2]` sin/cos exactly as PC, descarte 1500 e gate 1/5120.
++- Joint source: subtype 1, scale 25, `BITMAP_JOINT_SPIRIT` / `Effect/JointSpirit01.OZJ`, 30 tails, órbita e luz de `ZzzEffectJoint.cpp`.
++- FIX72 três Monster32 dragons e M71 scratch reuse preservados.
++
++## Limite conhecido
++O desktop usa o índice real do pool global `JOINT` na fase orbital. O Web ainda não possui um pool global unificado; FIX74 usa índice estável 0..9 para esses dez owners de Icarus. A geometria/clock/texture/light ficam source-proven, mas essa fase pode diferir do PC se outros joints ocuparem índices antes deles. Não é claim de Icarus 100%.
++
++## Próximo
++Validação física em Icarus; Lorencia material/placement residual; unificação do joint pool; demais `ZzzEffectJoint` families.
+diff -ruN /mnt/data/fix74_src/MUWEB_R90_FIX73_F352_MASTER_SKILL_INTEGRATED_2026-10-05/R90_FIX74_SOURCE_HASHES.json /mnt/data/MUWEB_R90_FIX74_ICARUS_SPEAR_JOINT_LORENCIA_2026-10-05/R90_FIX74_SOURCE_HASHES.json
+--- /mnt/data/fix74_src/MUWEB_R90_FIX73_F352_MASTER_SKILL_INTEGRATED_2026-10-05/R90_FIX74_SOURCE_HASHES.json	1970-01-01 00:00:00.000000000 +0000
++++ /mnt/data/MUWEB_R90_FIX74_ICARUS_SPEAR_JOINT_LORENCIA_2026-10-05/R90_FIX74_SOURCE_HASHES.json	2026-10-05 16:28:42.452377090 +0000
+@@ -0,0 +1,544 @@
++{
++  "build": "MUWEB_R90_FIX74_ICARUS_SPEAR_JOINT_LORENCIA_2026-10-05",
++  "mutable": [
++    "runtime-config.js"
++  ],
++  "files": {
++    "CURRENT_AUTHORITY.txt": "19037d0903ac288f8f3d31fe991c0f5741a6dccb5b2da9cb2fee2df417b90cee",
++    "DESLIGAR_WEB_R90.bat": "91e41f8ce6ad24ac3d2a1ed7453067fcab05e12f22a812929e7fbb2b38895115",
++    "FIX73_BAT_INVENTORY.txt": "20370a6bc28b292715db4685b6abbe4d46627858295a0d41581fa9aba3b79cfd",
++    "FIX74_BAT_INVENTORY.txt": "6a9dbd78a79a8162db4642c05baa79d8fb30a02cdc16f97cb3afc54cfef3be06",
++    "INSTALAR_DEPENDENCIAS_R90.bat": "e5a7a11ff528a0c1bccc15302cb8863bcc649db71fe7d704e38a20f6f0b41f7b",
++    "LEIA_PRIMEIRO_FIX44.txt": "e3fe9dc72855eb228fbd9215546e1065688e4a1417cd82e0cdb24b0c55c33225",
++    "LIGAR_WEB_R90_FIX74.bat": "fddd9b0aea7279235aef67a824d426dcb87cb11a2d0c0a88d03eac3528b67b8d",
++    "MUWEB_LANE_MAPS_ENGINE_M61_REPORT.md": "ba8cb5382dce6b9cfe9a42fd76270976798a0177cac72391feda3b376480acdd",
++    "MUWEB_LANE_SKILLS_PROTOCOL_FIX61_REPORT.md": "1c53d2be875bc57e3be27eb581cf04680d43124fc328b4ce1973ca79158114ad",
++    "MUWEB_R90_FIX47_PORTABILITY.md": "aaa8f8d70190ba5b633771166dd1c8ca58fc70de83d965ec8ea3c7ede53df779",
++    "MUWEB_R90_FIX48_PORTABILITY.md": "5d448743008c5423731af83c5142018fe43b69acac6ecfb93007e3489b4c9e2d",
++    "MUWEB_R90_FIX49_RENDER_VISIBILITY_HOTFIX.md": "0e151d296e04a7a32843585bceeabe7da06b1f38afb4943a8cfbda101875a158",
++    "MUWEB_R90_FIX50_PORTABILITY.md": "10f8326594196027f9d74e12e9b0158fcb7cdd984cb20c8009176ad1c24b07c3",
++    "MUWEB_R90_FIX51_PORTABILITY.md": "2d988557c9d88a80865488487d8835173055f90d7eb872a102c32949a1549d43",
++    "MUWEB_R90_FIX52_PORTABILITY.md": "eae0942fbeba7babb95f6f1ecddb7cd72186529fdfbf22b8fbedeeba19ab9a63",
++    "MUWEB_R90_FIX53_PORTABILITY.md": "7338735dee87cd253e8cefe5633111dbef8e397de25dea50267962dbbe67df29",
++    "MUWEB_R90_FIX54_PORTABILITY.md": "d749427972722d7ac00b0e736769f49450836a778950cae10f379420713a73b8",
++    "MUWEB_R90_FIX55_PORTABILITY.md": "aa7c6d69090caa44ad97c87f9e7712f7a0cb253063d0b3e2f876e827aab9afa1",
++    "MUWEB_R90_FIX56_PORTABILITY.md": "38cfdc5878a245d48984f5d7896709846f35851645575acb1bed39c9b2cff5c9",
++    "MUWEB_R90_FIX57_PORTABILITY.md": "16d572c154a4f63210ec7ea5680dd1055e6c52a7bcc291f0f81a44d1a2bc6e28",
++    "MUWEB_R90_FIX58_PORTABILITY.md": "e287462e96b63b365b516e0dfd47eca4fe3c74f9a9e4f7c17e003229c12b2d7c",
++    "MUWEB_R90_FIX59_PORTABILITY.md": "34e34f569197e0a1f80d231a482c401b3ac37846af8c6ad884801e446797b954",
++    "MUWEB_R90_FIX60_PORTABILITY.md": "6a6556f4af445a565ea8ab7cb9ad9a0c3a4ee65ff6481af4c38677913b9667dd",
++    "MUWEB_R90_FIX61_ITEMS_LUA_LANE.md": "452917d9ea05d32315e25c164c86a3b4348817f456553acfb93c9623dd3a881d",
++    "MUWEB_R90_FIX61_PORTABILITY.md": "854200d710c39c378d5140ce3d64a6b9a21cf59c66067da4d7d0eceec332e557",
++    "MUWEB_R90_FIX64_PORTABILITY.md": "1092733a7e84db6dd73348985c4382381a5bc4377d71422833b6d9ba96de2632",
++    "MUWEB_R90_FIX69_PORTABILITY.md": "c2eda87aba739e84a985c6850edfe4126af9e766d7793c02dcb160bcc4ca4531",
++    "MUWEB_R90_FIX72_PORTABILITY.md": "33713d36c9541c5922a86219c5012652cf7b3503a0e13c415ac18987278ec9d1",
++    "MUWEB_R90_FIX73_PORTABILITY.md": "e94fb0a82d047c068912baccbd503988ce92f8238d22fea7e33943ffd9b1102c",
++    "MUWEB_R90_FIX74_FROM_FIX73.patch": "0605dbcbc4e992eeb4a7f8b7dcee7b001a918b9737fc49409f3bf91f09b645f0",
++    "MUWEB_R90_FIX74_PORTABILITY.md": "185c93c6f7936253ed4b4e2b321f7cda85ef05839d0858fe435883a8180c26a5",
++    "R90_FIX31_SOURCE_HASHES.json": "5581d905590142625b1acb3d09c6c978f27af9b84e1dc327809f7a653f9067b3",
++    "R90_FIX35_SOURCE_HASHES.json": "d4b4ff16b14b9f44c259a022cf0938a1e0383df379c866f3b01b7159ac9b8e1e",
++    "R90_FIX40_SOURCE_HASHES.json": "67a72a56d641e1523ea1de4455aae97c200f63bfa9118deeab106bb99e91ed61",
++    "R90_FIX41_SOURCE_HASHES.json": "1758f462148b8d37d31b3f8014658a7c9e5e049ae8b07e4d8636138415982a26",
++    "R90_FIX42_SOURCE_HASHES.json": "79c7476b8d43fee74966031a27a9f0306b4c07bef83ec8127bf9b572c4186f11",
++    "R90_FIX43_SOURCE_HASHES.json": "19e5ac961eedaf45d391005c14d25fe364e2f199763641fda12eeb735c32a800",
++    "R90_FIX44_SOURCE_HASHES.json": "834e5681b0bfa39eb89d35c65616546dc505dda073c1e86323f78d1942ea7e1c",
++    "R90_FIX47_CHANGED_HASHES.json": "8d38477360f4215f1babc25576805940e41b3e3fdf80791065a97ad1b218e3b9",
++    "R90_FIX48_SOURCE_HASHES.json": "a8d0aec94919c70d6cdb0711d4e481024cbc334c62b1f3eea69928529108c57a",
++    "R90_FIX49_CHANGED_HASHES.json": "72f6434067bf5b953afb0cafd45c15781e05eda5a5ad947a547961716bc17306",
++    "R90_FIX49_SOURCE_HASHES.json": "007e094d065da7e66ac2be807efa57e6cda2ccecc23a52f4f3af3408ade9def1",
++    "R90_FIX50_SOURCE_HASHES.json": "ff13f2d214ad7c040408a33f03937cf40fa976adb9f59e6586f08c93336f4d6e",
++    "R90_FIX51_CHANGED_HASHES.json": "42489d4399162ca78241316212465066d5551f09ce4b4ff6f2715bbaca7f451a",
++    "R90_FIX51_SOURCE_HASHES.json": "6e7315498ab981e8fe35967049f25f9185af904e23c1a6f74cfb3d16b2a11071",
++    "R90_FIX52_CHANGED_HASHES.json": "7759e203440bd564ce9e621500573906a53e91b135bb41b2648d75080cca21ba",
++    "R90_FIX52_SOURCE_HASHES.json": "e1f1b035e2e19531b539300f81186fe70e324917c3d5fd20d41f5d22af473899",
++    "R90_FIX53_CHANGED_HASHES.json": "b4f947ab1f8f2124d208c30b696bfde078d989261ac3c9a56b7161b7db35ec75",
++    "R90_FIX53_SOURCE_HASHES.json": "dda333ad0943432ad5732410d75cc0a7d705cb5d65908df67be08b6c1f16fc7d",
++    "R90_FIX54_CHANGED_HASHES.json": "e9607c7bc6b7fffbe154d10e8fe4a7b97605a26eea2312736388d8a4c613d126",
++    "R90_FIX54_SOURCE_HASHES.json": "1ad996b02ba5fc6d645ce3eb4ddff7197fde061f795de34603a1d3416b31ef6f",
++    "R90_FIX55_SOURCE_HASHES.json": "3f2eb9d2c096236288be3a0cd6aa5de5989f81d0222192b63b02787d967c7f83",
++    "R90_FIX56_SOURCE_HASHES.json": "4db00b6a4747f152a619e2d096e3ce0161ecf2aa51b572e9d33e629fc9dddf3d",
++    "R90_FIX57_CHANGED_HASHES.json": "aaa6cefea43ec45bd62f8a86d24395d31cd6caea724d6f1a03a6cc6f4fcec53c",
++    "R90_FIX57_SOURCE_HASHES.json": "8cca91d6563dc4f056371c798a8d5f1a68bb086435bb527fdc4dd3207b705300",
++    "R90_FIX58_CHANGED_HASHES.json": "3313222c53961dbea2f2851727680004b07dc24781d04ec423eecfcca38ed5f2",
++    "R90_FIX58_SOURCE_HASHES.json": "fb7e19fd6a615376ba62e610ecc9335dc09d27b2eac08e23198d48665e5a8460",
++    "R90_FIX59_CHANGED_HASHES.json": "831dc1b37e5c526037c0ffc24014209fcdbc306263200185b033749642cc6df5",
++    "R90_FIX59_SOURCE_HASHES.json": "fdc3ef8274906d28f0e95445f797ff40517ff5e740af14193917c23290648ce1",
++    "R90_FIX60_CHANGED_HASHES.json": "53dec7e4b0977da0da31e611af5a33f671211c1ac84787c12ca346c7d94532ee",
++    "R90_FIX60_SOURCE_HASHES.json": "eed6d0ed398bed9e7186c7f1b8caba6b6c843a0a142f1b9f4bfd399deff9092d",
++    "R90_FIX61_SOURCE_HASHES.json": "893ad5915f84d342e86829b6789af6cdd9ed4072867f45beba28d2c79e446f3e",
++    "R90_FIX68_SOURCE_HASHES.json": "c0a0c4779d952da0d3a285b69ba52e41851832b0b38c5609aa7b55b2705eed0d",
++    "R90_FIX70_SOURCE_HASHES.json": "d2aa3bccac80777123216d92fbe5463b17314f44b359f82369d64a88f25a74e5",
++    "R90_FIX71_SOURCE_HASHES.json": "e20663aec59fce0d0353ade2e17d456241556e91ecdc731dd6bf9847982f7be9",
++    "R90_FIX72_SOURCE_HASHES.json": "fbfb9361056cf1a8aafa00b0688d41c0dd6b9ccd20d33710db0057a10ef8eebd",
++    "R90_FIX73_SOURCE_HASHES.json": "72ab958e944b5c5e6f774fcf7fa57d4375a269883ac7a2218409e2674f583f48",
++    "README.md": "6c99432029e7816f0703939e6f4f22ae472d1285177eac60805b215750821cb9",
++    "assets/BmdGeometryPool.js": "ec2d73763fe89a69edbfb0560ab531789abc1ab7bc38dca774e40b3de4f797f4",
++    "assets/MUAssetLoader.js": "e73dc1ea777cd0ac8deb24eaf611a36f10400082a39194949210106c116e1bcb",
++    "assets/MUModelRenderer.js": "648ac94165c0ce68422a131cfbfc75ed0b208091d9e31766612dc9a90c034916",
++    "assets/MUSoundManager.js": "f23eb88afece7885b0b627d89fe83db7c5782dce6578e633b10f7ead8b224bd4",
++    "assets/MUTextureManager.js": "1e0bf307ca362cd19ea8c8b352da62a9dd27b80549d55a2778384e380b7957d0",
++    "audio/SoundBoard.js": "d094b53bdf711768311c8c22e291b24cf8ca5100873f2c7145275c9f98666917",
++    "audio/SoundManager.js": "4e0d93d759ae8711c7c0bf3ef1707b00f92ba91e28dc0c3bb9f400544aefca42",
++    "core/ChatSystem.js": "280ad953728ea950c337101bf3ccb4a9b48df104f436a530fcfd9c5d5e02d593",
++    "core/Config.js": "1e82f724324f275d143d571039197f5c5c0e27c41098b090704d071ebdeb0ad4",
++    "core/Game.js": "c83f4428a7c4e6e9a15893ad5b0d6391c3be923ba4f4f7cc3969f4dc29ba847e",
++    "core/GameApp.js": "34867daaabb18db7652056e82ebb70d4c43947ba6000849d892464f0c89481ef",
++    "core/Input.js": "528772b6b097c79ad66db4c96d4d2cc6e9a98dfb64ca2e346a4ab6177e84c0c4",
++    "core/Timer.js": "1d2396304bf0080f0527af183207fe7f0c1c91b5029ffbecebc6710cacd3c344",
++    "data/CharacterClassMap.js": "7fde8e0cb3f6e6c13d3140d35627fb1fa6dd638650a2ea6689cede09ff1d2bc0",
++    "data/CharacterEquipmentCodec.js": "c7d39b9ea3e7c92692e282a6354e6dc90464030c9f707b55adcb7172edb027a4",
++    "data/CharacterHelperLua.js": "eff53861ed85993cfaf90638553a369c4986f542249797c0ea67d406ec31e6f1",
++    "data/CurrentClientItemOwners.js": "ac872b2ab0b63233b346988f8dce3a0b32a8b4c5148e4547c7fa88dc15b4f241",
++    "data/CurrentClientLuaAuthority.js": "f1a39699185a2d2f437b57e4fa1b8533ac2414419ddf6aec1f2ad41538638722",
++    "data/CurrentClientMonsterOwners.js": "ab4699b64057606c8b3b352f7d9e4c5365395fc4bdea8c1f5b3e44ff5bf4d7e9",
++    "data/CustomBowLua.js": "3000aa10bce6a9150eff6c7aaf36042c645901c345ed511e12d8619c73b6296e",
++    "data/CustomItemFloorLua.js": "aca6553014f62280df5cf3524208326c16e5c938bdeb13a784ec1aa6fec647f8",
++    "data/CustomItemForceLua.js": "3b2fe5fdccd33c0c82afe296143104c90b39aff60c2a27e939fc36b65c8f9f7e",
++    "data/CustomItemModelMap.js": "02d3dfbe208fbe3e8e0b05590aeac1dc04167a93cd262ba896f68efda927c96d",
++    "data/CustomItemPresentation.js": "712e7d1104a02d2a278d01b7de8ea66bd8d2147a3f1e524048e0cd5e408bd4b8",
++    "data/CustomPreviewElements.js": "843bfb7e05fdf23334dcb72482a4f6f59d24b0719a73122d88e43ff26da8b8e5",
++    "data/DarkSpiritLua.js": "60a778755f0edde28cc6325e4186ba84d0013256770c5a9c9b24d4bb3977c825",
++    "data/DisableExcellentLua.js": "35c41dd1a402446d6e3c6292c9fcf17af5810485f3dccf21bd1be408d85da642",
++    "data/Inventory.js": "96f28d71d1991cdd6e7c5449cb151bb42a768b91801875d50de271da46a3c328",
++    "data/Item.js": "6c48ce916b96c04d704a4644c396887d28e809410ea67054412e338afde2195d",
++    "data/ItemAttributeData.js": "a5d9144e126d0baf683619359a02a205d61024c02b9713f8057e4fc42f23ddc7",
++    "data/ItemEffectsLuaConfig.js": "4175b0672ff7529a6bf2787690788016939e7735170413a116994f91097dab22",
++    "data/ItemModelMap.js": "b15dcff1f8dc1c17090671e905b29aa080aae8cc047229521f607b99412c4a2e",
++    "data/ItemModelResolver.js": "cd64058b8d058f3e0138cc7987c779c92bd14cc2aaffcb9df3ac8bb5030bded3",
++    "data/ItemTransparencyLua.js": "58f25f557d39fc094bb4351ed5a75d27d189eac38b4d1ea4fb5bf1b89c1b5189",
++    "data/ItemTypes.js": "a014cc7843508c0392f17feb6927d5bded81771dbdcc306242ed835ff64a77a9",
++    "data/ItemUiLuaConfig.js": "33e250c56d5e91211914aa286dab1c36aed6a4eb38b4cad9174f1a4c65f054fd",
++    "data/LoadData.js": "363eda8c56c4742a5823c707c05359110f816dd72370a48e2850e142d66e2caf",
++    "data/MagicFinishBuffMap.js": "3cfd5303b8f88d39d26e41bf631a136a1c6462c509a5804872dd4fb24bc5ebbe",
++    "data/MixSystem.js": "bb264662cc69899a78276cd511d85189577d750320c31e692d6a4af0e18417b2",
++    "data/MoveCustomLua.js": "37942cbe0eb4ffe54aa5934328fab6ada51491267d5736ede96b77342c3b762c",
++    "data/PacketItemCodec.js": "9387080d1392a3620707327f32bab7061a155043be64bb02daa114f548ef8e4e",
++    "data/PcAdvancedItemOwners.js": "ab5f2c1cc95a472f6a8550ab224b68e5a3ae6511d3f7baf3338eb4981a699b10",
++    "data/PcBitmapLuaOwners.js": "cd41170c0efaa96e6c66b102c1a8a3c3f5bca1e5ef12b6a0683d0eb272bba27a",
++    "data/PcBitmapLuaVM.js": "af7ddeeb03a9e149cd9903fb3d3dcde430196ad34b092615672f60de51d3e97f",
++    "data/PcCharacterLuaEffects.js": "515373abbb557d8c3c8b5400a69eec6f238a68dd20fd406af4500f63657438d4",
++    "data/PcCustomCapeLua.js": "4913bad5d721941b06d500c8ae8bf55029582266a0f63cb6d4090ac567646c8a",
++    "data/PcElementSlotsLua.js": "b3e0875880954a52a63a0f807343d113e0d5a4a35e52d622d4d87041bfe4cb29",
++    "data/PcGlobalText.js": "e3f65a137f43367533daba427113ff31adfd72c8d89b0cfefdc7ce6daf71ab97",
++    "data/PcItemAttributes.js": "77c3e77f8cc9c48a8ea82364549baa90436f71923bf430d105d81c3aa2035d97",
++    "data/PcItemInfo.js": "bc2020675cd0a0da141d4c933ba00ba1ca3239df99d2ad7ff0327e556d2e6e96",
++    "data/PcItemSetOwners.js": "3efaac17e5ae526689a5a4db1c879e6786426c6843bdc8b36d4bfb70841dbbea",
++    "data/PcLuaCrypt.js": "799d5234e6201b890fec3f57617a1801db6777cf68c1a9bd818a50f6460e472e",
++    "data/PcPlayerBodyModelMap.js": "3fc09a9b69429a9de4559a280a0ea31baf239421d3030a094c3e94acd57c4a60",
++    "data/RealData.js": "7333726bf65f165b2031c274b3528fe9f51cec0be42db49e8ef9f1a37f191b9a",
++    "data/RemoteAssets.js": "47f7f71d0a3c87704e8364dfa4b1b67b631d4140384c41d4799d8b8b3057b718",
++    "data/RenderModelNativeOracle.js": "d023aca7f5944f4380d9c2cc71f935f15a77cca1eed0fdb06bbc09c3b83c00a6",
++    "data/ServerListData.js": "8bc808ac8e8d2472fe876a62a63f3ed1ccbd8fac2d442a682a458b75ef09aa67",
++    "data/SkillNames.js": "40cade4c3ab4600f729983751cd922ef4348a0154734b7b63eb89a78b464e144",
++    "data/generated/MonsterModelMap.js": "87e5ced6d8abffebaa1f30c0bd0bd3e1b52e75b59a34ad0cf1a1e224f9109c5b",
++    "data/generated/RealItems.js": "ffe08a05d7b50bf03773e700ca85ff946ed2c55ed5b8bdcd82dd741a1290e133",
++    "data/generated/RealMaps.js": "3cb8bf30beb309ee34a7140a39730364e5b8fac41706a90cc25195ebb8a62f80",
++    "data/generated/RealMonsterStats.js": "f8667837ec9d7e0793f3e1f56df53b44b1db8da0f56d11102b78a17b214804f6",
++    "data/generated/RealMonsters.js": "9274b2de0babc1e5028f0ec7d17eb347a1c4279a5dd772f7b3a3f68ac61d9de6",
++    "data/generated/RealSkills.js": "84233e4ca03847d0ba2a7ed9234bc68a36958c08bd0a4a4ed0dce8c318fe7639",
++    "database/AccountSystem.js": "4c2c9ad60a67df2ae9c1c8ccbe822bd0e02673444f08b5baeadfbcae655328ef",
++    "database/CharacterDB.js": "6f7b821958a3da201afd71168be64a9f680988973b8cfc88d7863e684bb5715c",
++    "database/EventLogDB.js": "f76b4eec7aded0a26333578be4aaa23c4da2159b72cad37d691bb9dfc5b72417",
++    "database/GuildDB.js": "56113e91b5b313e269a0617427f5b80f03f53b972a3bb02427f0311e2e5bbeaf",
++    "database/MUDatabase.js": "bd6b205abfe502810633601fdad296933c32f136489414d7819060b6ca4a166e",
++    "database/RankingSystem.js": "184947e4d6a130d0242e7c7bcb4ef5d1717b711ec11a4bea428570eb5d125046",
++    "database/WarehouseSystem.js": "894fddd6bcf2ce421d65b645bbb570d4adc37cfb0e3eec0eb421f5ae61b31ea9",
++    "database/config/database.js": "d96666f3d0d448f85b6dd2259c2e5a7476f63bff9721d6f84c82f116e8384646",
++    "database/index.js": "8216d7c379e0395c8f2bd2f599558463aa7007c8889e365ef7e10e34529265f5",
++    "docs/ENGINE/00_INDEX.md": "df427dbae8b33c14f6cc6bc5ef2a7f60d9dcfbfe39e32ea440f8011da8ccd61f",
++    "docs/ENGINE/01_ARCHITECTURE.md": "67076a1caafc146095dd8f64f389805de3842c446a7ac3456f94284a037d25ee",
++    "docs/ENGINE/02_RUNTIME_BOOT_FLOW.md": "1835d64af581fbf62c3fbcdbcbc7469aba6c01e2a6f181c35d1637a2d411574b",
++    "docs/ENGINE/03_RENDERING_PIPELINE.md": "b7d179543a452036487bb0db311a235cd1111d42a6ff124b00327ab756d6ba26",
++    "docs/ENGINE/04_MAP_TERRAIN_OBJECTS.md": "a6ea1d9d02c35d6e6569709a64dc3632733a1c90c76f8afc85a49b154c01721f",
++    "docs/ENGINE/05_ITEMS_INVENTORY_EQUIPMENT.md": "b6963322facd102e105ab1932bed292ebcf8e248061f8fa91888d86b564404e2",
++    "docs/ENGINE/06_NETWORK_PROTOCOL.md": "5a11584c77f465065685ab377597f9b01ef2df4a407acf260583ff37a84d1575",
++    "docs/ENGINE/07_SKILLS_EFFECTS.md": "5d7ea458a3319370ba080172d1c21511f5be96b1cf7ff10cd9e04545728d9516",
++    "docs/ENGINE/08_UI_INPUT_SOCIAL.md": "6e66a30ef3e7be8e36b04f91c55aa14453db4e814667723dc4e840c39c7c7e62",
++    "docs/ENGINE/09_DATA_LUA_OWNERS.md": "d10c0415cad7d37cf52d3cfa9da1d296b52eb80a627ce68d5380b1546e58f716",
++    "docs/ENGINE/10_PERFORMANCE.md": "ca8b6db449a8c23b162cf56bb300ebe369a35c7129039759521dfa26a65175d1",
++    "docs/ENGINE/11_PORTABILITY_STATUS.md": "99ea976600025d298d812859283c63cebbe6ec262cb208f1ca9d89ded421f5bd",
++    "docs/ENGINE/12_REMAINING_PORTS.md": "ed245b395be8d74c3b9ae7a184374924bce2dcad2f98a2292843d71d23b52436",
++    "docs/ENGINE/13_FIX46_PORTABILITY.md": "3f94943d7b32c49bd6ac7d72124df23c830690c0b1eba56039f909525f72893e",
++    "docs/ENGINE/13_VALIDATION_AND_TESTS.md": "b9844d75f4d53c6e4fd6a0429968bb2124eb9bc84ded7dd8e0f39bca86317549",
++    "docs/ENGINE/14_GITHUB_MAINTENANCE.md": "2a44fc0839936be7d21a87299ac019e9f6bd256ba4825965c6aa4df2de742689",
++    "docs/ENGINE/15_RELEASE_CHECKLIST.md": "a7dd006d710dcaffa804fd75939ffa6eb706921424db4da33333d93214b64859",
++    "docs/ENGINE/AUTOGEN_MODULE_INDEX.md": "5999183cd4f4f6f7851e707a1eb32eb5e8e035653efe6f4a49a1f72291409fd7",
++    "docs/ENGINE/AUTOGEN_TEST_INDEX.md": "6940f7ea2b34ec9cd0c80470da60ea50927d2050b0fc99ee024e630a28bebd4b",
++    "docs/ENGINE/GITHUB_SECURITY_PRECHECK.md": "343c524ed1506184528b5b9dd0a73f10dacea9b52f9d4ff6da3920f112bf9372",
++    "docs/ENGINE/SOURCE_CROSS_REFERENCE.md": "f4990c918282e0955d4b7749c1ee3d4dd2762e77498196f501b3a09889292862",
++    "docs/fix43/PORTABILITY_FIX43.md": "7745a12cf533c25a15bca15873a40c2c9bfac639246c0468b66a9043cd707e31",
++    "effects2/CritFX.js": "940576d9269e49a0cde13a0aa741eab193000f11b0301d44f798e5e0202f71c1",
++    "effects2/DeathFX.js": "bb1d1bb2ca3191e4cb4325c0371001e946c84e6b8abd519c85a928eb4eec46e2",
++    "effects2/LevelUpFX.js": "79e008ece69e150bd98d1319ad28c662fec13d172aa898e1e5128e92f6c82887",
++    "game/BuffSystem.js": "97f23f6a29cb20cd44bf192d66067df7a26e48cc36cc586f408f89a391acc8af",
++    "game/Character.js": "0cfcbb2c7be8d878f1573e5834373fe0b677689dc941ba0a6ec58094ef101298",
++    "game/ClickToMove.js": "530e2bc5db234be9f8395148c464da43b97d33224d3505315c8ac396dece9c5f",
++    "game/CollisionWithWorld.js": "981753b5f1587027fc1cd1e7aa069f19adc84e86df98d4d0547e7c161fbf44a2",
++    "game/DropSystem.js": "2e5c88d748e8b3f7e71c6c678d27c63692f944615d8baa6fb7d8d2c0a19dee91",
++    "game/FloatingText.js": "023ebda7969c491b398c345d6ef658701362472c8edf82eb33c8cc084ccc8eef",
++    "game/GameOptions.js": "5a9bbc83bf43ff797ad4011447f17bd35dd48ba26747a7a2c85ed3a10bba596b",
++    "game/InventoryGrid.js": "c0492c9236ab8c75533400bae9193b2f80309d74cf61bd68f0e5482b55dd65a5",
++    "game/MUDirection.js": "baefcd1092362fd154e5d4f54382b0c2d9d2b4d73c6075d650f5bb5c46d0bd7e",
++    "game/Monster.js": "66c949debd72c3d76a6c7d267fd4126e10e92b7b4bc8a6340a019ab99eacbfd5",
++    "game/MonsterManager.js": "edde257e1d6c70199f0771e78abc07ea8d435c621694363d284cab6d3dd1040f",
++    "game/MonsterModel.js": "05f9b3bdd43f52a09c14b5e65bd5a5da9d3dc4584e6f86e8d51e0a1af9f754da",
++    "game/Movement.js": "725ca48dfb200e19f0ac9370e02c4ae52d56cd87b7ecfd65952d93041fc28c99",
++    "game/MuHelper.js": "c5e8cf452b049a286ac48e5dc508326b78d6628500161366b8fc6767cd48c898",
++    "game/NpcModel.js": "620ecdca61bb0e40d26adcaf00652af5df4100457e26bc1d4636741faeeb184e",
++    "game/PCSkillEffectsPackA.js": "9f43ac5010ee1bc2f074a84d9e3a852dd5476b7a9511921152cfbb3b3a9c9f40",
++    "game/PcBlowDestruction232.js": "a4b4337280003905fd2a541748f7ddf4edf4dd54290edc549333cd6bb7a51766",
++    "game/PcBlowSecondary.js": "8d5f3e5c8bb0c1e2f2ec320225553c30c6136b20cb9265149fa69e5b1caedc3a",
++    "game/PcDeathCannonForce4.js": "cecbea78862a52d44905b33ad62a667e78ddd13fef51e9bb60bac7cb06491606",
++    "game/PcEnergyBallImpact.js": "ad6b4ee62c59febc5d102cef1dc4bb56b3d543faca2d6d74871705e8a42f2a37",
++    "game/PcFireballImpact.js": "fe301b9435dee7625e898868707677306512ab3c9559bc8f169a9cfc00e2f06f",
++    "game/PcFlashImpact.js": "afa736aeaf2f4282eb1cb6639925ef46fe6bec677feab99f239d426aef0bd4e2",
++    "game/PcFurySpark0.js": "58015a8491d9615a3cfd52901167280a91a583b25a9e9e88b95cef219adf28e4",
++    "game/PcFuryStrikeCore.js": "c590314731baa9fecae582d37bad400073ad122478710ae891c37757fafd3513",
++    "game/PcIceImpact.js": "5c9c614b0e7552a293a0c9c8efbb49718254e11ea5ec301f2504ea12e57ae364",
++    "game/PcInventoryMoveRules.js": "ef0b33700410aa2a406f5b89db9b1126edd89bd1a859eba16c3e7f9fb2728a3d",
++    "game/PcMapContext.js": "31363a4ee471d3fb7658467d8aa9f33be8ec0bc819e4742ad247e3cbf3f59c6b",
++    "game/PcMonsterLuaPresentation.js": "b4a3677d6859d5c03a794d542a13d91aa9845287138ff300585183e7ad2c3b50",
++    "game/PcVitalitySecondary.js": "d5f614b469b6beebe48c2d38916540ef326bac81a38a857c7aca080be53d604b",
++    "game/PcVitalitySpirit2.js": "ef51888e21499badf09cab512d6570363b80eaf36f341dcb569a5d4f5f72bf4e",
++    "game/PcWheelWeaponPose.js": "9523daff7a693464263ed4c1089ccf020dda33b46dd4ceb1aac06b14b8536a0a",
++    "game/PcWizardBasicImpact.js": "cfc00ff0664049481d1468e129d22ce5788bdd21bf4e326bae199282ef796eb6",
++    "game/PetSystem.js": "619aa07b6e4a9d8ad6862833bf2e63fa16328cbd868d5816a907d9c04bf353e9",
++    "game/PlayerViewportManager.js": "360aacd177df5312b27c30232fd2e5d8e1e215404a53e5a78bdb005d77c58511",
++    "game/QuestSystem.js": "5ffd6801233459a791161ee9c09d3ab01a28e1579f0d563008d047d30ffcce94",
++    "game/ServerCustomPreviewMirror.js": "5d07985ca1b40e869eeff247bb52db6e937569d04837fe529125d97a478abbdf",
++    "game/ServerGroundItems.js": "e32322a4505883253034b0f5e1505809a094a8539dd603660fd90cac8387ee6c",
++    "game/ServerInventoryMirror.js": "9e98e6b92a44524e7be2a10ea7bce2e42db91a460b8b56fa89a21fe6360fcdcd",
++    "game/ServerNpcShopMirror.js": "fbe2ed51c03d37050be97b91266daa95b8b5d475f978c51f5529d8ad11d0333e",
++    "game/ServerStorageMirror.js": "60af539b4f78860cae16e3cce01e212ac8d148ff44d285d04b81c33476c93cc5",
++    "game/SkillEffects.js": "c53e1c8eccb6a78021026b638bb8ade50e06f8505f535b1fc0db68a3e32f2322",
++    "game/ViewportActorSemantics.js": "23522234eb91f98e63c34fa659937af78cd278d22f6c62dbfb1f66d9754320f3",
++    "gateway-server.cjs": "2881f886868fa3a22409cfc394d7b9f0ea0a2044eef91785c4cf29f3424c6eca",
++    "graphics/BmdAdapter.js": "79af9c8f42d2cbb35b44161719145ea00ecf12e238b53f3fec6e5481fe0d7822",
++    "graphics/BmdParser.js": "e03a3db58a4c3f391437195a3c0f6bc80ec6e643cdcaedcf700f7b583e4dbe91",
++    "graphics/Camera3D.js": "1381e1bcd947d30ca84145960dca4ab1483a8fa132979001b98973fa527e57e8",
++    "graphics/CharacterPreview.js": "d78ce93e6398366ee9186d3cc236e3508d2707f5bac658cf109b32043653e6ac",
++    "graphics/CwsParser.js": "19b4ecf4b843deb04e23f6a1927c788d425f130f4962d6316ef1e8970a946e04",
++    "graphics/Effects.js": "6daa643b1a62cedefae58353d7807ff767a3e16bb60167086f9c3703090aa9ad",
++    "graphics/GroundItemLayer.js": "562ecfb1f30fdbd4c2cf1c4e4fff60ec6f3aadde0c39f25dace33ed6df6f38be",
++    "graphics/ItemMaterialPresentation.js": "7f976cb40e810453b4e3dc14579ec8019cbcec49e6424d3f4d82babf411177e1",
++    "graphics/MuTerrain.js": "6aa0f5ab2dd44741295db71172b5f25d1f11b509c13fd68be3417dbc490e52e5",
++    "graphics/PcCapeCloth.js": "fac02169d46d02400e7349f544827bc9d81ec5f36ee12a6282ca071dbcdb3106",
++    "graphics/PcItemChromeColors.js": "023e2b8c109bb5994255789338e995c22317a33bf2386575a2f34c4d255a37d3",
++    "graphics/PcRuneAura.js": "2156138ea78ee7e5083641f225c8663e384e54d028ba12ac2b9a3401b40e8db4",
++    "graphics/PlayerComposer.js": "4da1c4af1a03abaf67f7ae62f6988ccb143dc660fc23cdc6d27acd3522724ae3",
++    "graphics/Scene.js": "55fb97d6c7d49526e61a1d070e97ee1fe1fa15bcf2e243caca9c7a32214351b4",
++    "graphics/TitleBackground.js": "e841ff3f07dfb372681e4dafdfb2e3d530bae835802cc5eab096ea34ddc5c12b",
++    "index.html": "10c73a893c69aed175d95e56ef3492ee19479ccd4052407ff7f052d873ef889c",
++    "math.js": "32631eaaa82fbd6d994da1402dd2fa834a38b820c8c0f8bddf33ea14ddbe2efa",
++    "net/WSClient.js": "ef54347342051f15a0af919f2a97a5a942067446bfa519ce4cfeb542a95ed7d2",
++    "network/.env.example": "63bb86815208fb5799a788dc5cf7281215a5b90a903fd7954c7cf82244464c99",
++    "network/MUConfig.js": "412148eab3f2faf301a38e7461e1fcf9744f49e30b429dbce06c24bc91e108d3",
++    "network/MUGateway.js": "c8ba86a2977d471115f187fd56a21f67b0372b4763406932a321177c490f5fa7",
++    "network/MUServerManager.js": "cb3ad50f5d408806135551b27f1347e414d6ea3f2335f28e3f4181017ab028e6",
++    "network/README.md": "e2f23aa1bbade6cb901bb105005f1a8659c316aed2863ccbc42afe2b0ecefe80",
++    "network/ServerLauncher.js": "49c08f105a1da94bd1435d25dd7c129b83a3f444b13dff70431e276f7af24b52",
++    "network/config.json": "f5366a34fa348c682c0086bc6b59a2eba004dc1d640123ede8ab76beb117316d",
++    "network/index.js": "d769b371440558d8a6ed4d488a2331be4e57464628fea389938291b39d41a4c2",
++    "network/package-lock.json": "3139b1eda27d40d1b10b91a5f3ff6a9cd0d0f5dc9f70ca6edf46f4c885180a5a",
++    "network/package.json": "7c050a81aac7addef778ce63c999952f5bfb11dd63a7b5450e5314661fc4c6d9",
++    "network/utils/logger.js": "2c85c57836de0ffc1fff185fef87ad505403d9bb7cb9fa23320d310cc7eb081a",
++    "package-lock.json": "f6db26c1d0b0d8bda1dec79439c7d8d60f8ab8c0cad69fd58dfedd65db56e2a0",
++    "package.json": "38cd6783762c302bf20068e120ea9bfbd43acd967e109b965c72d54ef628fe24",
++    "progression/Awakening.js": "58d451a53626973ab6af1762687129ba20273b26d81ef9dd0b3c5b00bfbccc4b",
++    "progression/Mastery.js": "9219578aa3a34af167326e20db0ae32b87b4014dd4f50a9400370f77cddae145",
++    "progression/Priority.js": "185f53b1ff14ba1b4110c9f496f57764a88bcff890e19b54ce300ffefe9c4030",
++    "protocol/Crypto.js": "d71494b9ab2e8096c226c7a4f0413efa4196f0bd2fabd9cb172a7b66706410f9",
++    "protocol/MUCrypto.js": "522d3648f0fc22fcb384a460f58544546be9b56d71e98a172a6165259928cd26",
++    "protocol/MUOpCodes.js": "b2045764b12eb57b25e61a4ad5119f5a7752c1b653ccc054cca8c048dd77ad62",
++    "protocol/MUPacketManager.js": "6bb6528efb404b7d4db6a76584ec382ec70595eba175b246e38b257e8c6b3f37",
++    "protocol/MUPacketRouter.js": "816f11c3d30d9df4293d9938f4f1928941b26b145a3a470f2c65de1b293a35fe",
++    "protocol/MUProtocol.js": "4b3f147706dbed051a3153b2ceb4afb36be4d8f35030c7eda982ede6b98454e7",
++    "protocol/NetClient.js": "2f71e122f109623fa269f821c86d9c3750a31fd477d757d929685fedb1a9c3bd",
++    "protocol/PacketBuilder.js": "d656ac87b571fb327245d3e8a65de11d61eed3d5d56e9758df3731994caf271e",
++    "protocol/PacketTypes.js": "1f57a38e8c879a6306d6645e7563071b9efad048868aa437ae99e9f8f62679cc",
++    "protocol/RealMUProtocol.js": "d32e49acba0756f40fa2931e595644d32498c50c52c0de51a7da49a43ef054e7",
++    "protocol/index.js": "abf395d88d26ad958a9157220f5fba1c3225f9330aad87998ed0c0535588d8fc",
++    "protocol/package.json": "03651041b6a1e9af4eaeb54a7db1440334b7413b65c1119eb9d856f288ae7b0a",
++    "protocol/test-protocol.js": "bcabea290ee1e8306bec14e69f05556e47127223171c0aab2451bab520e7e6e4",
++    "public/asset-manifest.json": "9f9183399730153538e54b11bc4ce676056710e255c08fd8a2e7c906e1585884",
++    "scenes/CharCreateScene.js": "717d6e50b721589e1b1124382a030693907082e8ee9969708dff55a7e1af82e2",
++    "scenes/CharSelectScene.js": "f7640aacb8505d0012770c84dc40be61d6d86929fd6242cdf7eb5dcd8a7843e6",
++    "scenes/LoadingScene.js": "cafe633fc6487a6749af845ac24148a04feeda078e5740f85e21d01319d4ef14",
++    "scenes/LoginScene.js": "3042c4943b993bc42af812a8e2a73acc8caab95e6280aada56429287b7085ecd",
++    "scenes/SceneManager.js": "3366af7328b8de3e492c9e9df2cde18e93125df1f9f0fcc853d4192b70b902a7",
++    "scenes/ServerSelectScene.js": "09450647da65d078133a5544a2a4b8869900ffe53f7737d1fcc5224c2c69861e",
++    "scenes/WorldScene.js": "c8921bf30a0901cfff2dfe11eaff516e95da986742f303fd1f2153915942cfef",
++    "skills/PcSkillCastRouter.js": "c097fb8947b428acb75d16b1c9918eaca81213232c46315a809b52ebeca021fd",
++    "skills/ServerMagicList.js": "b311f6364e23726dfeec270931c1ddef359368ee7b504996a6ef953403a520ee",
++    "skills/SkillAttributeData.js": "db9d312a96bb05da2063b9361dc0f9df32a1fe6f801b963c8f13fea53e9608a5",
++    "skills/SkillData.js": "be2834ed9a0add96f1aa346e8fc7680b23bfbd672283d3a23fea9b545c644ac5",
++    "skills/SkillSystem.js": "6d700a1f772b913aa3856fd30fe7c85a604b79a5331c13a938f1c89803a82796",
++    "social/Duel.js": "be229dd9a2646b66dc2675338d1e58c5e18c30ee3802d41d445fbc77ad224a0a",
++    "social/Friends.js": "841b1ec47e3870ecace14b2ec09bf270d9ed7633d05cf0cb891dc79d4ea64f56",
++    "social/GuildSystem.js": "2ff3f1c332f2e527e363ec2c72e2a96ea0d39d58bb03fb17f1040662e698ac70",
++    "social/PK.js": "abff47d3ff9d67ce39a3ed86a4f64acf0b929feed709828d36c0bfef6f56f61d",
++    "social/Party.js": "eb784395b606b33f6ca0ea0dacb4db5a739bb6a9caf7084df9c913280f4cd299",
++    "social/Trade.js": "9a7c6fe53df21f907e86652328c859aa00b3ddf2761674f4c0679b44f45e92b3",
++    "test-fix61-map-backlog.mjs": "332b938d6534683f6d1ac50921fdd4ac91d401ba1d222d57414f17eabe08a01c",
++    "test-maps-engine-m64-att-authority.mjs": "154b81ab00ff8f3d234e299c8b43801e449227f55bb14fddc531128adbb4981d",
++    "test-maps-engine-m71-icarus-moveobject-scratch.mjs": "0abc09d609523b2079cff2b5954b3ff0877ab3b21745fcc2d2f89f0a8e71c5ef",
++    "test-r90-fix10-inventory-load-budget.mjs": "f7ccf6a42d555e5fd5aedb176cb8048466bbefbd951f1b512b0038a0563db9bd",
++    "test-r90-fix11-map-transition-frame.mjs": "5372b2cc096722d716cbf23c55e62c51cdba1b13838b355e915756b237f1d24a",
++    "test-r90-fix12-material-residency.mjs": "551027dd5621b19da91f4232462af098719e21c5dd2a3fb510238aa7a7a26063",
++    "test-r90-fix13-stock-material-residency.mjs": "ffa6b0e8e9e52e7a378e4c75c4a37b473375d73242e3c2507071b4eb55e2633a",
++    "test-r90-fix14-material-mesh-owners.mjs": "042aef9f0710cef7fd01c3fda0390b07c73db3a0437d5890686a56a38517ea58",
++    "test-r90-fix14-world75-residency.mjs": "5fa1b27a4ba27e7f36628c642868a3e801f6f6c5e89e0b96f89c54bfeb03848a",
++    "test-r90-fix15-bmd-inflight.mjs": "517434b62a6cc1d6656df93145f0a458c8774f6b3cd563acea3443e4dd94d103",
++    "test-r90-fix16-character-publication.mjs": "9495c12a12fbf89db002dd446e46249cc938d158a8eb860fd655a6233384dc95",
++    "test-r90-fix17-asset-authority.mjs": "d5f075058bfd2fa82564247cfb7a21e828af57186948270acc2b19e71bdfcd35",
++    "test-r90-fix18-terrain-dialog-colors.mjs": "e918483a62cfdb4eb843f1fb82c440b6d862a03baeabb094ca8de34c6fe62d1f",
++    "test-r90-fix19-indoor-click-grass.mjs": "c7adb678ffa6524937aa4a92f78b7e3c6b2091fcb7ec50b162638d5492c2507e",
++    "test-r90-fix2-runtime-regressions.mjs": "8fd2177f18cced714fd482be9e46defaa61fa2bf0126a3d29e890a92468dce61",
++    "test-r90-fix20-fenrir-owner.mjs": "8a82c3176099696d1f5997052c1ce938e703a5fd3a02f403bc0b3b1c56db5e93",
++    "test-r90-fix21-map-bound-grass.mjs": "4bcbe867e41af7c35ed004d8961f95fb494e75277d3b3d42771ddcc24d40dbe1",
++    "test-r90-fix22-login-object-passes.mjs": "ae279d94530c5d3d492ecbfccb0abf24e826957bc5c6131b24d860292867b780",
++    "test-r90-fix23-geometry-lifetime.mjs": "a140cea09cd11780ec9eb19fb6b0ddb0204efc9a8304214e2b9eaab03c3e2ad1",
++    "test-r90-fix24-texture-authority.mjs": "b4dacabb4f735c46ae844b5ad4c904431485ddbda3178e0647fb6dc64a97a742",
++    "test-r90-fix25-equipment-slots.mjs": "7b8b8fd7cc8062faef6a2d8d106d47ecbd29df226b1b1d76b0773808df5a7900",
++    "test-r90-fix26-alternate-item-models.mjs": "3ce86c149ef72678001795c276df6e19279a424ee758d92a798caced15affe0e",
++    "test-r90-fix27-terrain-topology.mjs": "1561420ccb7f0b54d0fa7e045ab1341a4750a18753e7ff5e314f09de4f34135d",
++    "test-r90-fix28-hud-monk.mjs": "d67b200124116fd50691e29b53ef092f3e44bdb3d1ea38c567bafcb6f4e24e8c",
++    "test-r90-fix29-inventory-material.mjs": "bd12bc19828fbeeb2cce66432055c6ba6b422f7506ae101e16960c468b5060e7",
++    "test-r90-fix3-material-owners.mjs": "cd4c63d2fa7da545747f2cb0b3cbe4fd1cd12490f094fbdfc78de2106b234728",
++    "test-r90-fix3-normal-ownership.mjs": "1d3304fcfd29a907f0c14ba7a662b4ed3f3d464f32cf88371f70e9c6484728d7",
++    "test-r90-fix30-event-namespace.mjs": "9c551df2d034c081f75c45bceeed5449db118159dd70fda2c127d3ecd267a75a",
++    "test-r90-fix31-armorinven.mjs": "c04bf151d0745529e3227968ed620ac4352e7dd26a19d886fc21fe422f5bd3d9",
++    "test-r90-fix32-event-stock.mjs": "1737a219757b0d365eb32a79a5c99b1b38f4c03d712d627ed2c9944ddae44f31",
++    "test-r90-fix33-event6-color.mjs": "e4326eb653ceb85de35731dd5e812c4e579f6f12455f654137d63b9436c34713",
++    "test-r90-fix34-event13-stream.mjs": "9f2bf55303a435021002536a3a743cd289ff2f0e696be29051803a98256d4a9b",
++    "test-r90-fix35-event18-blendmesh.mjs": "090871a121908e275c6b584bcf3421fd16e8a9b4f4ece214f92826f2ffba507d",
++    "test-r90-fix36-event-bone-sprites.mjs": "4656cabc34dbbd94d326eb7c6ff87e8b5367fc19ffbfde9a616d6f0f1160304a",
++    "test-r90-fix37-potion-sprites.mjs": "21629a881b0500fd9f3660a8e3c771e73053fa40460478156ec334197ab773c0",
++    "test-r90-fix38-authority-integrity.mjs": "fee6e44fc323670eb86fb3736695258ec72fb281250b503b42acf5f1a77d1938",
++    "test-r90-fix39-potion17-blend.mjs": "1a53b7ab3e4028f27b57480ecc90cbdcff2ccee98131668b00d6a8932b3f8c9a",
++    "test-r90-fix4-equipment-lifetime.mjs": "b6998a34f9f3c4b7cae723040b24b67a65b37b5d99add6b0951bfaf569db15a6",
++    "test-r90-fix40-icarus-cloud.mjs": "45a64f3f7ee9987bdebae359ef679365952e63d7a07e32e3c727ff554e43fb95",
++    "test-r90-fix41-recovery.mjs": "c978b5da6492b91222a0d96216fb6dd0eb3f1ce0321f1ddb1ba683ee967cbbcd",
++    "test-r90-fix42-npcshop-bk-map-audit.mjs": "5f73b21af6155b1f82f8173bece72d0cd3dac3e48961475744a4ccc2b1cc246c",
++    "test-r90-fix43-icarus-bk.mjs": "29eea5c5b5d07210f181da54ae95a68e74ff1b7b3115e1d7c9eb42a9bd608f52",
++    "test-r90-fix44-lorencia-port-authority.mjs": "a9ddc6c3ab19a86354984908416fe53aa75edd881ee28c42f384df7e736690b0",
++    "test-r90-fix45-cursor-lua-models.mjs": "df5bd8908ab951c53406bf78f66150dfe3413d9e42d30dcf3c6d333dd83413a0",
++    "test-r90-fix46-darkspirit-lua-owner.mjs": "09c80060bbc3f99e0bb443e4be0347569428cba083f9c067a51e9daa8bd68360",
++    "test-r90-fix46-monster-lua-contracts.mjs": "96720e18119057d290e6505534f3929064f5121feed9d2d2360c6b1f98a5c540",
++    "test-r90-fix47-character-monster-lua.mjs": "be98365f5761222144c7e06ec2626c389aba2fcfa439933c5579bb4031c66385",
++    "test-r90-fix47-pk-protocol.mjs": "121703d51e643364b7473c6f2d89e32cfc4377d12d6d3c1998bd922304c8c531",
++    "test-r90-fix48-character-lua-consumer.mjs": "b76a00ecdfa816162db323cb2bd44c56643723266d4cf1ae50172716b1e5067b",
++    "test-r90-fix48-summonlife-protocol.mjs": "5b7dbf3b35d31aa076e2ff8b6892477b89107e2d0a7a90a2aabd8042c03b6baa",
++    "test-r90-fix49-texture-generation-regression.mjs": "7ad67acb24b6e7620caba0001b7dc47e4c73ac7d7b234aa8722a404eb69055d5",
++    "test-r90-fix5-fixed-function.mjs": "72aa16d91b1994f05b15fdff219d1f28ed89e5a8e1aae167a4c9d725a5cc6502",
++    "test-r90-fix50-icarus-customwing-perf.mjs": "31e77a07a8253b3a684987486994c676eea118a0fef0bc3723ea2aef7433aaae",
++    "test-r90-fix53-custom-preview-elements.mjs": "2c722e2004154a884c67155561ed1755f8c9b9f98a90d18845bf8eda6ddcebe7",
++    "test-r90-fix53-summoner-helper-actions.mjs": "efa6e468885ffeb7579fc2daef7c26b96c665b30795bb74b01cf024aab8fb0a1",
++    "test-r90-fix54-lua-particle-stages.mjs": "fc4d45793e15d6572ce7e265fecb794a6ab294bebb0e82c482dccc95fa4b69dd",
++    "test-r90-fix55-wing-tooltip-icarus.mjs": "82e65af2b5bf8a3237411dac37f9a4aa014a05118877859762a575d4d1cba338",
++    "test-r90-fix56-icarus-thunder-stock-wing-tooltip.mjs": "c148eae0490f0a1e17890162d2a2d0b85b9dc3ffbee32d560fef3119a2e21776",
++    "test-r90-fix57-cape-transform.mjs": "d885b4431fb2d765ca36719f206b115c562df903b5f5b19163bdc3f6397859d9",
++    "test-r90-fix58-cape-cloth-lua.mjs": "6b8a1fd441503ecd85d48fcb5dad0cd1bfc4215c721a4eb71deb6f2573fea36d",
++    "test-r90-fix59-cape-position-owner.mjs": "bd1430120f1cf7e013b6ce1bc970c9c51782a6fc0646922e915a16e0a1d37304",
++    "test-r90-fix6-bitmap-owners.mjs": "2bed33df830121187a686f1defa6b3f2e919080a13c4cc3b48752aa9ba833009",
++    "test-r90-fix60-quest-protocol.mjs": "2f4456f9c500512e753c35cd2914d0a5785d703d826d6d4efab950e41c82e441",
++    "test-r90-fix61-multiline-item-owners.mjs": "928d04535d8309d614ea0f7d7f21da2d40be9cea56bce7f4bd6132839f136c54",
++    "test-r90-fix62-itemeffects-multiline.mjs": "9418a57993ad738ba7bd551729b5f78260920730efea161f05b51a990c1b099a",
++    "test-r90-fix63-helper-movement-owner.mjs": "ee203212d6dd9a9730e4bde940f9d3750e2bdb0104d7b28a689ffd703966fad3",
++    "test-r90-fix63-monster-effect-rand-gate.mjs": "0a639736be79259537d1cb6130c7334fb05c0161bba790c6b4b3b9a0883e34ac",
++    "test-r90-fix64-character-lua-openfile.mjs": "1a0b6ec936187cc8b60d404e7ea48e062002e9c187e58d0e173804c6f1a54cd3",
++    "test-r90-fix65-character-lua-nested-includes.mjs": "19209aba80aab639f90c50472ae79298d43ae146d1c961c016a1408a4f9f0ab5",
++    "test-r90-fix66-characterhelper-long-comment.mjs": "55a12be0f80cca9791111c40b441add8ff61e9678dcf1778fbed84ed73da4c6d",
++    "test-r90-fix67-item-owner-long-comments.mjs": "6e342c0a79fe2c3a47588058bd8e97aee9e83e0888808e02e3a0b40460a137e2",
++    "test-r90-fix68-c0-friend-list-contract.mjs": "75b4e3c1a8ba0afc042ed8e20b45227e16bb263afcc8d4cdd3dc3eff53fb97cb",
++    "test-r90-fix68-characterhelper-call-boundary.mjs": "20385345bd80c958499bf158b3878c298d9b0e86139856334e760e6db62a1b35",
++    "test-r90-fix68-f306-exact-layout.mjs": "5d82fcfcecf0f2782238d61efe53b55d834bb821e7f4e45dbf3ff9ebc4d160d1",
++    "test-r90-fix69-f304-revival-contract.mjs": "25879b2b6d29704140ddd6ad3129e4fa426b101f27d2d88aa3af5419edb2153f",
++    "test-r90-fix7-lua-startup.mjs": "91fe13a5c68385892dcee2dc2148fc08ea778f5100e32c1782d67904dfea437a",
++    "test-r90-fix70-icarus-lorencia-map-parity.mjs": "eb9e0577846d3df7b61dc501ccb2b0629eee10c14e77301779f55873d5eb3fd6",
++    "test-r90-fix70-render-cape-model.mjs": "b1e170566da758e1f25b0f8490b369ab4d4f4f0a69b47bf0507f447d82a09417",
++    "test-r90-fix71-f351-master-level-up-contract.mjs": "f1b5eedcc1a7718f552ba8dc20b4ae1235c80e9855452e45e8a1428efb380357",
++    "test-r90-fix72-cape-callback-cache.mjs": "4bd4b83aff4402946a6bd2fa182096c07e5d3d06829b51ae24f157aafdfc99c8",
++    "test-r90-fix72-icarus-dragons.mjs": "db4baab73192e43884d46d92bd8152f20981d64d2e4541948116c4e773c8c849",
++    "test-r90-fix73-f352-master-level-get-skill-contract.mjs": "ad4eb6292f6dd11225daff3f2a80753f46331c20f7075abe495bea4b893f1a68",
++    "test-r90-fix74-cape-bodylight-branch.mjs": "91d5967ae4eb5e039503115cdc95a9eed8a44fe774a0591dd52ae996a4501694",
++    "test-r90-fix74-icarus-spear-joint.mjs": "0add4fd207eef3708eefb423df744987289b6bf1f95eb3e3d99aa5e42797d6b9",
++    "test-r90-fix8-pc-inventory-mapload.mjs": "d9b699867e2ad225fb9cea9c9bf7cc9732fddb214a57d6ecfe3a223197f8dc8a",
++    "test-r90-fix9-pc-hidden-item-presentation.mjs": "6806fd881189f8bdbf830462ec11a0cd4b91daafb4ee4c8c5539878d302e54c8",
++    "test-r90-map-engine-m62-icarus-cloud-pool.mjs": "f0711f8acc0136074624698dbc789c76de7f401ebadab48c5cbe6af134d263ec",
++    "test-r90-map-engine-m63-world-entry-prefetch.mjs": "10a54264d84ca87365dd4bea6e5cd583e9a6a84f1a43be9cc773a9ed9bbf2ecf",
++    "test-r90-map-engine-m65-icarus-cloud-prewarm.mjs": "2b1efa3662d7f4b04acb084f4c51f759b164d8da7ace19e0f0d1b36b75d5db3e",
++    "test-r90-map-engine-m66-placement-concurrency.mjs": "29af65156c764f8117b6a69d17b83dbbd83e71b6ef902ed308d05921cb173535",
++    "test-r90-map-engine-m67-lorencia-bridge-owner.mjs": "ca112f5145d534dd89e31e3434a85e24512faae6933bbae1abf4748d63a7fe58",
++    "test-r90-map-engine-m68-model-stage-concurrency.mjs": "99c98baacb4dc7bf0afa24f5de99b3162c4a6a02572ff27bbc38651528f6286c",
++    "tests/fix10-render.html": "2d608dc25cfcec2224065e9109bc407be64144f5cc6548973d4f9144ecf75501",
++    "tests/fix10-render.mjs": "f8092b64f1a8dc3c09fae29cbfd3a8d78aca7597d1c37d5a0ffc37510509bb70",
++    "tests/fix11-render.html": "df019927204ee7029b18a55e83c0bbde9ed30e3d330ee97ba1b349f11e0190d4",
++    "tests/fix11-render.mjs": "8939a34511af7c7d5b85fcdee1de81d6db942cbd5d0e3fe91303654c2d8f511c",
++    "tests/fix12-render.html": "2b62b76782eb5e25c3278aca191ce4eb51a7d3c37dee2e0c0285365ff740f1ca",
++    "tests/fix12-render.mjs": "015db5ab211246e603a4e511b797933b695b2e6300f1493f8d432d02ee3e0a3b",
++    "tests/fix13-render.html": "a2b4fb30c57c78b7aebdabd631c8c0ba31cec435cfa7fcde84737efa383f71b1",
++    "tests/fix13-render.mjs": "8219501677c96b8a4ca815a595d1fa35bf29b2d9a2da0ec47fb5cb098ae9ae78",
++    "tests/fix14-render.html": "c892eeba721395a3531d785f9c8b2db274ba6d27576fe86821d58bdbef9ff011",
++    "tests/fix14-render.mjs": "26d560c24a2d476df72c7c307c4da17e02b90ad756c6972bab234657dac3e534",
++    "tests/fix15-render.html": "cbb0f741ccd45de18e81df12f12f61d920f3743ce48d37e1a40545d55e9f4e21",
++    "tests/fix15-render.mjs": "5e49b641a88f20e9d040a772f6f50b4058ede21236e6efcdd22988e9ef56e047",
++    "tests/fix16-render.html": "a10d4c1a42aee89e2c89d754d7062a783313c2f33ecd461b77a87e1b96d257b9",
++    "tests/fix16-render.mjs": "c6dcfc272010cebc4a862c334dcbc4763c49fa88603c2851c97e4fab41f44d71",
++    "tests/fix17-render.html": "41211da16e5fad85ef32175a99d114de0be588b6f11f2876c075a76eafa71492",
++    "tests/fix17-render.mjs": "061b79c09280decba1ae3a6ed8d20aa306b0ab00e26a3cd9af4e893aaf20355c",
++    "tests/fix18-render.html": "964aeb058a5ef422dcd2c2b9e7472a6a2ffbf084d451b9532d02d4f484726a24",
++    "tests/fix18-render.mjs": "a2dce9f700bb22b091b9760eed6d670e2239c5974e117def2d13bd2001e261cd",
++    "tests/fix19-render.html": "e3db8c9ef6620d3b8db57fdd901e7e9b6b75a74b44934decd88cb9b4073f205e",
++    "tests/fix19-render.mjs": "6cebb69fa56534f05c102646393cbb0199f491a77924ffd0c7050878f0ba0aab",
++    "tests/fix2-render.html": "e26e2af2d6ce0f5fe053e79af42a707def43b050036ff6d119b1656c3dd68a0c",
++    "tests/fix2-render.mjs": "d2d833dc9963c3f8d01ace7ff8b3ae30edc8fb8655c1f1479a399ab56de05caa",
++    "tests/fix21-render.html": "053e91dbff53d44d63233467a93e64defec2f162fd72aba29b45224ec2e1eb84",
++    "tests/fix21-render.mjs": "bbc3e0dbdb482fef15250cb77116170b3c87dcdea55e0280d2780e3a0c873b22",
++    "tests/fix22-render.html": "404b82d054608e42933e91bdb18768fe24cb6f2701bec20a4ce42049305ad94a",
++    "tests/fix22-render.mjs": "742f5a2283d9e0670fe9b303530747276f60e21565b10638e26a0c08eb45b5c3",
++    "tests/fix23-render.html": "782bfcdb13d5f35d83a18fc32bd02a03528682534b0d33ed6157b195d589083b",
++    "tests/fix23-render.mjs": "14aa85fa99738b949e11b7922a5806a0f0bcca01924c2b13e7302e23ca9409d4",
++    "tests/fix3-render.html": "4bb49e5f90f5295015a32b98c56d1afeb97231062689d3b1c364204e97c2067e",
++    "tests/fix3-render.mjs": "0511284dd7f9de8c8080fc3135c9df20c4b83a04d5eb51ca510085eed647abcf",
++    "tests/fix4-fixtures.mjs": "e1fe77bcaf66271889e4cf7d77c66be2635ce58144cb678a760ad29289a35f2b",
++    "tests/fix4-render.html": "ac27dac38d2c7bbc0bffa587df55299d95857ac9c3998382c985d32b8c32900e",
++    "tests/fix4-render.mjs": "aa2b72c0ad74b9c8c7d5552d5827c17273292290a679110b628c4660e9c56953",
++    "tests/fix5-render.html": "5eaefaa12fefea11614de600cbd55dab214b777c4986291a50e017cf23c6880c",
++    "tests/fix5-render.mjs": "6982963a3164c6d3d9fc75893ef48681f3cf6633fd091281ceac5fda5217f5ea",
++    "tests/fix6-render.html": "bbe18ab878f2aaecb63887d51dcd785f3c36ecb9b58e82ace76873d28889bffc",
++    "tests/fix6-render.mjs": "46d8fcfa925f133f0917c0598be9ac29ea17463c11fef5d9f7f10d6f747aaab8",
++    "tests/fix61-magiclist-count.mjs": "85f93dcedf3a48cb736778a96c4cab535db6394d83b0a71d54de61b993cb338a",
++    "tests/fix64/test-f3-13-equipment-key.mjs": "c8e7e4be7b1ff448d902a1dcf2d78a72946da535e4f311c04a52d1957d0d6221",
++    "tests/fix65/test-magic-family-wire-contract.mjs": "8c793312f6b1875553bc936018c837dfa8ab2fd0ca04c8f945115139cab60c3f",
++    "tests/fix66/test-elf-support-sound-owner.mjs": "38a8eec73496c9440a91a91c0753932f9278307f72fc057d7c52aa769f029aaf",
++    "tests/fix67/test-fix67-f3-pk-damage-contract.mjs": "dd64d17c508f5adea109f326abe65effbefaee01fed55a4bc64e856964434962",
++    "tests/fix7-render.html": "e78d1dca64f3c5016763be287af6fcf0e2fb62ae96c2e15610e10d4d06a0c965",
++    "tests/fix7-render.mjs": "e717bbcbc0443719f1e380f2e98f0b2edffd7744d208d95e10170da3b8f870e5",
++    "tests/fixtures/fix18-pc-item-colors.cpp": "55dd6b144ea3ba30ce7a0c1c02c79f78882b557e3fc9430c6167d6c4ea066534",
++    "tests/fixtures/fix18-pc-item-colors.json": "162c0d3ef43b8fd01e9151ba786ec8b7d8311aa4738e8270d239904851a0a129",
++    "tests/fixtures/item-byte-skill.bmd": "83a87918f3661b1af6a2073e7fbf556862d4d5bd26be7acf84ef796a154f928a",
++    "tests/fixtures/item-word-skill.bmd": "7c2218e5ebf18ca1c5e98ec2bdc4db7170cd87c48ae9b89cc51e5887180ebad0",
++    "tools/asset-server.cjs": "b3f076b24656879c223c9d87f3aeb678e89275f14a9af1abd6aa33408a86de02",
++    "tools/build-fengari-bitmap.mjs": "58c306ff1ba328b4396245452c51527efa08b313646cf5bd351757fe762290da",
++    "tools/dev-web-server.cjs": "b5f2c66c5d0434ba7e4d5e6bb0f1189b3c4493ea0ae129874e3663fb73bb1367",
++    "tools/fengari-bitmap-build/package-lock.json": "9fbbbd08526b79c4d79a224f990e7100bf41cfefc55117544938dfeca52a4626",
++    "tools/fengari-bitmap-build/package.json": "84cffa30266149f518ace4e7e7f93a795ead194612582390510e6b06f1032616",
++    "tools/fengari-bitmap-entry.mjs": "4722b739c93513b8f06501a1eac9e3043530d32dc133fd730c9614e3203a1df4",
++    "tools/gen-item-model-map.mjs": "ec40178edfe6b3ad35e42eb7c2d18cac1f2732cdcfda54aca3c48e6002792ab8",
++    "tools/gen-skill-attribute-table.mjs": "11cf26eeca946445bc7bbf07adb69e88131a7e8e9afd05d47f308259c43cd324",
++    "tools/generateMonsterData.mjs": "f487020890ce37dbe499c611d4eba42af6cb6972bb92b15b3c233793cd8f80aa",
++    "tools/generateRealData.mjs": "75804e7ccd8a56c3816322eb6b043b0e9d79e87e78a28bde67d826d8b4f7bd85",
++    "tools/history/bootstrap-fix41/LEIA_PRIMEIRO_FIX40.txt": "aab79ba8c0c250c08cf998b95ca605a0090b6785bd6ac1f1be79caf07913d41d",
++    "tools/history/bootstrap-fix41/LEIA_PRIMEIRO_FIX41.txt": "1569c174a514443f6607ef1a078b7fc7ab7e3d91a8f0f2082004e79fded12bdf",
++    "tools/history/bootstrap-fix41/start-r90-fix41-safe.cjs": "505b52c31f913bf9d2631c707adcb526c2977de2818bcbb276d24954b6d47d68",
++    "tools/history/bootstrap-fix43/LEIA_PRIMEIRO_FIX42.txt": "224d571959a9ca08f850e24cfed1b97bb352ab23a028da4a5ed9d7c545161cf6",
++    "tools/history/bootstrap-fix43/start-r90-fix42-safe.cjs": "2a06a4b1a26747305e6e9dbf1630575e00361de1fb0c99836ade6c4da34fae1d",
++    "tools/history/bootstrap-fix44-parent/LEIA_PRIMEIRO_FIX43.txt": "00573397e262cd93527176c6d9a0959affdcc8b8accb600aad2b7a69186f52eb",
++    "tools/history/bootstrap-fix44-parent/start-r90-fix43-safe.cjs": "cc12c8e27281f3cb35af736e45fe2e5648a8c0a10af691f2fc8c0dca69884870",
++    "tools/history/start-r90-fix40-safe.cjs": "7454eb3fc50ec746dde148f1ae571f983bcb1f594b24ce90ee7ce66edfd309b8",
++    "tools/start-r90-fix25-safe.cjs": "3d731a24a087f03e85763e35b055e8019f12bcaf717f8d8faebf9ec29f69a921",
++    "tools/start-r90-fix26-safe.cjs": "70fb7409ac8191aedb68daabf2e076de411733d5b53ae62f2ea6d0b02d88d4a1",
++    "tools/start-r90-fix27-safe.cjs": "a9c36763e727bc31c28d8b704ca449b9d8020c86990f4f8dad8535480b35ff04",
++    "tools/start-r90-fix44-safe.cjs": "48795754c23b2526a241e605b55d8a2c9bb1447a665df65638ba855a16227e37",
++    "tools/start-r90-fix48-safe.cjs": "508c1ff54c487c03875e041874d2926ab48d9b3c2dac6dac073b78f48c18d89c",
++    "tools/start-r90-fix49-safe.cjs": "a76f83333ef87e0d902c54febae0e717eed5ac4e84603f9e040892c82c5c65c5",
++    "tools/start-r90-fix50-safe.cjs": "2b5313061a22b65660080f6ae67a5a20c86c5e8be27a74fa99101cf93ca7adcb",
++    "tools/start-r90-fix51-safe.cjs": "b8b0326a6eb0221c88a1bcdd37668b8dc44b2eab8e17675150c4ee00ca54a7b6",
++    "tools/start-r90-fix52-safe.cjs": "fab50ecd81d7276c3c11458caa4b72681d96dc3f94ad96eba4a6720b4fcac431",
++    "tools/start-r90-fix53-safe.cjs": "360637fd88c4d32c4ae2d2163067dbd29254190a1a82fd6be36303992beb312b",
++    "tools/start-r90-fix54-safe.cjs": "72f020c54872dd53ccf6b662713d452ae08a2feb461b52f9c1deda07d111955b",
++    "tools/start-r90-fix55-safe.cjs": "d75ae72e5b6d44a64ac00bb00724f9fbe688d15e9d628495146c0427190fe7eb",
++    "tools/start-r90-fix56-safe.cjs": "7a8169eb998d6bfe99d4c60ad389321c6fdc0175f1753a7faf1d5884101954ed",
++    "tools/start-r90-fix57-safe.cjs": "23346117ab198da7529977004120f83b47560de7393edf413199480e7d476f2b",
++    "tools/start-r90-fix58-safe.cjs": "dca8561fd354201f024c48f9614638992c0914301b7651231ea7d0c1d773a512",
++    "tools/start-r90-fix59-safe.cjs": "2733a7b8cb06b2db522b468125c430d6d8db8f9f4919cfd6b705eec3740d71b2",
++    "tools/start-r90-fix60-safe.cjs": "3fc2c3aa935ee6dd1399a259c1d88d7f61278174ccbbcd89cea14fa23b9cb65d",
++    "tools/start-r90-fix61-safe.cjs": "88b1745f77418d85aac2bfb98beb8c9a45d1c1ac1257145442e700205839f61c",
++    "tools/start-r90-fix68-safe.cjs": "b6edc96bde71cf12ae2598d6e0d54ab02f8c8b91d0d1b6db02f034af39bef28e",
++    "tools/start-r90-fix69-safe.cjs": "42a64e7cbde9f4b2a7cde0fb064ce6ad9c46e5771cbdf72e03f2de9ea9c724ca",
++    "tools/start-r90-fix70-safe.cjs": "7e7ac218d6cb4100d7134caa48e36f10de05d616784db09d1e9ea87b3404eb85",
++    "tools/start-r90-fix71-safe.cjs": "779e9f0273a56c8c966bbd526be531b6a92d0b3f68505f897fa74d3edbb2d17a",
++    "tools/start-r90-fix72-safe.cjs": "744f6d08664fa8ce9042c2e2cb10b38f47630b15d9bca4d8049079aee74513d1",
++    "tools/start-r90-fix73-safe.cjs": "61d0711ec6a2b03bdf234de75724b13b21730b98b282e6cde8ba83c4aacec8f9",
++    "tools/start-r90-fix74-safe.cjs": "4ce806e0bb0d709dbbe6c7612bf66600b816ceadb74890a81165b136bb4d1b08",
++    "tools/start-r90-safe.cjs": "c7711f881f194cb09bcfec9fb63c2c758ffa8726457f37b43440595bf76ec8be",
++    "tools/test-fix18-runtime.mjs": "dfc66a9e34bdff014a4e9d87d37a33b81de754f766403b091f508e2b59d049d3",
++    "tools/test-fix19-runtime.mjs": "e516c35d1bfe8f70fa1cdf685c089c5f9be8954e9ab940e394b73263184a547e",
++    "tools/test-fix20-runtime.mjs": "cf362d50652e5f8a03eaf1376550a3abcbaa0aa7ead952fa2acd85cf8b40a703",
++    "tools/test-fix21-runtime.mjs": "c26e7b2ae03625e2f18d0fe5706c4f838ec5390e75d2ee55ed0bf309b5f23cf3",
++    "tools/test-fix22-runtime.mjs": "0f8b349155893fc561a7b42bf0e3ae17d3372d68837ee5875c73c1011f4d50d1",
++    "tools/test-fix23-runtime.mjs": "739b7a7512a50a616acc34f3fde852d3e9279a52a4539eaaf8abe25789fc052b",
++    "tools/test-fix24-runtime.mjs": "de73e8febfe3d620dc3c5f98f0417d475d814a9873d9589c0c396710445ce308",
++    "tools/test-fix25-runtime.mjs": "efb2401b8c9920673f50f5865db7a814dcc2fa2bd46c86e9a1834da6fd80f2fc",
++    "tools/test-fix26-runtime.mjs": "6af203b2f8b791a9c874319fefe9a0809069588c43fe14622b9c80af93d5f9c6",
++    "tools/test-fix27-runtime.mjs": "450c0577cc1b9acfec194af5a629d13193c7edb9654bf243963f1a418be3307c",
++    "tools/test-fix28-runtime.mjs": "9f9f8c63a40981912db6a3642e1d3c9a089122aa54f3a854047ee77d0adc3ea1",
++    "tools/test-fix29-runtime.mjs": "53c2fa1fac099b89b66990a634074114814f52ee5f5e489a878d81a0b3dc5687",
++    "tools/test-fix30-runtime.mjs": "aaa64e5ad77ed678e21cd5729bcb7b3fb4859f47c68836f9f8e0eaa63b4f94d9",
++    "tools/test-fix31-runtime.mjs": "883c8b40720b252210519cf272b14260f4b86ce2eaf9e901e5e1859d3970ea03",
++    "tools/test-fix32-runtime.mjs": "6cc0bc60a5ef3f3ebce8f8d6c778b836431373243e972ea17dcf142eab15f2f5",
++    "tools/test-fix33-runtime.mjs": "e309d69b96c3d8199376af18c5c7ea9aadbe0f2fcb6dbb5eba0174bdb4b5a0c1",
++    "tools/test-fix34-runtime.mjs": "08251e707d3ecc775793d1aeec02244fc9ba66232cc8075ca16bc30c9aee6da7",
++    "tools/test-fix35-runtime.mjs": "02a8dacd531e9db89ccdf3bd5113c84809093af53fa70a4858c025b8b70b1a61",
++    "tools/test-fix36-runtime.mjs": "0572c3d4bd8fc835f15f17911768cd5dd8916cf2b46f0def934921021eb9435b",
++    "tools/test-fix37-runtime.mjs": "0752e734f8f50355fc9ec391c953bc57329e27811a80df4db4de943b69821986",
++    "tools/test-fix38-runtime.mjs": "63d907d4579c9304ffc218a2ffbe71db22e1d4b308ef362452b61c02b981f11f",
++    "tools/test-fix39-runtime.mjs": "78dc0f61feb8959ee164f7923f593357e2098142b0b8ce6aa2fd011e90cdc16c",
++    "tools/test-fix40-runtime.mjs": "128d0032053e5de63e3e717e19338c131ce911ac11263101bf084dfcb4ef862f",
++    "tools/test-fix51-runtime.mjs": "83a11e4579f8461ca033fee28cd6182335ec33d948819b80ac72c3a7f03a483d",
++    "tools/test-fix52-runtime.mjs": "c5de20ee93005e98f13392b37970f9b441b4fb793a04c5a70836824c69b43b83",
++    "tools/verify-runtime-source.mjs": "c7d8d966f99a7863fce802abe0737ce10039b563d34150f310a8381b96b13594",
++    "tools/web-runtime-control-r90.ps1": "79552c307465af112ca3fb36d2aad9e91c1960437e8109494b3cc56481886458",
++    "ui/MUSprites.js": "6099a401e73c2ec762f930b27b3e4ce171f761c16835156d84354fa2ed01ecbc",
++    "ui/MUVirtualViewport.js": "31de79b042778cd413a257c48fc662d8bf7c007dd9d93b56109c9567199d1a53",
++    "ui/MUWindow.js": "99b5ba9f903e425985718653464acb9e4317aaacc85505cd26f1e4888e07e313",
++    "ui/events.js": "0f22bafd228bd435adef31a3f5c9990408408aa69e4ad10207fc33db2b456d7d",
++    "ui.js": "59d1070acc4438b91012388625cec3d38db54b090c5a469075a11993d1c63ffe",
++    "ui2/BuffBar.js": "cc38d16bea4242173f1f3b5ae98354a3398ab6ee927b3e7585aff64aea4f9628",
++    "ui2/BuffIcons.js": "9ef41cbd249d640a5ffd1a748e7cb7d738bdd5fdee0290798940ee0dc23fbecb",
++    "ui2/ChaosMachineWindow.js": "ce5066214bcac0a56384021c4c8a3bce6421e57f1b0488627667b9fdaa82d081",
++    "ui2/CharacterWindow.js": "4fa82d2c95b58629fec6587b57e93ad613d1325eb6bcfbd2fd091aa75bd4028e",
++    "ui2/CommandWindow.js": "81fec1f383abcb635e086c490b1adfb01e0de9e4a6f44f91abc8ce3890f7c3ff",
++    "ui2/InventoryWindow.js": "fc9316f3f2d4e26c437d0c576b20f8161e747edaebe07ab659e581f1eff9ccd3",
++    "ui2/ItemIconRenderer.js": "e6641899256505e6bcc11c3d67c6ced06604a4e3689253eaa0ae1318faa1f430",
++    "ui2/MUWindow.js": "2ffa06c21587e62c03432d51b8916db15857c9f196250b379ad88df0c7e6b9b6",
++    "ui2/Minimap.js": "b7e45a12a2c632fe72da6e30c7d365419e698aaf96fe8a646d701ad5aad82a23",
++    "ui2/MoveCustomWindow.js": "253c1d907b3334899af3507758661beb5de6c794c73ea69c5f62ccf71abd4430",
++    "ui2/NotificationCenter.js": "bee39cab6fe87cb159d3eef29092fcedcc5131ff791d1e7f7daf4f3f1a076bbf",
++    "ui2/NpcShop.js": "1c361306eeeec3e97b839ffab71274f9925f36698554beccefae5a43300e4b19",
++    "ui2/QuickHotkeys.js": "5db0c90f28f2d0a399fda3a64e2eaf1e33858d598e220786e4c4cc139a1058d7",
++    "ui2/Scoreboard.js": "8eb5b656ccbeca22a880852d04a4daf32b1c4658005241d2bd641af588f1ab00",
++    "ui2/SkillBar.js": "8148bb031d693f5d7f25d77a40277d7710e54f57bfe660100ca4f75b1ca41259",
++    "ui2/SkillIcons.js": "0922edab25e5ca281918acbaf7a85dffbf44730d3c558e49293819a357283717",
++    "ui2/StatusBars.js": "3b5935202d3248169f83a64b7ff6ddeca18ca2f027c262d6927b103316883085",
++    "ui2/StorageWindow.js": "1f12fc283e726de76850a8c2279605367df6cc79ca2a9b30b476bf2e6f6e7deb",
++    "vendor/FENGARI_LICENSE.txt": "22f7f42119da138d1fb456e8fd5a5fb342cb46b2dd2f7cdfe9ebdd3171dcc2e7",
++    "vendor/SPRINTF_JS_LICENSE.txt": "f8287e4dd9480be58c56aca4a55c23b782c43a86e69aabad78fff4df0d29edef",
++    "vendor/fengari-bitmap-0.1.4.mjs": "8bc4504d3600444258554b674c82cd24f435fa9e3410f3499f32e408dadfb6f7",
++    "world/AttMapLoader.js": "348dcecbdec02d8f2f30addd48b74d16e090773c62866c56e91c1f2fb8488862",
++    "world/CooperativeLoadBudget.js": "65a5953404a78ba2c626a32bc9ad2610ab4bbb6aa14ef1d93399ca659f5e8903",
++    "world/MapData.js": "a3a757bf6a4a337e0d483727a6336d005aaf32e3a288d703f758f713838c99df",
++    "world/MapManager.js": "97cbe5208c8c76848c69c054f09b5dbecb8c6e4c6d3383906983f5bbe6a667dd",
++    "world/Pathfinding.js": "a2da586f2effd9aa346340244a51185034af51cc41a8b56c808f1c436ee90bb6",
++    "world/PcIcarusBoids.js": "302930af8f6e881dc1b3732c47899d753edea97c47e6131522a0c8c04e036350",
++    "world/PcIcarusEnvironment.js": "d3755fe734bccaed93a28337094ae4584d76287ce2f1a9fc96551f0c79d90ff8",
++    "world/PcIcarusVisualContract.js": "22ba54ccd4b12cc39986496d6180abb5c3368f0d6d3a2e2fb58911756cdf125b",
++    "world/PcIndoorVisibility.js": "22bdaeb3cabf5ac36d3a4e14df9c8fc12e869a8104c400b179a76f5e1501b01d",
++    "world/PcLoginObjectPresentation.js": "53d2e74b3f305c0bd57a1026ed883d94291d6300a72add94aaa4a9a03876e1e3",
++    "world/PcLorenciaEnvironment.js": "a8ca074bedbe659cb1c4d83b1c7e724ff55132e3f570ac16027f82ee04f5f0ae",
++    "world/PcLorenciaFauna.js": "7a287771e79e8a4c3df1af7c821fa4fa1a1bb8f4c55175e849b073c9ae2eccaa",
++    "world/PcLorenciaFish.js": "181755b5fad9f45f112688a75a18e597b34d8e5c8a66359bf7f44c86c7b68a98",
++    "world/PcLorenciaVisuals.js": "a542c8fb421eee3e7118fe60adcd67f87a7452f07e5e2c06be8cafd71e435911",
++    "world/PcMapObjectVisuals.js": "ccfa968fb4f8c90b40aa2513f93b7df297a152dacad356fb0b21c61055dc282e",
++    "world/PcMapParticles.js": "3543f09dd7b2bdbe1117bc0beeaba550c840a83f139a6eed4c0127ed82f827e3",
++    "world/PcParticleBudget.js": "489f83651b73c38c611f2d30ccfb2d001357422cecb6e65df459132d1bce71fa",
++    "world/PcThunderJoint.js": "72879e711bb54909f3d48e3059d8b21ccb2947c8fb24c047e335fce1c4c78667",
++    "world/PcWorld75LightTexture.js": "144bc65738ffce07d5f860eb218e824302a02c0a9fa6958fa0b34968498c8ca5",
++    "world/PcWorld75Particles.js": "90d123d82084fabf122b6df5a05fe032f882c9fdd7782322fd13cf5c8f8b691d",
++    "world/PcWorldRegistry.js": "09931b718af80ec2f6feea5103f75b6a9de17cb58807c116d2cdbd2917036f8c",
++    "world/Portal.js": "7e574bc6188273811b8d9def17fd85d186fc72202d717fb96cd3a56c2cae04ef",
++    "world/TerrainObjectWorld.js": "d8e9d33166f51466630264f688cabdac025e32ece896e69eea5f5a28b51cbd20",
++    "world/TerrainWorld.js": "f743303901eeacb1dba513d00dc0558833fbdee97d7332cef29baf5f8b67e7e2"
++  }
++}
+diff -ruN /mnt/data/fix74_src/MUWEB_R90_FIX73_F352_MASTER_SKILL_INTEGRATED_2026-10-05/core/GameApp.js /mnt/data/MUWEB_R90_FIX74_ICARUS_SPEAR_JOINT_LORENCIA_2026-10-05/core/GameApp.js
+--- /mnt/data/fix74_src/MUWEB_R90_FIX73_F352_MASTER_SKILL_INTEGRATED_2026-10-05/core/GameApp.js	2026-10-05 16:01:21.000000000 +0000
++++ /mnt/data/MUWEB_R90_FIX74_ICARUS_SPEAR_JOINT_LORENCIA_2026-10-05/core/GameApp.js	2026-10-05 16:27:09.867962014 +0000
+@@ -116,7 +116,7 @@
+ export const MUWEB_R90_FIX15_REVISION = 'MUWEB_R90_FIX15_BMD_INFLIGHT_MAP_CANCEL_2026-10-03_A';
+ export const MUWEB_R90_FIX46_REVISION = 'MUWEB_R90_FIX46_DARKSPIRIT_MONSTER_LUA_CONTRACTS_2026-10-04_A';
+ export const MUWEB_R90_FIX47_REVISION = 'MUWEB_R90_FIX47_CHARACTER_LUA_MONSTER_PRESENTATION_2026-10-04_A';
+-export const MUWEB_SOURCE_REVISION = 'MUWEB_R90_FIX73_F352_MASTER_SKILL_INTEGRATED_2026-10-05';
++export const MUWEB_SOURCE_REVISION = 'MUWEB_R90_FIX74_ICARUS_SPEAR_JOINT_LORENCIA_2026-10-05';
+ export const MUWEB_PREVIOUS_SOURCE_REVISION = 'MUWEB_R78_ITEMVIEW_WORLDENTRY_ANIMATION_CHARSELECT_RECOVERY_2026-09-30_A';
+ export const MUWEB_R77_BASE_REVISION = 'MUWEB_R77_CANONICAL_WORLD_ROUTING_CUSTOMMOVE_PREFETCH_UTF8_2026-09-30_A';
+ 
+diff -ruN /mnt/data/fix74_src/MUWEB_R90_FIX73_F352_MASTER_SKILL_INTEGRATED_2026-10-05/graphics/PlayerComposer.js /mnt/data/MUWEB_R90_FIX74_ICARUS_SPEAR_JOINT_LORENCIA_2026-10-05/graphics/PlayerComposer.js
+--- /mnt/data/fix74_src/MUWEB_R90_FIX73_F352_MASTER_SKILL_INTEGRATED_2026-10-05/graphics/PlayerComposer.js	2026-10-05 14:27:00.000000000 +0000
++++ /mnt/data/MUWEB_R90_FIX74_ICARUS_SPEAR_JOINT_LORENCIA_2026-10-05/graphics/PlayerComposer.js	2026-10-05 16:24:24.328415327 +0000
+@@ -517,8 +517,15 @@
+             // PC CustomCape::RenderCape calls RenderCapeModel(BMD,Object,Type,RenderCharacter).
+             // Keep the exact authored callback plan beside the equipped model; consumers may
+             // execute only operations the renderer actually implements (never synthesize FX).
+-            renderCapePlan: (resolved.wing.custom?.customWing && resolved.wing.custom?.isCape)
+-                ? customCapeRenderPlan(PC_MODEL_ITEM + resolved.wing.itemType, true) : Object.freeze([]),
++            // PC CustomCape::RenderModel derives RenderCharacter from BMD::BodyLight:
++            // exact white (1,1,1) => 0, any other BodyLight => 1.  Keep both
++            // immutable Lua-authored programs because terrain lighting can change after
++            // equip; selecting one must not re-enter Fengari in the render hot path.
++            renderCapePlans: (resolved.wing.custom?.customWing && resolved.wing.custom?.isCape)
++                ? Object.freeze({
++                    white: customCapeRenderPlan(PC_MODEL_ITEM + resolved.wing.itemType, false),
++                    lit: customCapeRenderPlan(PC_MODEL_ITEM + resolved.wing.itemType, true),
++                  }) : null,
+             classId: Number(opts?.classId ?? decoded.classByte ?? 0) & 7,
+             customColor: resolved.wing.color || null, effectType: resolved.wing.effectType || 0,
+         };
+@@ -906,6 +913,21 @@
+     }
+     if (wr.mixer?.clips?.has?.('action_0')) wr.playAction('action_0');
+     if (rule.playSpeed != null) wr.playSpeed = rule.playSpeed;
++    // FIX74: mirror CustomCape.cpp exactly: RenderCharacter is zero only when
++    // BMD::BodyLight is exactly white.  Selection is allocation-free and follows
++    // later terrain-light updates; Lua execution itself remains memoized by FIX72.
++    if (spec.renderCapePlans) {
++        const chooseCapePlan = () => {
++            const c = wr.bodyLight;
++            const white = c?.r === 1 && c?.g === 1 && c?.b === 1;
++            wr.userData ??= {};
++            wr.userData.muRenderCapePlan = white ? spec.renderCapePlans.white : spec.renderCapePlans.lit;
++            wr.userData.muRenderCapeCharacter = white ? 0 : 1;
++        };
++        chooseCapePlan();
++        const setBodyLight = wr.setBodyLight.bind(wr);
++        wr.setBodyLight = (color) => { const out=setBodyLight(color); chooseCapePlan(); return out; };
++    }
+     // Wings/rigid helpers are items too. R53 applied RenderModel/+level/etc to
+     // body and held weapons but skipped these separate BMD renderers, making
+     // equipped character visuals diverge from inventory/current-client rules.
+diff -ruN /mnt/data/fix74_src/MUWEB_R90_FIX73_F352_MASTER_SKILL_INTEGRATED_2026-10-05/test-maps-engine-m72-icarus-spear-boids.mjs /mnt/data/MUWEB_R90_FIX74_ICARUS_SPEAR_JOINT_LORENCIA_2026-10-05/test-maps-engine-m72-icarus-spear-boids.mjs
+--- /mnt/data/fix74_src/MUWEB_R90_FIX73_F352_MASTER_SKILL_INTEGRATED_2026-10-05/test-maps-engine-m72-icarus-spear-boids.mjs	1970-01-01 00:00:00.000000000 +0000
++++ /mnt/data/MUWEB_R90_FIX74_ICARUS_SPEAR_JOINT_LORENCIA_2026-10-05/test-maps-engine-m72-icarus-spear-boids.mjs	2026-10-05 16:29:56.901834631 +0000
+@@ -0,0 +1,6 @@
++import fs from 'node:fs';import assert from 'node:assert/strict';
++const b=fs.readFileSync(new URL('./world/PcIcarusBoids.js',import.meta.url),'utf8');
++for(const x of ['SPEAR_COUNT = 10','velocity: 2.2','240*40','ri(1024) - 512','>= 1500','ri(5120) === 0','41273','5161','SPEAR_TAILS = 30','SPEAR_SCALE = 25','BITMAP_JOINT_SPIRIT','0.048 * 0.5','0.0613 * 0.5','0.1113 * 0.5','* 70','+ 10 + vz * 140','0.4 + 0.2 * sa']) assert.ok(b.includes(x),`missing ${x}`);
++assert.ok(b.includes('Math.sin(b.angle)')&&b.includes('Math.cos(b.angle)'),'MoveHeavenBug must use raw Angle[2]');
++assert.ok(!b.includes('const az = rad(b.angle)'),'degree conversion regressed into MoveHeavenBug');
++console.log('PASS M72/FIX74 Icarus 10 MODEL_SPEARSKILL subtype1 boids source contracts');
+diff -ruN /mnt/data/fix74_src/MUWEB_R90_FIX73_F352_MASTER_SKILL_INTEGRATED_2026-10-05/test-r90-fix70-icarus-lorencia-map-parity.mjs /mnt/data/MUWEB_R90_FIX74_ICARUS_SPEAR_JOINT_LORENCIA_2026-10-05/test-r90-fix70-icarus-lorencia-map-parity.mjs
+--- /mnt/data/fix74_src/MUWEB_R90_FIX73_F352_MASTER_SKILL_INTEGRATED_2026-10-05/test-r90-fix70-icarus-lorencia-map-parity.mjs	2026-10-05 15:23:25.000000000 +0000
++++ /mnt/data/MUWEB_R90_FIX74_ICARUS_SPEAR_JOINT_LORENCIA_2026-10-05/test-r90-fix70-icarus-lorencia-map-parity.mjs	2026-10-05 16:28:41.557435375 +0000
+@@ -20,5 +20,5 @@
+ assert.ok(objects.includes('LORENCIA_ARCHITECTURE_AUDIT_SERIALS'), 'Lorencia architecture audit missing');
+ assert.ok(objects.includes('STRUCTURAL_FULL_FIDELITY_SERIALS = new Set([80, 85])'), 'Bridge/BridgeStone exact path regressed');
+ assert.ok(objects.includes('muLorenciaArchitectureProfile'), 'Lorencia architecture profile publication missing');
+-assert.ok(app.includes('MUWEB_R90_FIX72_ICARUS_DRAGON_LORENCIA_2026-10-05'), 'source revision stale');
++assert.ok(/MUWEB_R90_FIX7[2-9]_/.test(app), 'source revision stale');
+ console.log('PASS FIX70 Icarus ambient BITMAP_LIGHT + map-entry profile + Lorencia architecture diagnostics');
+diff -ruN /mnt/data/fix74_src/MUWEB_R90_FIX73_F352_MASTER_SKILL_INTEGRATED_2026-10-05/test-r90-fix72-icarus-dragons.mjs /mnt/data/MUWEB_R90_FIX74_ICARUS_SPEAR_JOINT_LORENCIA_2026-10-05/test-r90-fix72-icarus-dragons.mjs
+--- /mnt/data/fix74_src/MUWEB_R90_FIX73_F352_MASTER_SKILL_INTEGRATED_2026-10-05/test-r90-fix72-icarus-dragons.mjs	2026-10-05 15:22:46.000000000 +0000
++++ /mnt/data/MUWEB_R90_FIX74_ICARUS_SPEAR_JOINT_LORENCIA_2026-10-05/test-r90-fix72-icarus-dragons.mjs	2026-10-05 16:27:57.170668618 +0000
+@@ -10,8 +10,8 @@
+ assert.match(s,/ri\(4000\) - 2000/);
+ assert.match(s,/hero\.z - 600/);
+ assert.match(s,/Math\.hypot\(d\.x - hero\.x, d\.y - hero\.y\) >= 4000/);
+-assert.match(s,/muPcUnresolvedSpearJointBoids = 10/);
++assert.ok(/muPcUnresolvedSpearJointBoids = 10/.test(s) || /muPcSpearJointBoids = SPEAR_COUNT/.test(s));
+ const t=fs.readFileSync(new URL('./world/TerrainObjectWorld.js',import.meta.url),'utf8');
+ assert.match(t,/createPcIcarusBoidsOwner/);
+ assert.match(t,/3 Monster32 sky dragons/);
+-console.log('PASS FIX72 Icarus GOBoid CreateDragon Monster32 owner + fail-closed spear joints');
++console.log('PASS FIX72 Icarus GOBoid CreateDragon Monster32 owner (spear lane may be closed by newer authority)');
+diff -ruN /mnt/data/fix74_src/MUWEB_R90_FIX73_F352_MASTER_SKILL_INTEGRATED_2026-10-05/test-r90-fix74-cape-bodylight-branch.mjs /mnt/data/MUWEB_R90_FIX74_ICARUS_SPEAR_JOINT_LORENCIA_2026-10-05/test-r90-fix74-cape-bodylight-branch.mjs
+--- /mnt/data/fix74_src/MUWEB_R90_FIX73_F352_MASTER_SKILL_INTEGRATED_2026-10-05/test-r90-fix74-cape-bodylight-branch.mjs	1970-01-01 00:00:00.000000000 +0000
++++ /mnt/data/MUWEB_R90_FIX74_ICARUS_SPEAR_JOINT_LORENCIA_2026-10-05/test-r90-fix74-cape-bodylight-branch.mjs	2026-10-05 16:24:24.330336566 +0000
+@@ -0,0 +1,10 @@
++import fs from 'node:fs';
++import assert from 'node:assert/strict';
++const s=fs.readFileSync(new URL('./graphics/PlayerComposer.js',import.meta.url),'utf8');
++assert.match(s,/white: customCapeRenderPlan\([^\n]+false\)/);
++assert.match(s,/lit: customCapeRenderPlan\([^\n]+true\)/);
++assert.match(s,/c\?\.r === 1 && c\?\.g === 1 && c\?\.b === 1/);
++assert.match(s,/muRenderCapeCharacter = white \? 0 : 1/);
++assert.match(s,/wr\.setBodyLight = \(color\) =>/);
++assert.doesNotMatch(s,/renderCapePlan: \(resolved\.wing/);
++console.log('PASS FIX74 CustomCape RenderCharacter BodyLight branch + allocation-free plan selection');
+diff -ruN /mnt/data/fix74_src/MUWEB_R90_FIX73_F352_MASTER_SKILL_INTEGRATED_2026-10-05/test-r90-fix74-icarus-spear-joint.mjs /mnt/data/MUWEB_R90_FIX74_ICARUS_SPEAR_JOINT_LORENCIA_2026-10-05/test-r90-fix74-icarus-spear-joint.mjs
+--- /mnt/data/fix74_src/MUWEB_R90_FIX73_F352_MASTER_SKILL_INTEGRATED_2026-10-05/test-r90-fix74-icarus-spear-joint.mjs	1970-01-01 00:00:00.000000000 +0000
++++ /mnt/data/MUWEB_R90_FIX74_ICARUS_SPEAR_JOINT_LORENCIA_2026-10-05/test-r90-fix74-icarus-spear-joint.mjs	2026-10-05 16:27:09.868492957 +0000
+@@ -0,0 +1,6 @@
++import fs from 'node:fs';
++import assert from 'node:assert/strict';
++const s=fs.readFileSync(new URL('./world/PcIcarusBoids.js',import.meta.url),'utf8');
++for(const x of ["SPEAR_COUNT = 10","SPEAR_TAILS = 30","SPEAR_SCALE = 25","Effect/JointSpirit01.OZJ","velocity: 2.2","240*40","ri(5120) === 0","Math.hypot(b.x-hero.x,b.y-hero.y) >= 1500","0.048 * 0.5","0.0613 * 0.5","0.1113 * 0.5","0.4 + 0.2 * sa","CreateJoint(MODEL_SPEARSKILL, subtype1, scale25)"]) assert.ok(s.includes(x),`missing ${x}`);
++assert.ok(!s.includes('exact owner pending'),'legacy fail-closed spear marker remains');
++console.log('PASS FIX74 Icarus 10 MODEL_SPEARSKILL MoveHeavenBug + CreateJoint subtype1 retained owner');
+diff -ruN /mnt/data/fix74_src/MUWEB_R90_FIX73_F352_MASTER_SKILL_INTEGRATED_2026-10-05/tools/start-r90-fix74-safe.cjs /mnt/data/MUWEB_R90_FIX74_ICARUS_SPEAR_JOINT_LORENCIA_2026-10-05/tools/start-r90-fix74-safe.cjs
+--- /mnt/data/fix74_src/MUWEB_R90_FIX73_F352_MASTER_SKILL_INTEGRATED_2026-10-05/tools/start-r90-fix74-safe.cjs	1970-01-01 00:00:00.000000000 +0000
++++ /mnt/data/MUWEB_R90_FIX74_ICARUS_SPEAR_JOINT_LORENCIA_2026-10-05/tools/start-r90-fix74-safe.cjs	2026-10-05 16:27:09.868315966 +0000
+@@ -0,0 +1,30 @@
++const fs = require('node:fs');
++const path = require('node:path');
++const crypto = require('node:crypto');
++const root = path.resolve(__dirname, '..');
++const MUTABLE_RUNTIME = new Set(['runtime-config.js']);
++function sha256(p){return crypto.createHash('sha256').update(fs.readFileSync(p)).digest('hex');}
++function verifyBuild(){
++  const manifestPath = path.join(root, 'R90_FIX74_SOURCE_HASHES.json');
++  if(!fs.existsSync(manifestPath)) throw new Error('R90_FIX74_SOURCE_HASHES.json ausente');
++  const m = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
++  let n=0;
++  for(const [rel, expected] of Object.entries(m.files || {})){
++    if(MUTABLE_RUNTIME.has(rel)) continue;
++    const p = path.join(root, rel);
++    if(!fs.existsSync(p)) throw new Error(`FIX74 arquivo ausente: ${rel}`);
++    const actual = sha256(p);
++    if(actual !== expected) throw new Error(`FIX74 arquivo modificado/incompleto: ${rel}`);
++    n++;
++  }
++  console.log(`[R90 FIX74] ${m.build}: ${n} arquivos imutaveis verificados.`);
++  return m;
++}
++module.exports={verifyBuild};
++if(require.main===module){
++  try{
++    verifyBuild();
++    if(process.argv.includes('--verify-only')) process.exit(0);
++    require('./start-r90-safe.cjs').main().catch(e=>{console.error('[R90 FIX74] FALHA:', e.message); process.exitCode=1;});
++  }catch(e){console.error('[R90 FIX74] FALHA:', e.message); process.exitCode=1;}
++}
+diff -ruN /mnt/data/fix74_src/MUWEB_R90_FIX73_F352_MASTER_SKILL_INTEGRATED_2026-10-05/world/PcIcarusBoids.js /mnt/data/MUWEB_R90_FIX74_ICARUS_SPEAR_JOINT_LORENCIA_2026-10-05/world/PcIcarusBoids.js
+--- /mnt/data/fix74_src/MUWEB_R90_FIX73_F352_MASTER_SKILL_INTEGRATED_2026-10-05/world/PcIcarusBoids.js	2026-10-05 15:21:06.000000000 +0000
++++ /mnt/data/MUWEB_R90_FIX74_ICARUS_SPEAR_JOINT_LORENCIA_2026-10-05/world/PcIcarusBoids.js	2026-10-05 16:29:56.901640832 +0000
+@@ -1,21 +1,109 @@
+ // PcIcarusBoids.js — retained Main 5.2 GOBoid.cpp WD_10HEAVEN sky boids.
+-// FIX72 closes the three source-owned MODEL_MONSTER01+31 dragons only.
+-// Boid slots 3..12 are MODEL_SPEARSKILL joint owners and remain fail-closed
+-// until the exact ZzzEffectJoint subtype-1 renderer is ported.
++// FIX72 closes the three source-owned MODEL_MONSTER01+31 dragons.
++// FIX74 closes boid slots 3..12: MoveHeavenBug + MODEL_SPEARSKILL CreateJoint subtype1
++// using the retained JointSpirit01 texture, 30-tail cross ribbon and authored light law.
+ import * as THREE from 'three';
+ import { MUAssets } from '../assets/MUAssetLoader.js';
+ import { MUModelRenderer, RenderFlags } from '../assets/MUModelRenderer.js';
+ import { applyMuUpAxis } from '../graphics/BmdAdapter.js';
++import { RemoteAssets } from '../data/RemoteAssets.js';
++import { tryAcquirePcParticle, releasePcParticle } from './PcParticleBudget.js';
+ 
+ const PC_HZ = 25;
+ const TICK = 1 / PC_HZ;
+ const DRAGON_COUNT = 3;
++const SPEAR_COUNT = 10;
++const SPEAR_TAILS = 30;
++const SPEAR_SCALE = 25;
++const SPEAR_TEXTURE = 'Effect/JointSpirit01.OZJ';
++let spearTexturePromise = null;
+ const DRAGON_BMD = 'Monster/Monster32.bmd'; // OpenMonsterModel(31) => Type+1.
+ const DRAGON_ACTION = 'action_7'; // MONSTER01_DIE(6)+1.
+ const ri = (n) => Math.floor(Math.random() * Math.max(1, n));
+ const rad = (d) => d * Math.PI / 180;
+ const deg = (r) => r * 180 / Math.PI;
+ 
++
++async function loadSpearTexture() {
++  if (spearTexturePromise) return spearTexturePromise;
++  spearTexturePromise = (async () => {
++    const d = await RemoteAssets.fetchDecodedImage(SPEAR_TEXTURE);
++    if (!d?.image) return null;
++    const t = new THREE.Texture(d.image);
++    t.needsUpdate = true;
++    t.colorSpace = THREE.SRGBColorSpace;
++    t.wrapS = THREE.RepeatWrapping;
++    t.wrapT = THREE.ClampToEdgeWrapping;
++    t.minFilter = t.magFilter = THREE.LinearFilter;
++    t.generateMipmaps = true;
++    t.userData.muPcBitmapPath = SPEAR_TEXTURE;
++    return t;
++  })().catch(() => null);
++  return spearTexturePromise;
++}
++function makeSpearRibbonGeometry() {
++  const g = new THREE.BufferGeometry();
++  // Two crossed retained faces, matching the 4 points authored by CreateTail.
++  const samples = SPEAR_TAILS;
++  const vertsPerSample = 4;
++  g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(samples * vertsPerSample * 3), 3));
++  const uv = new Float32Array(samples * vertsPerSample * 2);
++  for (let i = 0; i < samples; i++) {
++    const v = i / Math.max(1, SPEAR_TAILS - 1);
++    const o = i * 8;
++    uv[o] = 0; uv[o+1] = v; uv[o+2] = 1; uv[o+3] = v;
++    uv[o+4] = 0; uv[o+5] = v; uv[o+6] = 1; uv[o+7] = v;
++  }
++  g.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
++  const idx = [];
++  for (let i = 0; i < samples - 1; i++) {
++    const a=i*4,b=a+1,c=a+2,d=a+3,n=(i+1)*4;
++    idx.push(a,b,n, b,n+1,n);       // horizontal face
++    idx.push(c,d,n+2, d,n+3,n+2);   // vertical face
++  }
++  g.setIndex(idx);
++  return g;
++}
++function spearOrbitMu(target, worldTick, jointIndex) {
++  // ZzzEffectJoint.cpp MODEL_SPEARSKILL subtype 1.
++  let iFrame = worldTick;
++  iFrame = ((jointIndex % 2) ? iFrame : -iFrame) + jointIndex * 53731;
++  const f0 = 0.048 * 0.5, f1 = 0.0613 * 0.5, f2 = 0.1113 * 0.5;
++  const x0 = Math.sin((iFrame + 55555) * f0) * Math.cos(iFrame * f1);
++  const y0 = Math.sin((iFrame + 55555) * f0) * Math.sin(iFrame * f1);
++  const z0 = Math.cos((iFrame + 55555) * f0);
++  const sa = Math.sin((iFrame + 11111) * f2), ca = Math.cos((iFrame + 11111) * f2);
++  const vz = x0;
++  const vy = sa * y0 + ca * z0;
++  const vx = ca * y0 - sa * z0;
++  return {
++    x: target.x + vx * 70,
++    y: target.y + vy * 70,
++    z: target.z + 10 + vz * 140,
++    light: [0.2, 0.2, 0.4 + 0.2 * sa],
++  };
++}
++function updateSpearRibbon(owner) {
++  const attr = owner.mesh.geometry.attributes.position;
++  const a = attr.array;
++  const half = SPEAR_SCALE * 0.5;
++  // PC CreateTail stores four world-space corners per retained sample. The
++  // joint angle is zero in CreateDragon, so its local X/Z cross is retained.
++  for (let i = 0; i < SPEAR_TAILS; i++) {
++    const p = owner.tails[i] || owner.tails[owner.tails.length-1] || owner.point;
++    const x=p?.x||0, y=p?.z||0, z=-(p?.y||0); // MU -> Web
++    const o=i*12;
++    a[o]=x-half; a[o+1]=y; a[o+2]=z;
++    a[o+3]=x+half; a[o+4]=y; a[o+5]=z;
++    a[o+6]=x; a[o+7]=y-half; a[o+8]=z;
++    a[o+9]=x; a[o+10]=y+half; a[o+11]=z;
++  }
++  attr.needsUpdate = true;
++  owner.mesh.geometry.computeBoundingSphere();
++  const l=owner.point.light;
++  owner.mesh.material.color.setRGB(l[0],l[1],l[2]);
++}
++
+ function heroMu(gameScene) {
+   const p = gameScene?.mainObject?.position;
+   if (!p?.isVector3) return null;
+@@ -38,14 +126,20 @@
+   group.userData.muPcOwner = 'GOBoid.cpp::MoveBoids/CreateDragon/MoveBoidGroup';
+   group.userData.muPcDragonModel = DRAGON_BMD;
+   group.userData.muPcDragonCount = DRAGON_COUNT;
+-  group.userData.muPcUnresolvedSpearJointBoids = 10;
+-  group.userData.muPcUnresolvedReason = 'MODEL_SPEARSKILL CreateJoint subtype1 exact owner pending';
++  group.userData.muPcSpearJointBoids = SPEAR_COUNT;
++  group.userData.muPcSpearJointOwner = 'GOBoid.cpp::CreateDragon(index>=3)+MoveHeavenBug; ZzzEffectJoint MODEL_SPEARSKILL subtype1';
+ 
+   const dragons = Array.from({ length: DRAGON_COUNT }, (_, i) => ({
+     i, live: false, renderer: null, outer: null,
+     x: 0, y: 0, z: 0, angle: 0, velocity: 0.2, gravity: 0.5,
+     dirX: 0, dirY: 0, dirZ: 0, scale: 0.3, alpha: 1,
+   }));
++  const spears = Array.from({ length: SPEAR_COUNT }, (_, j) => ({
++    i: j + DRAGON_COUNT, jointIndex: j, live: false,
++    x: 0, y: 0, z: 0, angle: 0, velocity: 2.2, lifeTime: 240*40,
++    mesh: null, tails: [], point: {x:0,y:0,z:0,light:[.2,.2,.4]}, budget: false,
++  }));
++  let worldTick = 0;
+   let disposed = false, ready = false, acc = 0, elapsed = 0;
+ 
+   function spawn(d, hero) {
+@@ -94,9 +188,40 @@
+       d.angle = turnAngle(d.angle, target, d.gravity);
+     }
+   }
++  function spawnSpear(b, hero) {
++    b.velocity = 2.2;
++    b.lifeTime = 240 * 40;
++    b.angle = ri(360);
++    b.x = hero.x + (ri(1024) - 512);
++    b.y = hero.y + (ri(1024) - 512);
++    b.z = hero.z;
++    b.live = true;
++    b.tails.length = 0;
++  }
++  function tickSpear(b, hero) {
++    if (!b.live) { spawnSpear(b, hero); return; }
++    // GOBoid.cpp::MoveHeavenBug, authored at the 25 Hz FX/world tick.
++    // PC passes Angle[2] directly to sinf/cosf here (no degree conversion).
++    b.x += b.velocity * Math.sin(b.angle);
++    b.y -= b.velocity * Math.cos(b.angle);
++    const iFrame = worldTick;
++    b.angle += 0.01 * Math.cos((34571 + iFrame + b.i * 41273) * 0.0003)
++                    * Math.sin((17732 + iFrame + b.i * 5161) * 0.0003);
++    b.lifeTime -= 1;
++    if (Math.hypot(b.x-hero.x,b.y-hero.y) >= 1500 || ri(5120) === 0) {
++      b.live = false; b.tails.length = 0; if (b.mesh) b.mesh.visible = false; return;
++    }
++    const q = spearOrbitMu(b, worldTick, b.jointIndex);
++    b.point = q;
++    b.tails.unshift({x:q.x,y:q.y,z:q.z});
++    if (b.tails.length > SPEAR_TAILS) b.tails.length = SPEAR_TAILS;
++    if (b.mesh) { b.mesh.visible = true; updateSpearRibbon(b); }
++  }
++
+   function tick() {
+     const hero = heroMu(gameScene);
+     if (!ready || !hero) return;
++    worldTick++;
+     for (const d of dragons) {
+       if (!d.live) { spawn(d, hero); continue; }
+       steer(d); // ZzzAI.cpp::MoveBoid.
+@@ -115,6 +240,7 @@
+       d.outer.rotation.y = rad(d.angle);
+       d.outer.visible = true;
+     }
++    for (const b of spears) tickSpear(b, hero);
+   }
+ 
+   void MUAssets.loadBMD(DRAGON_BMD).then(async (bmd) => {
+@@ -141,6 +267,29 @@
+     group.userData.muPcDragonMissing = `${DRAGON_BMD}: ${e?.message || e}`;
+   });
+ 
++  void loadSpearTexture().then((texture) => {
++    if (disposed || !texture) return;
++    const hero = heroMu(gameScene);
++    if (!hero) return;
++    for (const b of spears) {
++      if (!tryAcquirePcParticle()) { group.userData.muPcSpearBudgetDrops = (group.userData.muPcSpearBudgetDrops || 0) + 1; continue; }
++      b.budget = true;
++      const geometry = makeSpearRibbonGeometry();
++      const material = new THREE.MeshBasicMaterial({
++        map:texture, color:new THREE.Color(.2,.2,.4), transparent:true, opacity:1,
++        depthTest:true, depthWrite:false, side:THREE.DoubleSide,
++        blending:THREE.AdditiveBlending, toneMapped:false,
++      });
++      const mesh = new THREE.Mesh(geometry,material);
++      mesh.frustumCulled = false; mesh.renderOrder = 6; mesh.visible = false;
++      mesh.name = `Icarus_SpearJoint_${b.i}`;
++      mesh.userData.muPcOwner = 'CreateJoint(MODEL_SPEARSKILL, subtype1, scale25)';
++      mesh.userData.muPcTexType = 'BITMAP_JOINT_SPIRIT';
++      mesh.userData.muPcMaxTails = SPEAR_TAILS;
++      b.mesh = mesh; group.add(mesh); spawnSpear(b,hero);
++    }
++  }).catch((e)=>{ group.userData.muPcSpearTextureMissing = `${SPEAR_TEXTURE}: ${e?.message || e}`; });
++
+   group.userData.update = (dt) => {
+     if (disposed) return;
+     const d = Math.max(0, Number(dt) || 0);
+@@ -153,6 +302,7 @@
+     }
+     for (const x of dragons) if (x.live) x.renderer?.update?.(d, elapsed);
+     group.userData.muPcLiveDragons = dragons.reduce((n, x) => n + (x.live ? 1 : 0), 0);
++    group.userData.muPcLiveSpearBoids = spears.reduce((n, x) => n + (x.live ? 1 : 0), 0);
+   };
+ 
+   return {
+@@ -160,6 +310,12 @@
+     dispose() {
+       if (disposed) return; disposed = true;
+       for (const d of dragons) { try { d.renderer?.dispose?.(); } catch {} d.renderer = null; d.outer = null; }
++      for (const b of spears) {
++        b.live=false; b.tails.length=0;
++        if (b.mesh) { try { b.mesh.geometry?.dispose?.(); b.mesh.material?.dispose?.(); } catch {} }
++        if (b.budget) releasePcParticle();
++        b.mesh=null; b.budget=false;
++      }
+       group.clear();
+     },
+   };

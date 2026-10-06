@@ -17,14 +17,17 @@ const ri=(n)=>Math.floor(Math.random()*Math.max(1,n));
 const rad=(d)=>d*Math.PI/180;
 const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
 
-function rotatePc(v, angle) {
+function rotatePcInto(v, angle, out) {
   const ax=rad(Number(angle?.[0])||0), ay=rad(Number(angle?.[1])||0), az=rad(Number(angle?.[2])||0);
   const sr=Math.sin(ax),cr=Math.cos(ax),sp=Math.sin(ay),cp=Math.cos(ay),sy=Math.sin(az),cy=Math.cos(az);
   const m00=cp*cy,m10=cp*sy,m20=-sp;
   const m01=sr*sp*cy+cr*-sy,m11=sr*sp*sy+cr*cy,m21=sr*cp;
   const m02=cr*sp*cy+-sr*-sy,m12=cr*sp*sy+-sr*cy,m22=cr*cp;
-  return [v[0]*m00+v[1]*m01+v[2]*m02,v[0]*m10+v[1]*m11+v[2]*m12,v[0]*m20+v[1]*m21+v[2]*m22];
+  out[0]=v[0]*m00+v[1]*m01+v[2]*m02;out[1]=v[0]*m10+v[1]*m11+v[2]*m12;out[2]=v[0]*m20+v[1]*m21+v[2]*m22;return out;
 }
+function set3(a,x=0,y=0,z=0){a=a||[0,0,0];a[0]=x;a[1]=y;a[2]=z;return a;}
+const WHITE3=Object.freeze([1,1,1]);
+const ZERO3=Object.freeze([0,0,0]);
 function pcToThree(origin,p,out=new THREE.Vector3()) { return out.set(origin.x+p[0],origin.y+p[2],origin.z-p[1]); }
 async function loadBitmap(path){
   if(texCache.has(path)) return texCache.get(path);
@@ -69,30 +72,39 @@ function makeMaterial(loaded, subtype, kind){
   if(subtractive){m.blending=THREE.CustomBlending;m.blendEquation=THREE.AddEquation;m.blendSrc=THREE.ZeroFactor;m.blendDst=THREE.OneMinusSrcColorFactor;} else m.blending=THREE.AdditiveBlending;
   return m;
 }
-function makeParticle(kind,subtype,light,origin,angle,loaded){
-  if(!tryAcquirePcParticle())return null;
-  const p={kind,subtype,life:2,scale:1,rotation:0,gravity:0,frame:0,angle:[...angle],velocity:[0,0,0],pos:[...origin],light:[...light],sprite:null,mat:null,loaded};
+function particlePoolKey(loaded,subtype,kind){return `${loaded.path}|${kind}|${kind==='smoke'&&subtype===2?'sub':'add'}`;}
+function acquireParticle(kind,subtype,loaded,pool){
+  if(!tryAcquirePcParticle())return null;const key=particlePoolKey(loaded,subtype,kind);let bucket=pool.get(key);let p=bucket?.pop()||null;
+  if(!p){const mat=makeMaterial(loaded,subtype,kind),sprite=new THREE.Sprite(mat);sprite.frustumCulled=true;sprite.userData.muPcOwner='ZzzEffectParticle.cpp';p={mat,sprite,_poolKey:key};}
+  p._poolKey=key;p.loaded=loaded;p.sprite.visible=true;p.mat.opacity=1;p.mat.rotation=0;p.mat.color.setRGB(1,1,1);return p;
+}
+function recycleParticle(group,p,pool){group.remove(p.sprite);p.sprite.visible=false;releasePcParticle();let bucket=pool.get(p._poolKey);if(!bucket){bucket=[];pool.set(p._poolKey,bucket);}bucket.push(p);}
+function disposeParticlePool(pool){for(const bucket of pool.values())for(const p of bucket)p.mat.dispose();pool.clear();}
+function makeParticle(kind,subtype,light,origin,angle,loaded,pool){
+  const p=acquireParticle(kind,subtype,loaded,pool);if(!p)return null;
+  p.kind=kind;p.subtype=subtype;p.life=2;p.scale=1;p.rotation=0;p.gravity=0;p.frame=0;p.angle=set3(p.angle,angle?.[0]||0,angle?.[1]||0,angle?.[2]||0);p.velocity=set3(p.velocity,0,0,0);p.pos=set3(p.pos,origin?.[0]||0,origin?.[1]||0,origin?.[2]||0);p.light=set3(p.light,light?.[0]||0,light?.[1]||0,light?.[2]||0);p.baseOrigin=null;
   if(kind==='fire'){
     p.life=24;p.rotation=ri(360);
-    if(subtype===0){p.velocity=[0,-(ri(16)+32)*.1,0];p.scale=(ri(64)+128)*.01;}
-    else if(subtype===1){p.velocity=[0,-(ri(16)+32)*.1,0];p.scale=(ri(4)+10)*.01;}
-    else {p.velocity=[0,-(ri(32)-16)*.1,0];p.scale=1;}
+    if(subtype===0){set3(p.velocity,0,-(ri(16)+32)*.1,0);p.scale=(ri(64)+128)*.01;}
+    else if(subtype===1){set3(p.velocity,0,-(ri(16)+32)*.1,0);p.scale=(ri(4)+10)*.01;}
+    else {set3(p.velocity,0,-(ri(32)-16)*.1,0);p.scale=1;}
   }else if(kind==='smoke'&&subtype===0){p.life=16;p.scale=(ri(32)+48)*.01;p.angle[0]=ri(360);p.rotation=0;}
   else if(kind==='smoke'&&subtype===2){p.life=50;p.scale=(ri(64)+64)*.01;p.rotation=ri(360);p.gravity=(ri(32)+60)*.1;}
-  p.mat=makeMaterial(loaded,subtype,kind);p.sprite=new THREE.Sprite(p.mat);p.sprite.frustumCulled=true;p.sprite.userData.muPcOwner='ZzzEffectParticle.cpp';p.sprite.userData.muPcParticle=`${kind}:${subtype}`;return p;
+  p.sprite.userData.muPcParticle=`${kind}:${subtype}`;return p;
 }
+const rotateScratch=[0,0,0];
 function updateParticle(p,f){
   p.life-=f;if(p.life<=0)return false;
-  const rv=rotatePc(p.velocity,p.angle);p.pos[0]+=rv[0]*f;p.pos[1]+=rv[1]*f;p.pos[2]+=rv[2]*f;
+  const rv=rotatePcInto(p.velocity,p.angle,rotateScratch);p.pos[0]+=rv[0]*f;p.pos[1]+=rv[1]*f;p.pos[2]+=rv[2]*f;
   if(p.kind==='fire'){
     p.gravity+=.004*f;const lum=p.life/24;
     if(p.subtype===0){p.scale-=.04*f;p.frame=Math.floor((23-p.life)/6);p.pos[2]+=p.gravity*10*f;}
-    else {p.scale+=p.gravity*f;p.velocity=p.velocity.map(v=>v*Math.pow(.98,f));p.frame=Math.floor((23-p.life)/6);p.pos[2]+=p.gravity*10*f;}
+    else {p.scale+=p.gravity*f;{const damp=Math.pow(.98,f);p.velocity[0]*=damp;p.velocity[1]*=damp;p.velocity[2]*=damp;}p.frame=Math.floor((23-p.life)/6);p.pos[2]+=p.gravity*10*f;}
     // CreateFire supplies the authored orange light. Fire subtype 0..3 does not
     // overwrite o->Light in MoveParticles; only its frame/scale/position change.
     void lum;
-  }else if(p.subtype===0){const lum=p.life/8;p.light=[lum,lum,lum];p.gravity+=.2*f;p.pos[2]+=p.gravity*f;p.scale+=.05*f;}
-  else if(p.subtype===2){const lum=p.life/50;p.light=[lum,lum,lum];p.gravity-=.1*f;p.pos[0]-=p.gravity*.2*f;p.pos[2]+=p.gravity*f;p.scale-=.01*f;}
+  }else if(p.subtype===0){const lum=p.life/8;set3(p.light,lum,lum,lum);p.gravity+=.2*f;p.pos[2]+=p.gravity*f;p.scale+=.05*f;}
+  else if(p.subtype===2){const lum=p.life/50;set3(p.light,lum,lum,lum);p.gravity-=.1*f;p.pos[0]-=p.gravity*.2*f;p.pos[2]+=p.gravity*f;p.scale-=.01*f;}
   return p.scale>0;
 }
 function applyParticleVisual(p,baseOrigin){
@@ -117,30 +129,30 @@ export async function createPcLorenciaVisualOwner(serial,obj,origin,options={}){
   const fire=await loadBitmap(PC_LORENCIA_BITMAP_PATHS.BITMAP_FIRE);const smoke=await loadBitmap(PC_LORENCIA_BITMAP_PATHS.BITMAP_SMOKE);
   if(!fire||!smoke)return null;
   const group=new THREE.Group();group.name=`LorenciaVisual_Type${serial|0}`;group.userData.muPcVisualOwner='ZzzObject.cpp/CreateFire';
-  const particles=[];let disposed=false;
+  const particles=[];const particlePool=new Map();let disposed=false;
   const angle=[Number(obj?.angleX)||0,Number(obj?.angleY)||0,Number(obj?.angleZ)||0];
   const addTerrainLightMu = typeof options?.addTerrainLightMu === 'function' ? options.addTerrainLightMu : null;
   const objMuX = Number(obj?.x) || 0, objMuY = Number(obj?.y) || 0;
-  const baseOrigin=origin.clone();
+  const baseOrigin=origin.clone();const localScratch=[0,0,0],randomScratch=[0,0,0],lightScratch=[0,0,0];
   group.userData.update=(dt)=>{
     if(disposed)return;const safe=Math.max(0,Number(dt)||0);const factor=Math.min(2.5,safe*25);
     // CreateFire is called once per RenderObjectVisual frame. rand_fps_check(2)
     // uses 25Hz-reference density independent of presentation FPS.
     for(const spec of contract.emitters){
-      const local=rotatePc(spec.offset,angle);const randomized=[local[0]+ri(16)-8,local[1]+ri(16)-8,local[2]+ri(16)-8];
+      const local=rotatePcInto(spec.offset,angle,localScratch);const randomized=randomScratch;randomized[0]=local[0]+ri(16)-8;randomized[1]=local[1]+ri(16)-8;randomized[2]=local[2]+ri(16)-8;
       if(spec.type===0){
-        const lum=(ri(6)+6)*.1;const light=[lum,lum*.6,lum*.4];
+        const lum=(ri(6)+6)*.1;const light=set3(lightScratch,lum,lum*.6,lum*.4);
         // CreateFire(Type 0): AddTerrainLight uses the SAME rotated+jittered
         // Position and RGB as the optional fire particle, every render frame.
         addTerrainLightMu?.(objMuX + randomized[0], objMuY + randomized[1], light, 4);
-        gate(safe,2,()=>{const p=makeParticle('fire',ri(4),light,randomized,angle,fire);if(p){particles.push(p);group.add(p.sprite);}});
+        gate(safe,2,()=>{const p=makeParticle('fire',ri(4),light,randomized,angle,fire,particlePool);if(p){particles.push(p);group.add(p.sprite);}});
       }
-      else if(spec.type===1)gate(safe,2,()=>{const p=makeParticle('smoke',0,[1,1,1],randomized,angle,smoke);if(p){particles.push(p);group.add(p.sprite);}});
-      else gate(safe,2,()=>{const p=makeParticle('smoke',2,[1,1,1],randomized,angle,smoke);if(p){particles.push(p);group.add(p.sprite);}});
+      else if(spec.type===1)gate(safe,2,()=>{const p=makeParticle('smoke',0,WHITE3,randomized,angle,smoke,particlePool);if(p){particles.push(p);group.add(p.sprite);}});
+      else gate(safe,2,()=>{const p=makeParticle('smoke',2,WHITE3,randomized,angle,smoke,particlePool);if(p){particles.push(p);group.add(p.sprite);}});
     }
-    for(let i=particles.length-1;i>=0;i--){const p=particles[i];if(!updateParticle(p,factor)){group.remove(p.sprite);p.mat.dispose();releasePcParticle();particles.splice(i,1);continue;}applyParticleVisual(p,baseOrigin);}
+    for(let i=particles.length-1;i>=0;i--){const p=particles[i];if(!updateParticle(p,factor)){recycleParticle(group,p,particlePool);particles.splice(i,1);continue;}applyParticleVisual(p,baseOrigin);}
   };
-  return {group,hidden:contract.hidden,dispose(){if(disposed)return;disposed=true;for(const p of particles){group.remove(p.sprite);p.mat.dispose();releasePcParticle();}particles.length=0;}};
+  return {group,hidden:contract.hidden,dispose(){if(disposed)return;disposed=true;for(const p of particles)recycleParticle(group,p,particlePool);particles.length=0;disposeParticlePool(particlePool);}};
 }
 
 
@@ -154,10 +166,10 @@ function boneWorldPoint(renderer, boneIndex, pcOffset, out = new THREE.Vector3()
   out.set(Number(pcOffset?.[0]) || 0, Number(pcOffset?.[1]) || 0, Number(pcOffset?.[2]) || 0);
   return bone.localToWorld(out);
 }
-function makeBoneSmokeParticle(worldPos, loaded, worldMs = 0) {
-  const p = makeParticle('smoke', 0, [1,1,1], [0,0,0], [0,0,0], loaded);
+function makeBoneSmokeParticle(worldPos, loaded, worldMs, pool) {
+  const p = makeParticle('smoke', 0, WHITE3, ZERO3, ZERO3, loaded, pool);
   if (!p) return null;
-  p.baseOrigin = worldPos.clone();
+  p.baseOrigin = p.baseOrigin instanceof THREE.Vector3 ? p.baseOrigin.copy(worldPos) : worldPos.clone();
   p.rotation = Number(worldMs) % 360;
   return p;
 }
@@ -188,6 +200,7 @@ export async function createPcLorenciaBoneVisualOwner(serial, renderer, obj) {
   const flare = type === 56 ? await loadBitmap(PC_LORENCIA_BITMAP_PATHS.BITMAP_LIGHT) : null;
   if ((type === 105 && !smoke) || (type === 56 && !flare)) return null;
   const particles = [];
+  const particlePool = new Map();
   const tmpA = new THREE.Vector3(), tmpB = new THREE.Vector3();
   const merchant = [];
 
@@ -208,9 +221,9 @@ export async function createPcLorenciaBoneVisualOwner(serial, renderer, obj) {
     const p1 = [ri(32)-16, -20, ri(32)-16];
     const p4 = [ri(32)-16, -80, ri(32)-16];
     const w1 = boneWorldPoint(renderer, 1, p1, tmpA);
-    if (w1) { const p=makeBoneSmokeParticle(w1, smoke, worldMs); if(p){particles.push(p);group.add(p.sprite);} }
+    if (w1) { const p=makeBoneSmokeParticle(w1, smoke, worldMs, particlePool); if(p){particles.push(p);group.add(p.sprite);} }
     const w4 = boneWorldPoint(renderer, 4, p4, tmpB);
-    if (w4) { const p=makeBoneSmokeParticle(w4, smoke, worldMs); if(p){particles.push(p);group.add(p.sprite);} }
+    if (w4) { const p=makeBoneSmokeParticle(w4, smoke, worldMs, particlePool); if(p){particles.push(p);group.add(p.sprite);} }
   };
 
   renderer.addPresentationUpdate?.((worldMs = 0) => {
@@ -228,7 +241,7 @@ export async function createPcLorenciaBoneVisualOwner(serial, renderer, obj) {
       const factor = Math.min(2.5, dt * 25);
       for (let i=particles.length-1;i>=0;i--) {
         const p=particles[i];
-        if (!updateParticle(p,factor)) { group.remove(p.sprite); p.mat.dispose(); releasePcParticle(); particles.splice(i,1); continue; }
+        if (!updateParticle(p,factor)) { recycleParticle(group,p,particlePool); particles.splice(i,1); continue; }
         applyParticleVisual(p,p.baseOrigin);
       }
     } else {
@@ -247,5 +260,5 @@ export async function createPcLorenciaBoneVisualOwner(serial, renderer, obj) {
     }
   });
 
-  return {group,dispose(){if(disposed)return;disposed=true;for(const p of particles){group.remove(p.sprite);p.mat.dispose();releasePcParticle();}particles.length=0;for(const x of merchant)x.mat.dispose();group.clear();}};
+  return {group,dispose(){if(disposed)return;disposed=true;for(const p of particles)recycleParticle(group,p,particlePool);particles.length=0;disposeParticlePool(particlePool);for(const x of merchant)x.mat.dispose();group.clear();}};
 }

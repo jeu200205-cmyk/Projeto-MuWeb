@@ -9,15 +9,15 @@
  *  B) MuPromax "Terrain{N}.att": 3 bytes de junk + 256*256 bytes XOR3 (FC CF AB).
  *  C) Raw: exatamente width*height bytes sem header (ex.: 256x256 = 65536).
  *
- * Bitmask por cell (padrão MU, fontes da comunidade):
- *   0x01 TW_NOMOVE   — bloqueado (não caminhável)
- *   0x02 TW_NOGROUND — sem chão
- *   0x04 TW_WATER    — água
- *   0x08 TW_ACTION   — trigger de ação
- *   0x10 TW_HEIGHT   — alteração de altura
- *   0x20 TW_CAMERA_UP
- *   0x40 TW_NOATTACKZONE — safezone (não pode atacar)
- *   0x80 TW_ATT
+ * Bitmask por cell (Main 5.2 _define.h authority):
+ *   0x01 TW_SAFEZONE  — safezone
+ *   0x02 TW_CHARACTER — occupied/character terrain bit
+ *   0x04 TW_NOMOVE    — blocked movement
+ *   0x08 TW_NOGROUND  — no terrain surface
+ *   0x10 TW_WATER     — water
+ *   0x20 TW_ACTION    — action/trigger
+ *   0x40 TW_HEIGHT    — authored height behavior
+ *   0x80 TW_CAMERA_UP — camera raise/indoor contract
  *
  * Grid do MU: 256x256 células; cada célula = 100 unidades do mundo no cliente
  * original (TERRAIN_SCALE = 100). No web-port o tileSize vem do PathGrid.
@@ -26,17 +26,19 @@
 import * as THREE from 'three';
 import { PathGrid } from './Pathfinding.js';
 
-// Bits padrão do MU
-export const ATT_FLAG = {
-    NOMOVE:        0x01,
-    NOGROUND:      0x02,
-    WATER:         0x04,
-    ACTION:        0x08,
-    HEIGHT:        0x10,
-    CAMERA_UP:     0x20,
-    NOATTACKZONE:  0x40, // safezone
-    ATT:           0x80
-};
+// Main 5.2 _define.h exact terrain bits.  Keep SAFEZONE as first-class
+// authority; NOATTACKZONE remains an alias only for older Web callers.
+export const ATT_FLAG = Object.freeze({
+    SAFEZONE:      0x01,
+    NOATTACKZONE:  0x01,
+    CHARACTER:     0x02,
+    NOMOVE:        0x04,
+    NOGROUND:      0x08,
+    WATER:         0x10,
+    ACTION:        0x20,
+    HEIGHT:        0x40,
+    CAMERA_UP:     0x80,
+});
 
 const XOR3_KEY = [0xFC, 0xCF, 0xAB];
 const MU_CELL_SIZE = 100;    // unidades do mundo por célula no cliente original
@@ -127,14 +129,23 @@ export function parseAtt(bytes) {
     return best;
 }
 
-/** Cria grid fallback totalmente caminhável. */
-function fallbackAtt(size = MU_GRID) {
+/**
+ * Missing/corrupt ATT must never fabricate traversable world geometry.
+ * Main 5.2 movement authority comes from the real Terrain*.att bytes; an
+ * all-walkable substitute lets click-to-move cross walls, bridge voids and
+ * other NOMOVE/NOGROUND cells. Keep the world evidence-gated instead: the
+ * conservative grid is fully blocked until an authoritative ATT is loaded.
+ */
+function unavailableAtt(size = MU_GRID) {
+    const cells = new Uint8Array(size * size);
+    cells.fill(ATT_FLAG.NOMOVE | ATT_FLAG.NOGROUND);
     return {
         width: size,
         height: size,
-        cells: new Uint8Array(size * size), // tudo 0 = walkable
-        format: 'fallback-all-walkable',
-        fallback: true
+        cells,
+        format: 'unavailable-authority-blocked',
+        fallback: true,
+        authorityMissing: true
     };
 }
 
@@ -172,8 +183,8 @@ export async function loadAttMap(mapNumber, opts = {}) {
     }
 
     if (!att) {
-        console.warn(`AttMapLoader: nenhum .att reconhecido para World${n} — usando fallback walkable`);
-        att = fallbackAtt();
+        console.error(`AttMapLoader: nenhum .att autoritativo reconhecido para World${n} — movimento bloqueado até carregar Terrain*.att real`);
+        att = unavailableAtt();
     }
 
     att.grid = attToPathGrid(att);
@@ -202,7 +213,7 @@ export function attToPathGrid(att, { blockWater = true } = {}) {
  * Retorna lista de {flag, minX, minY, maxX, maxY} por bounding box de grupos
  * conectados (flood fill 4-dir, só para contagens moderadas).
  */
-export function detectZones(att, flags = ATT_FLAG.NOATTACKZONE) {
+export function detectZones(att, flags = ATT_FLAG.SAFEZONE) {
     const { width, height, cells } = att;
     const visited = new Uint8Array(width * height);
     const zones = [];
@@ -318,7 +329,7 @@ export async function applyRealMap(mapNumber, mapManager, monsterMgr) {
     };
 
     const inSafezoneCell = (tx, tz) =>
-        (att.cells[tz * att.width + tx] & ATT_FLAG.NOATTACKZONE) !== 0;
+        (att.cells[tz * att.width + tx] & ATT_FLAG.SAFEZONE) !== 0;
 
     if (mapManager.spawnPoints && mapManager.spawnPoints.length) {
         for (const sp of mapManager.spawnPoints) {
@@ -337,7 +348,7 @@ export async function applyRealMap(mapNumber, mapManager, monsterMgr) {
             for (let x = 0; x < att.width; x++) {
                 const v = att.cells[y * att.width + x];
                 if ((v & (ATT_FLAG.NOMOVE | ATT_FLAG.NOGROUND | ATT_FLAG.WATER |
-                          ATT_FLAG.NOATTACKZONE)) === 0) free.push([x, y]);
+                          ATT_FLAG.SAFEZONE)) === 0) free.push([x, y]);
             }
         }
         const target = Math.min(64, free.length);

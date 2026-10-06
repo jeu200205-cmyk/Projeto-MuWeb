@@ -15,6 +15,7 @@ import * as THREE from 'three';
 import { GameTimer } from './Timer.js';
 import { Input } from './Input.js';
 import { Sound } from '../audio/SoundManager.js';
+import { MUSounds } from '../assets/MUSoundManager.js';
 import { RemoteAssets } from '../data/RemoteAssets.js';
 import { MUAssets } from '../assets/MUAssetLoader.js';
 import { RealMUProtocol } from '../protocol/RealMUProtocol.js';
@@ -64,6 +65,9 @@ import { magicFinishBuffState } from '../data/MagicFinishBuffMap.js';
 import { MuHelper } from '../game/MuHelper.js';
 import { GameOptions } from '../game/GameOptions.js';
 import { playLevelUp, preloadLevelUpTextures } from '../effects2/LevelUpFX.js';
+import { playDisplayShieldCrash } from '../effects2/DisplayEffectFX.js';
+import { playDisplayPotionEffect } from '../effects2/DisplayPotionFX.js';
+import { pcWorldActiveFromAssetWorld, pcInChaosCastle } from '../game/PcMapContext.js';
 import { onPlayerDeath, onRespawn, createBlood } from '../effects2/DeathFX.js';
 import { playCrit } from '../effects2/CritFX.js';
 import { NotificationCenter } from '../ui2/NotificationCenter.js';
@@ -96,7 +100,8 @@ import { loadDarkSpiritLua } from '../data/DarkSpiritLua.js';
 import { loadCustomBowLua, customBowType } from '../data/CustomBowLua.js';
 import { loadCurrentClientLuaAuthority } from '../data/CurrentClientLuaAuthority.js';
 import { loadPcCharacterLuaEffects } from '../data/PcCharacterLuaEffects.js';
-import { PLAYER_ACTIONS } from '../graphics/PlayerComposer.js';
+import { loadPcCustomCapeLua } from '../data/PcCustomCapeLua.js';
+import { PLAYER_ACTIONS, isFemaleClass } from '../graphics/PlayerComposer.js';
 import { MUSprites } from '../ui/MUSprites.js';
 
 // Identidade explícita da source servida. Se este marcador NÃO aparecer no
@@ -115,7 +120,7 @@ export const MUWEB_SOURCE_PARENT_REVISION = 'MUWEB_R28_FURY_CORE_BMD_2026-09-27_
 export const MUWEB_R90_FIX15_REVISION = 'MUWEB_R90_FIX15_BMD_INFLIGHT_MAP_CANCEL_2026-10-03_A';
 export const MUWEB_R90_FIX46_REVISION = 'MUWEB_R90_FIX46_DARKSPIRIT_MONSTER_LUA_CONTRACTS_2026-10-04_A';
 export const MUWEB_R90_FIX47_REVISION = 'MUWEB_R90_FIX47_CHARACTER_LUA_MONSTER_PRESENTATION_2026-10-04_A';
-export const MUWEB_SOURCE_REVISION = 'MUWEB_R90_FIX57_CAPE_LINK_MATRIX_WING_PRESENTATION_2026-10-05';
+export const MUWEB_SOURCE_REVISION = 'MUWEB_R90_FIX99_EFFECT_RUNTIME_MAP_POOL_2026-10-06';
 export const MUWEB_PREVIOUS_SOURCE_REVISION = 'MUWEB_R78_ITEMVIEW_WORLDENTRY_ANIMATION_CHARSELECT_RECOVERY_2026-09-30_A';
 export const MUWEB_R77_BASE_REVISION = 'MUWEB_R77_CANONICAL_WORLD_ROUTING_CUSTOMMOVE_PREFETCH_UTF8_2026-09-30_A';
 
@@ -284,7 +289,13 @@ export class GameApp {
         if (this.assetsOnline) {
             try {
                 const luaMeta = await loadCurrentClientLuaAuthority((p) => RemoteAssets.fetchBinary(p));
-                loadPcCharacterLuaEffects((p)=>RemoteAssets.fetchBinary(p)).catch((e)=>console.warn('[CharacterLuaFX] indisponível:', e.message));
+                // FIX58: these two Lua VMs are visual owners, not optional background
+                // metadata. Await them before any character composition so the first equipped
+                // cape/CharacterEffect cannot race against an empty registry.
+                await Promise.allSettled([
+                    loadPcCharacterLuaEffects((p)=>RemoteAssets.fetchBinary(p)).catch((e)=>{ console.warn('[CharacterLuaFX] indisponível:', e.message); return null; }),
+                    loadPcCustomCapeLua((p)=>RemoteAssets.fetchBinary(p)).catch((e)=>{ console.warn('[CustomCapeLua] indisponível:', e.message); return null; }),
+                ]);
                 console.info(`[GameApp] Lua authority READY ${luaMeta.present}/${luaMeta.total} scripts`);
             } catch (e) {
                 console.warn('[GameApp] Lua authority inventory unavailable:', e?.message || e);
@@ -669,6 +680,62 @@ export class GameApp {
                 console.info(`[MU] D2:12 period item code=${itemCode} slot=${slot} expire=${expireTime} applied=${applied?1:0}`);
                 if(applied) this.inventory?.emit?.('change',{type:'period-expire',slot,expireTime});
             },
+            // PC Main 5.2 quest-history/state owner. Keep this separate from
+            // the old local demo QuestSystem: these bytes are authoritative GS state.
+            onQuestHistory: ({ count, quests, slots }) => {
+                this._pcQuestHistory = Object.freeze({
+                    count: count & 0xff,
+                    quests: Object.freeze(quests.slice()),
+                    slots: Object.freeze(slots.slice()),
+                    at: Date.now(),
+                });
+                if (!this._pcQuestStates) this._pcQuestStates = new Map();
+                console.info(`[MU] 0xA0 quest history real: count=${count}`);
+            },
+            onQuestState: ({ questIndex, state }) => {
+                if (!this._pcQuestStates) this._pcQuestStates = new Map();
+                this._pcQuestStates.set(questIndex & 0xff, state & 0xff);
+                console.info(`[MU] 0xA1 quest state real: quest=${questIndex} state=${state}`);
+                // PC opens INTERFACE_NPCQUEST here; UI parity remains a separate owner.
+            },
+            onQuestResult: ({ questIndex, result, state }) => {
+                if (!this._pcQuestStates) this._pcQuestStates = new Map();
+                // WSclient.cpp applies setQuestList only when Result==0.
+                if ((result & 0xff) === 0) this._pcQuestStates.set(questIndex & 0xff, state & 0xff);
+                this._pcQuestLastResult = Object.freeze({ questIndex:questIndex&0xff, result:result&0xff, state:state&0xff, at:Date.now() });
+                console.info(`[MU] 0xA2 quest result real: quest=${questIndex} result=${result} state=${state}`);
+            },
+            onQuestPrize: ({ key, reparation, number }) => {
+                this._pcQuestLastPrize = Object.freeze({ key, reparation, number, at:Date.now() });
+                // WSclient.cpp cases 200 and 202 add LevelUpPoint only for Hero.
+                // Class-change/effect cases 201/203/204 stay retained until their
+                // exact class-conversion + visual owners are ported.
+                if ((reparation === 200 || reparation === 202) && Number(this._heroServerKey) === Number(key) && this.playerChar) {
+                    this.playerChar.levelUpPoint = Number(this.playerChar.levelUpPoint || 0) + (number & 0xff);
+                    this._ui?.characterWin?.refresh?.();
+                }
+                console.info(`[MU] 0xA3 quest prize real: key=${key} reparation=${reparation} number=${number}`);
+            },
+            onQuestMonKillInfo: ({ result, questIndex, killCounts }) => {
+                this._pcQuestKillInfo = Object.freeze({
+                    result:result&0xff, questIndex:questIndex&0xff,
+                    killCounts:Object.freeze(killCounts.slice()), at:Date.now(),
+                });
+                console.info(`[MU] 0xA4:00 quest kill-info real: quest=${questIndex} result=${result}`);
+            },
+            onFriendList: ({ memoCount, maxMemo, count, friends }) => {
+                // PC ReceiveFriendList (0xC0): authoritative FriendServer snapshot.
+                // Keep it separate from the old local Saves-based FriendsList until
+                // C1-C4 mutations/window ownership are ported exactly.
+                this._pcFriendList = Object.freeze({
+                    memoCount: memoCount & 0xff,
+                    maxMemo: maxMemo & 0xff,
+                    count: count & 0xff,
+                    friends: Object.freeze(friends.map((f) => Object.freeze({ name:f.name, server:f.server&0xff }))),
+                    at: Date.now(),
+                });
+                console.info(`[MU] 0xC0 friend list real: count=${count} memo=${memoCount}/${maxMemo}`);
+            },
             onNotice: ({ text } = {}) => {
                 // ReceiveNotice (0x0D, WSclient.cpp:1614): texto real do servidor
                 // (censo wire: 'Welcome MagoX !', 'Account level: Free').
@@ -681,6 +748,19 @@ export class GameApp {
                 // sem geometria inventada aqui).
                 this._weatherFlag = w;
             },
+            onWTTimeLeft: (msg) => {
+                this._pcWTTimeLeft = Object.freeze({ type:msg.type&0xff, time:msg.time&0xffff, at:Date.now() });
+                console.info(`[MU] F3:22 WT time-left real: type=${msg.type} time=${msg.time}`);
+            },
+            onSoccerScore: (msg) => {
+                this._pcSoccerScore = Object.freeze({ name1:msg.name1, score1:msg.score1&0xff, name2:msg.name2, score2:msg.score2&0xff, at:Date.now() });
+                console.info(`[MU] F3:23 soccer score real: ${msg.team1} ${msg.score1} x ${msg.score2} ${msg.team2}`);
+            },
+            onWTMatchResult: (msg) => {
+                this._pcWTMatchResult = Object.freeze({ type:msg.type&0xff, team1:msg.team1, score1:msg.score1&0xffff, team2:msg.team2, score2:msg.score2&0xffff, at:Date.now() });
+                console.info(`[MU] F3:24 WT match result real: type=${msg.type} ${msg.team1} ${msg.score1} x ${msg.score2} ${msg.team2}`);
+            },
+            onDisplayEffect: (msg) => this._handleServerDisplayEffect(msg),
             onCharacterCard: ({ characterCard, enable }) => {
                 // ReceiveCharacterCard_New: classes habilitadas p/ criação
                 this.chatInfo(`CharacterCard real: DL=${enable.darkLord}, SUM=${enable.summoner}, MG=${enable.dark}.`);
@@ -2328,6 +2408,8 @@ export class GameApp {
         // function flushes those buffers after the hero/managers exist.
         const _tWorld0 = performance.now();
         let _tMapMs = -1;
+        let _objectsReadyBeforeReveal = false;
+        let _gpuWarmup = { ms: 0, mode: 'none' };
         const _worldPhases = {};
         let _tPhase = _tWorld0;
         const _markWorldPhase = (name) => {
@@ -2355,7 +2437,13 @@ export class GameApp {
         if (serverMap == null) throw new Error('F3:03 não informou o mapa autoritativo de entrada; world load cancelado para não renderizar Lorencia por chute');
         const worldDesc = getPcWorldDescriptor(serverMap);
         if (!worldDesc) throw new Error(`server map inválido: ${serverMap}`);
-        this._startWorldPrefetch(serverMap,{allowLoading:true});
+        // MAPS_ENGINE M63: once the authoritative F3:03 destination is known and
+        // LoadingScene owns the screen, do not start a second speculative world
+        // prefetch. Scene.loadRealMap already launches its own non-blocking BMD
+        // warmup (concurrency=4, warmTextures=false) in parallel with terrain.
+        // Starting the char-select/move prefetch here scheduled another object
+        // walk 80ms later and could contend with the authoritative transition.
+        // Earlier char-select/MoveCustom intent prefetches remain intact.
         await this.mapManager.loadMap(worldDesc.serverMap);
         _markWorldPhase('metadata');
         this._reportProgress(85, `${worldDesc.name}: metadados prontos`);
@@ -2501,7 +2589,7 @@ export class GameApp {
 
         // Pet/helper: sistema preparado, porém NÃO invoca Dark Raven fake.
         // O visual só deve nascer de equipamento/viewport autoritativo do servidor.
-        this.pets = new PetSystem(this.scene.scene);
+        this.pets = new PetSystem(this.scene.scene, { terrainHeightAt: (x,z) => this.scene.terrainHeightAt(x,z) });
         // Rider ride-state (junction fenrir): PetSystem aplica as actions
         // PLAYER_FENRIR_* no renderer do herói enquanto montado — setter
         // fail-closed (null = ride-state no-op).
@@ -2816,14 +2904,14 @@ export class GameApp {
         // BMDs reais em background — exatamente os buracos/props tardios vistos
         // fisicamente. Hero/UI/network são montados em paralelo acima; neste
         // ponto fazemos um join final curto do MESMO owner real, sem placeholder.
-        const _objectsReadyBeforeReveal = await this.scene.waitWorldObjectsReady?.(realMapIndex, 1500);
+        _objectsReadyBeforeReveal = !!(await this.scene.waitWorldObjectsReady?.(realMapIndex, 1500));
         _markWorldPhase('objectsFinalJoin');
         console.info(`[PERF] World${realMapIndex} object owner before reveal=${_objectsReadyBeforeReveal ? 'READY' : 'PROGRESSIVE'} (finalJoin<=1500ms)`);
 
         this._reportProgress(98, 'Preparando shaders do mundo...');
-        const warm = await this.scene.warmupCurrentScene?.() || { ms: 0, mode: 'none' };
+        _gpuWarmup = await this.scene.warmupCurrentScene?.() || { ms: 0, mode: 'none' };
         _markWorldPhase('gpuWarmup');
-        console.info(`[PERF] world GPU warmup: ${Math.round(warm.ms || 0)}ms mode=${warm.mode || 'none'}`);
+        console.info(`[PERF] world GPU warmup: ${Math.round(_gpuWarmup.ms || 0)}ms mode=${_gpuWarmup.mode || 'none'}`);
 
         // R63: remove the R62 three-frame prime. Physical R62 evidence showed
         // it increased entry time without fixing the 799-call steady-state cost.
@@ -2839,6 +2927,20 @@ export class GameApp {
         console.info(`[PERF] world-entry: loadRealMap(World${realMapIndex})=${Math.round(_tMapMs)}ms | _buildWorld total=${Math.round(performance.now() - _tWorld0)}ms`);
         console.info('[PERF] world-entry phases(ms): ' + Object.entries(_worldPhases)
             .map(([k, v]) => `${k}=${Math.round(v)}`).join(' | '));
+        // MAPS_ENGINE M74: retain the outer transition profile as structured data.
+        // M69 owns Scene.loadRealMap phases; this snapshot covers the surrounding
+        // GameApp entry (hero/UI/final object join/GPU warmup/scene switch) so
+        // physical World1/World11 captures can be compared without scraping logs.
+        const _entryProfile = Object.freeze({
+            version: 'M74', world: realMapIndex|0, serverMap: serverMap|0,
+            totalMs: performance.now() - _tWorld0, loadRealMapMs: _tMapMs,
+            objectsReadyBeforeReveal: _objectsReadyBeforeReveal,
+            gpuWarmup: Object.freeze({ ms: Number(_gpuWarmup?.ms)||0, mode: String(_gpuWarmup?.mode||'none') }),
+            phases: Object.freeze({ ..._worldPhases }),
+            sceneMapEntry: this.scene?.scene?.userData?.muMapEntryProfile || null,
+        });
+        if (this.scene?.scene?.userData) this.scene.scene.userData.muWorldEntryProfile = _entryProfile;
+        globalThis.__MUWEB_WORLD_ENTRY_PROFILE__ = _entryProfile;
     }
 
     _layoutCharacterInventoryWindows() {
@@ -3362,6 +3464,106 @@ export class GameApp {
         return this._ctm;
     }
 
+    _pickPcOperateFromPointer(clientX, clientY, canvas) {
+        const ops=this.scene?.worldObjectLayer?.root?.userData?.pcOperatePlacements;
+        const camera=this.scene?.camera?.threeCamera;
+        if (!Array.isArray(ops) || !ops.length || !camera || !canvas) return null;
+        const rect=canvas.getBoundingClientRect();
+        const pointer=new THREE.Vector2(
+            ((clientX-rect.left)/Math.max(1,rect.width))*2-1,
+            -((clientY-rect.top)/Math.max(1,rect.height))*2+1,
+        );
+        const raycaster=this._operateRaycaster || (this._operateRaycaster=new THREE.Raycaster());
+        raycaster.setFromCamera(pointer,camera);
+        let best=null,bestDist=Infinity;
+        const localRay=new THREE.Ray(), hit=new THREE.Vector3();
+        for (const op of ops) {
+            const p=op?.position,q=op?.quaternion,b=op?.localBounds;
+            if(!p||!q||!b)continue;
+            const matrix=new THREE.Matrix4().compose(
+                new THREE.Vector3(p.x,p.y,p.z),
+                new THREE.Quaternion(q.x,q.y,q.z,q.w),
+                new THREE.Vector3(op.scale||1,op.scale||1,op.scale||1),
+            );
+            const inv=matrix.clone().invert();
+            localRay.copy(raycaster.ray).applyMatrix4(inv);
+            const box=new THREE.Box3(
+                new THREE.Vector3(b.min.x,b.min.y,b.min.z),
+                new THREE.Vector3(b.max.x,b.max.y,b.max.z),
+            );
+            if(!localRay.intersectBox(box,hit))continue;
+            hit.applyMatrix4(matrix);
+            const d=raycaster.ray.origin.distanceTo(hit);
+            if(d<bestDist){bestDist=d;best=op;}
+        }
+        return best;
+    }
+
+    _startPcOperate(op) {
+        if(!op||!this.playerChar)return false;
+        const wx=(op.targetX+0.5)*100-12800, wz=12800-(op.targetY+0.5)*100;
+        const wy=this.scene?.terrainHeightAt?.(wx,wz) ?? this.playerChar.position.y;
+        this.playerChar.targetPos=new THREE.Vector3(wx,wy,wz);
+        this._pendingPcOperate={op,startedAt:performance.now(),sent:false};
+        console.info(`[OPERATE FIX92] World1 Object${op.objectNumber} ${op.kind} -> tile(${op.targetX},${op.targetY})`);
+        return true;
+    }
+
+    _updatePcOperateIntent() {
+        const pending=this._pendingPcOperate, char=this.playerChar;
+        if(!pending||!char||pending.sent)return;
+        const op=pending.op;
+        const tile=this._heroServerTile || {
+            x:Math.floor((char.position.x+12800)/100),
+            y:Math.floor((12800-char.position.z)/100),
+        };
+        if(Math.max(Math.abs(tile.x-op.targetX),Math.abs(tile.y-op.targetY))>1)return;
+        // Main 5.2 MOVEMENT_OPERATE: sitting is rejected outside SafeZone while
+        // stock helper ITEM_HELPER+2/+3/+4/+37 is equipped.  The Web equipment
+        // owner stores the item extType (13*512+index), so compare the exact helper
+        // index rather than guessing from the rendered pet species. Pose is not gated.
+        if (op.kind!=='pose') {
+            const safeZone=Boolean(this.scene?.terrainWallAt?.(char.position.x,char.position.z)&0x0001);
+            const eq=this.scene?.mainObject?.userData?.muMovementContext?.equipment || null;
+            const helperExt=Number(eq?.helper?.extType ?? eq?.customHelper?.itemType ?? eq?.darkSpirit?.itemType);
+            const helperIndex=Number.isInteger(helperExt)?((helperExt%512)+512)%512:-1;
+            if(!safeZone && [2,3,4,37].includes(helperIndex)){
+                char.targetPos=null; this._pendingPcOperate=null;
+                console.info(`[OPERATE FIX92] sit bloqueado pelo helper PC index=${helperIndex} fora da SafeZone`);
+                return;
+            }
+        }
+        pending.sent=true; char.targetPos=null;
+        let pcDeg;
+        if(op.kind==='pose'||op.kind==='sit-facing') pcDeg=Number(op.targetAngle)||0;
+        else pcDeg=THREE.MathUtils.radToDeg(Number(char.rotation?.y)||0);
+        const dir=((Math.floor((pcDeg+22.5)/45)+1)%8+8)%8;
+        const action=op.kind==='pose'?129:128; // OptionType: AT_SIT1=128, AT_POSE1=129.
+        // PC MOVEMENT_OPERATE calls SetAction locally before SendRequestAction.
+        // Keep that immediate presentation while the 0x18 packet remains authoritative.
+        const female=isFemaleClass(this.playerChar?.visualClassId ?? this.playerChar?.classId ?? 0);
+        const localAction=op.kind==='pose'
+            ? (female?PLAYER_ACTIONS.POSE_FEMALE1:PLAYER_ACTIONS.POSE1)
+            : (female?PLAYER_ACTIONS.SIT_FEMALE1:PLAYER_ACTIONS.SIT1);
+        const localRenderer=this.scene?._playerRenderer || this.playerChar?.renderer;
+        const operateClip=localRenderer?.playAction?.(`action_${localAction}`,0.04);
+        if(operateClip) this.playerChar._pcOperateAction=localAction;
+        const send=async()=>{
+            try{
+                // MOVEMENT_OPERATE source sends a one-node move to TargetX/Y
+                // immediately before SendRequestAction, even after path arrival.
+                await this.muProtocol?.requestPcFacingMove?.(op.targetX,op.targetY,dir);
+                await this.muProtocol?.requestAction?.(action,dir);
+                // MOVEMENT_OPERATE closes with PlayBuffer(SOUND_DROP_ITEM01,&Hero->Object).
+                // Main 5.2 maps it to Data/Sound/pDropItem.wav; MUSounds owns that exact asset.
+                MUSounds.play('ui.drop');
+                console.info(`[OPERATE FIX92] 0x18 action=${action} dir=${dir} enviado`);
+            }catch(e){console.warn('[OPERATE FIX92] envio fail-closed:',e?.message||e);}
+            finally{this._pendingPcOperate=null;}
+        };
+        void send();
+    }
+
     _bindWorldInput() {
         // R79: um único owner para o mouse do mundo. A versão anterior tinha
         // dois listeners independentes: ClickToMove consumia mousedown e depois
@@ -3416,6 +3618,16 @@ export class GameApp {
                         return;
                     }
                     if (actor.isAttackable?.()) this._playerAttack(actor);
+                    return;
+                }
+
+                // Main 5.2 selection priority reaches SelectOperate only after
+                // item/character/NPC selection. Use the exact CreateObject OBB
+                // registry; PoseBox remains source-hidden and is still pickable.
+                const operate=this._pickPcOperateFromPointer(e.clientX,e.clientY,canvas);
+                if(operate){
+                    e.preventDefault();
+                    this._startPcOperate(operate);
                     return;
                 }
 
@@ -3828,6 +4040,67 @@ export class GameApp {
         }
     }
 
+    _handleServerDisplayEffect({ key, type }) {
+        const actor = this._resolveServerActor((Number(key) || 0) & 0x7fff);
+        if (!actor || (actor.kind !== 'hero' && actor.kind !== 'player')) return false;
+        const t = Number(type) & 0xff;
+        // Main 5.2 ReceiveDisplayEffectViewport type 0x02 has an intentionally
+        // empty MP-up branch. Consuming it is the complete visual contract.
+        if (t === 0x02) return true;
+        // Type 0x10 (ReceiveDisplayEffectViewport): PC distinguishes master
+        // by CharacterAttribute->Level>=401 AND third-class bit (0x10) on the
+        // displayed player's class. It also plays SOUND_LEVEL_UP.
+        if (t === 0x10 && actor.root && this.scene?.scene) {
+            const rawClass = Number(actor.classByte ?? this.playerChar?.classByte ?? 0) & 0xff;
+            const masterLevel = Number(this.playerChar?.level || 0) >= 401 && (rawClass & 0x10) !== 0;
+            const fx = playLevelUp(actor.root, this.scene.scene, this.scene.camera?.threeCamera || null, {
+                effectManager: this.effects, sound: Sound, masterLevel, heroLight: [1,1,1]
+            });
+            if (fx) {
+                this._activeLevelFx = this._activeLevelFx || [];
+                this._activeLevelFx.push(fx);
+            }
+            return Boolean(fx);
+        }
+        // Type 0x11: exact PC MODEL_SHIELD_CRASH owner. Chaos Castle suppresses
+        // both model effect and sound in the supplied Main 5.2 branch.
+        if (t === 0x11) {
+            const wa = pcWorldActiveFromAssetWorld(this.scene?.mapIndex);
+            if (pcInChaosCastle(wa)) return true;
+            if (!actor.root || !this.scene?.scene) return false;
+            const fx = playDisplayShieldCrash(actor.root, this.scene.scene);
+            if (fx) {
+                this._activeLevelFx = this._activeLevelFx || [];
+                this._activeLevelFx.push(fx);
+            }
+            // ZzzOpenData.cpp: SOUND_SHIELDCLASH = Data\Sound\shieldclash.wav.
+            try {
+                if (Sound?.buffers?.has?.('sfx-shieldclash-pc')) Sound.play?.('sfx-shieldclash-pc');
+                else if (typeof Sound?.loadWav === 'function') {
+                    Sound.loadWav('sfx-shieldclash-pc', 'shieldclash.wav')
+                        .then((buf) => { if (buf) Sound.play?.('sfx-shieldclash-pc'); })
+                        .catch(() => {});
+                }
+            } catch { /* audio degrada sem substituir asset */ }
+            return Boolean(fx);
+        }
+        // 0x01/0x03: exact PC BITMAP_MAGIC+1 subtype 5 owner. MoveEffect
+        // runs CreateHealing once per authored 25-Hz tick; each call emits
+        // 3 BITMAP_JOINT_HEALING subtype-11 tails with the ZzzEffectJoint
+        // constructor/motion contract. 0x01 remains build-gated by the PC's
+        // ENABLE_POTION_EFFECT; the Web lane enables the same visual owner.
+        if (t === 0x01 || t === 0x03) {
+            if (!actor.root || !this.scene?.scene) return false;
+            const fx = playDisplayPotionEffect(actor.root, this.scene.scene);
+            if (fx) {
+                this._activeLevelFx = this._activeLevelFx || [];
+                this._activeLevelFx.push(fx);
+            }
+            return Boolean(fx);
+        }
+        return false;
+    }
+
     /**
      * Resolve key do GameServer -> ator visual real já existente no viewport.
      * Retorna apenas actors autoritativos; nunca cria placeholder.
@@ -3842,6 +4115,7 @@ export class GameApp {
                 renderer: this.scene?._playerRenderer || null,
                 root: this.scene?.mainObject || null,
                 classId: this.playerChar.classId,
+                classByte: this.playerChar.classByte,
                 weaponRightSpec: this.scene?._playerWeaponRightSpec || null,
                 fenrir: this.scene?._playerFenrir || null,
                 buffContainer: this.playerChar.buffContainer || null,
@@ -3856,6 +4130,7 @@ export class GameApp {
                 renderer: rp.renderer || null,
                 root: rp.outer || null,
                 classId: rp.classId,
+                classByte: rp.classByte,
                 weaponRightSpec: rp.weaponRightSpec || null,
                 fenrir: rp.equipment?.fenrir || null,
                 buffContainer: rp.buffContainer || rp.outer?.userData?.buffContainer || null,
@@ -4102,6 +4377,11 @@ export class GameApp {
             : (wireType === AT_SKILL.DEFENSE || inMasterFamily(wireType, AT_SKILL.DEF_POWER_UP)) ? 2
             : (wireType === AT_SKILL.ATTACK || inMasterFamily(wireType, AT_SKILL.ATT_POWER_UP)) ? 3 : 0;
         if (elfSupportSubtype && this.skillFx.createElfSupportGroundEffect) {
+            // Main 5.2 WSclient.cpp: Heal/Attack/Defense (+0..+4 master families)
+            // emit SOUND_SKILL_DEFENSE iff sc->MonsterIndex != 77. Sound ownership
+            // is independent from Defense's success-gated visual child.
+            const sourceMonsterIndex = source.kind === 'monster' ? source.monster?.typeId : -1;
+            this.skillFx.playPcElfSupportReceiveSound?.(sourceMonsterIndex);
             const casterCloaked = source?.buffContainer?.has?.('srv_18') === true; // eBuff_Cloaking
             if (!casterCloaked && (elfSupportSubtype !== 2 || success)) {
                 this.skillFx.createElfSupportGroundEffect(to, target?.rotationY ?? 0, elfSupportSubtype, {
@@ -5190,6 +5470,7 @@ export class GameApp {
             this._updatePendingPcMovementSkill?.();
             if (this.scene.cameraMode === 'game') {
                 networkOwned=this._updateAuthoritativeMovement(dt);
+                this._updatePcOperateIntent();
                 if(!networkOwned)Movement.integrate(p, this.scene.camera.threeCamera, dt);
             }
             // Character.update owns only offline click-to-move integration. On a

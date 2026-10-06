@@ -4,7 +4,7 @@
 // _struct.h:301-327, stride 80, 600 registros + DWORD checksum).
 import { readFileSync, writeFileSync } from 'node:fs';
 
-const SRC = 'D:/clientepromax/Novo Pasta/MuPromax 1.0.2/Data/Local/Por/skill_por.bmd';
+const SRC = 'C:/clientepromax/Nova pasta/MuPromax 1.0.1/Data/Local/Por/skill_por.bmd';
 const OUT = new URL('../skills/SkillAttributeData.js', import.meta.url);
 const BUX = [0xFC, 0xCF, 0xAB];
 const RECORD = 80, COUNT = 600;

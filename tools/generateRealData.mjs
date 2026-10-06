@@ -1,6 +1,6 @@
 /**
  * generateRealData.mjs
- * Extrai dados REAIS do cliente MuPromax 1.0.2 (MU Online Season 6 custom)
+ * Extrai dados REAIS do cliente MuPromax 1.0.1 OFICIAL (MU Online Season 6 custom)
  * e materializa módulos ES em web-port/data/generated/.
  *
  * Fontes (DATA_ROOT):
@@ -17,8 +17,7 @@ import { fileURLToPath } from 'url';
 const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const OUT_DIR = path.join(ROOT, 'data', 'generated');
 
-const DATA_ROOT = path.join(
-  'C:/Users/jeu/.dsh-multiapi/attachments/v1/files/82/823e313de7b1f4d32301dc60182782d837f0252ac03d003af8074b2b8dee2009/extracted-client-full/MuPromax 1.0.2/Data');
+const DATA_ROOT = path.join('C:/clientepromax/Nova pasta/MuPromax 1.0.1/Data');
 
 const XOR3_KEY = [0xfc, 0xcf, 0xab]; // chave clássica MU p/ BMD de Local/
 
@@ -114,7 +113,7 @@ function writeModule(file, constName, data, header) {
 }
 
 const HEADER = (src) => `// GERADO AUTOMATICAMENTE por tools/generateRealData.mjs — NÃO EDITAR
-// Fonte REAL do cliente MuPromax 1.0.2: ${src}`;
+// Fonte REAL do cliente MuPromax 1.0.1 OFICIAL: ${src}`;
 
 fs.mkdirSync(OUT_DIR, { recursive: true });
 

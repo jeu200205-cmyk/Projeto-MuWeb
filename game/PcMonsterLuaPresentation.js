@@ -42,7 +42,7 @@ export async function attachPcMonsterLuaPresentation(renderer,monsterClass){
     }
     for(const row of particleRows){
       const chance=row.rule.randTime===100?true:(Math.floor(Math.random()*100)<=row.rule.randTime);
-      for(const p of row.particle.particles||[]) if(!chance) p.sprite.visible=false;
+      row.particle.setEnabled?.(chance);
     }
   };
   return {owners:Object.freeze(owners),unresolved:Object.freeze(unresolved),update,dispose(){for(const x of owners)x.owner?.dispose?.();}};

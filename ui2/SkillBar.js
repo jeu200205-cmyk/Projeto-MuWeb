@@ -3,6 +3,7 @@
 // disabled (i < 0); only Hero->CurrentSkill and the authored list are visible.
 import { loadSkillIconSheets, drawSkillIcon } from './SkillIcons.js';
 import { RemoteAssets } from '../data/RemoteAssets.js';
+import { AT_SKILL } from '../data/SkillNames.js';
 
 const PC_W=640, PC_H=480, WEB_SCALE=1.25;
 const ICON_W=20, ICON_H=28, LIST_COLUMNS=10, LIST_VISIBLE=20;
@@ -25,6 +26,7 @@ export class SkillBar {
     this.onUse=opts.onUse||(()=>{});
     this.onSelect=opts.onSelect||(()=>{});
     this.getMp=opts.getMp||(()=>Infinity);
+    this.checkAttack=opts.checkAttack||(()=>true);
     this._destroyed=false;
     this._autoReveal=opts.autoReveal!==false;
     this._parent=opts.parent||document.body;
@@ -46,6 +48,9 @@ export class SkillBar {
     this.currentIcon.width=ICON_W;this.currentIcon.height=ICON_H;
     this.currentCtx=this.currentIcon.getContext('2d');
     this.currentCell.appendChild(this.currentIcon);
+    this.currentDelay=element('div','position:absolute;left:0;bottom:0;width:20px;height:0;background:rgba(255,128,128,0.5);pointer-events:none;display:none;');
+    this.currentDelay.dataset.muPcSkillDelay='current';
+    this.currentCell.appendChild(this.currentDelay);
     this.currentCell.addEventListener('click',(event)=>{event.preventDefault();event.stopPropagation();if(this._ready&&this._hasSkills())this._setListOpen(!this._listOpen);});
     this.pcLayer.appendChild(this.currentCell);
 
@@ -63,10 +68,12 @@ export class SkillBar {
       const selected=element('div','position:absolute;left:4px;top:4px;width:20px;height:24px;display:none;pointer-events:none;background-repeat:no-repeat;');
       const icon=element('canvas',`position:absolute;left:6px;top:6px;width:${ICON_W}px;height:${ICON_H}px;pointer-events:none;`);
       icon.width=ICON_W;icon.height=ICON_H;
-      cell.append(selected,icon);
+      const delay=element('div','position:absolute;left:6px;bottom:1.5px;width:20px;height:0;background:rgba(255,128,128,0.5);pointer-events:none;display:none;');
+      delay.dataset.muPcSkillDelay=String(i);
+      cell.append(selected,icon,delay);
       cell.addEventListener('click',(event)=>{event.preventDefault();event.stopPropagation();if(this.slots[i])this.select(i);});
       this.listRoot.appendChild(cell);
-      this.slotEls.push({cell,selected,icon,iconCtx:icon.getContext('2d')});
+      this.slotEls.push({cell,selected,icon,delay,iconCtx:icon.getContext('2d')});
     }
 
     this._assetsReady=Promise.all([imageAsset(ASSETS.list),imageAsset(ASSETS.selected)]).then(([list,selected])=>{
@@ -89,7 +96,7 @@ export class SkillBar {
 
   _hasSkills(){return this.slots.some(Boolean);}
   _setListOpen(open){this._listOpen=Boolean(open&&this._hasSkills());this.listRoot.style.display=this._listOpen?'block':'none';}
-  clear(){this.slots.fill(null);this.cooldowns.fill(0);this.selected=-1;this._setListOpen(false);this._renderAll();}
+  clear(){this.slots.fill(null);this.cooldowns.fill(0);this.selected=-1;this._setListOpen(false);this._renderAll();this._renderDelays(performance.now());}
   assign(i,skill){
     if(!Number.isInteger(i)||i<0||i>=LIST_VISIBLE)return;
     this.slots[i]=skill||null;
@@ -101,11 +108,34 @@ export class SkillBar {
   _renderSlot(i){const slot=this.slotEls[i];if(!slot)return;this._draw(slot.iconCtx,this.slots[i]);slot.cell.style.display=this.slots[i]?'block':'none';}
   _renderCurrent(){this._draw(this.currentCtx,this.slots[this.selected]||null);this.currentCell.style.display=this._hasSkills()?'block':'none';}
   _renderSelection(){this.slotEls.forEach((slot,i)=>{slot.selected.style.display=(this.slots[i]&&i===this.selected)?'block':'none';});}
-  _renderAll(){for(let i=0;i<LIST_VISIBLE;i++)this._renderSlot(i);this._renderCurrent();this._renderSelection();}
+  _renderAll(){for(let i=0;i<LIST_VISIBLE;i++)this._renderSlot(i);this._renderCurrent();this._renderSelection();this._renderDelays(performance.now());}
   select(i){if(!Number.isInteger(i)||i<0||i>=LIST_VISIBLE||!this.slots[i])return false;this.selected=i;this._renderCurrent();this._renderSelection();this._setListOpen(false);this.onSelect(this.slots[i],i);return true;}
   // Gameplay may explicitly invoke use(); list clicks only select, as in PC.
-  use(i=this.selected,context=null){const skill=this.slots[i];if(!skill)return false;const now=performance.now();if(now<this.cooldowns[i])return false;if(skill.mpCost&&this.getMp()<skill.mpCost)return false;const accepted=this.onUse(skill,i,context);if(accepted===false)return false;this.cooldowns[i]=now+(skill.cooldown||0);return true;}
-  update(){/* exact RenderSkillDelay owner remains fail-closed; no wedge placeholder */}
+  use(i=this.selected,context=null){const skill=this.slots[i];if(!skill)return false;const now=performance.now();if(now<this.cooldowns[i])return false;if(skill.mpCost&&this.getMp()<skill.mpCost)return false;const accepted=this.onUse(skill,i,context);if(accepted===false)return false;this.cooldowns[i]=now+(skill.cooldown||0);this._renderDelays(now);return true;}
+  _delayFraction(i,now){
+    const skill=this.slots[i];if(!skill)return 0;
+    const type=Number(skill.skillType);
+    // PC NewUIMainFrameWindow.cpp skips these two permanent-buff skills.
+    if(type===AT_SKILL.INFINITY_ARROW||type===AT_SKILL.SWELL_OF_MAGICPOWER)return 0;
+    // Fenrir Plasma Storm delay is drawn only while CheckAttack() accepts it.
+    if(type===AT_SKILL.PLASMA_STORM_FENRIR&&!this.checkAttack())return 0;
+    const max=Math.max(0,Number(skill.cooldown)||0);if(max<=0)return 0;
+    const remaining=Math.max(0,(Number(this.cooldowns[i])||0)-now);
+    return Math.min(1,remaining/max);
+  }
+  _applyDelay(el,fraction,height){
+    if(!el)return;const h=Math.max(0,height*fraction);
+    el.style.height=`${h}px`;el.style.display=h>0?'block':'none';
+  }
+  _renderDelays(now=performance.now()){
+    for(let i=0;i<LIST_VISIBLE;i++)this._applyDelay(this.slotEls[i]?.delay,this._delayFraction(i,now),ICON_H);
+    const i=this.selected;this._applyDelay(this.currentDelay,Number.isInteger(i)&&i>=0?this._delayFraction(i,now):0,ICON_H);
+  }
+  update(){
+    // Exact Main 5.2 RenderSkillDelay: translucent (1,.5,.5,.5) rectangle grows
+    // from the icon bottom with SkillDelay/SkillAttribute.Delay. No radial wedge.
+    this._renderDelays(performance.now());
+  }
   ready(){return Promise.all([this._assetsReady,this._sheetsReady]).then(([ownerReady,sheetsReady])=>Boolean(ownerReady&&sheetsReady&&this._ready));}
   reveal(){if(this._ready&&!this._destroyed)this.root.style.visibility='visible';}
   hide(){this.root.style.visibility='hidden';this._setListOpen(false);}

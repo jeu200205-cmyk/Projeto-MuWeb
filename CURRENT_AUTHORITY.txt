@@ -1,0 +1,8 @@
+MUWEB central authority: MUWEB_R90_FIX99_EFFECT_RUNTIME_MAP_POOL_2026-10-06_FULL.zip
+Parent: MUWEB_R90_FIX98_EQUIPMENT_RAW_BMD_REATTACH_2026-10-05_FULL.zip
+FIX99: ports ItemEffects.lua LoadEffect to the exact ground-item owner (EffectManager.cpp/MoveItems), preserving 24-tick shiny cadence and 6-tick thunder cadence; thunder keeps 500 energy + 500 glow logical points per authored burst in retained GPU buffers.
+FIX99: replaces per-particle Sprite/SpriteMaterial allocation/disposal churn with retained per-owner pools in Lorencia and PcMapParticles (Icarus/Devil Square/Tarkan families) without reducing authored particle count, lifetime, texture, blend or spawn gates.
+FIX99: preserves FIX98 raw/adapted BMD reattach contract and guards CharacterEffectItens body/weapon/wing/helper coverage plus boot-only CharacterSetEffect ownership.
+FIX99: generic CreateEffect/CreateJoint native lifecycles, CustomCape shadow, CharacterHelper dynamic RandTime/action/Black/foot/shadow branches and Evil-Spirit custom-light joint lifecycle remain explicit/fail-closed; no fake renderer is introduced.
+Data authority remains C:\clientepromax\Nova pasta\MuPromax 1.0.1\Data ONLY.
+Status: DEVELOPMENT / NOT PHYSICALLY PROMOTED. Static/gate validation is not a 100% runtime claim.

@@ -22,8 +22,10 @@ const { spawn, spawnSync } = require('child_process');
 const ROOT = path.resolve(__dirname, '..');
 const TOOLS = path.join(ROOT, 'tools');
 const DATA_ROOT_FILE = path.join(ROOT, '.muweb-data-root-r90');
-const OFFICIAL_CLIENT_ROOT = process.env.MUWEB_OFFICIAL_CLIENT_ROOT || 'C:\\clientepromax\\Nova pasta\\MuPromax 1.0.1';
-const OFFICIAL_DATA_ROOT = process.env.MUWEB_OFFICIAL_DATA || path.join(OFFICIAL_CLIENT_ROOT, 'Data');
+const OFFICIAL_CLIENT_ROOT = 'C:\\clientepromax\\Nova pasta\\MuPromax 1.0.1';
+const OFFICIAL_DATA_ROOT = path.join(OFFICIAL_CLIENT_ROOT, 'Data');
+// USER AUTHORITY LOCK: do not allow remembered/env/discovered Data trees to override this client.
+// If this exact path is unavailable, boot must fail instead of binding another MU client.
 const EXPECTED_WORLD1_OBJECT_COUNT = 2987; // retained physical client capture
 const EXPECTED_ITEM_ATTR_STRIDE = 84;       // retained physical client: 8192 records, stride 84
 const EXPECTED_ITEM_ATTR_SIZE = 4 + 8192 * EXPECTED_ITEM_ATTR_STRIDE;
@@ -265,28 +267,8 @@ function siblingRememberedCandidates(){
   return out;
 }
 function userCandidates(){
-  const out=[]; const u=process.env.USERPROFILE||'';
-  // The user's official client Data root is authoritative and MUST be considered first.
-  addCandidate(out,OFFICIAL_DATA_ROOT);
-  addCandidate(out,process.env.MU_CLIENT_DATA);
-  for(const p of rememberedCandidates())addCandidate(out,p);
-  for(const p of siblingRememberedCandidates())addCandidate(out,p);
-  if(u){
-    for(const base of ['Documents','Downloads','Desktop']){
-      addCandidate(out,path.join(u,base,'MuPromax 1.0.1','Data'));
-      addCandidate(out,path.join(u,base,'Nova pasta','MuPromax 1.0.1','Data'));
-      addCandidate(out,path.join(u,base,'MuPromax 1.0.2','Data'));
-      addCandidate(out,path.join(u,base,'Nova pasta','MuPromax 1.0.2','Data'));
-      addCandidate(out,path.join(u,base,'Nova pasta','Data'));
-      addCandidate(out,path.join(u,base,'Data'));
-    }
-  }
-  for(const d of ['C:','E:','D:']){
-    addCandidate(out,`${d}\\clientepromax\\Nova pasta\\MuPromax 1.0.1\\Data`);
-    addCandidate(out,`${d}\\clientepromax\\Novo Pasta\\MuPromax 1.0.2\\Data`);
-    addCandidate(out,`${d}\\MuPromax 1.0.2\\Data`);
-  }
-  return out;
+  // Strict user authority: diagnostics may inspect only the exact official Data.
+  return [path.resolve(OFFICIAL_DATA_ROOT)];
 }
 function shallowCollectData(base,maxDepth=5,maxDirs=12000){
   const out=[]; if(!existsDir(base))return out; const q=[[base,0]];let seen=0;
@@ -299,11 +281,8 @@ function shallowCollectData(base,maxDepth=5,maxDirs=12000){
   }return out;
 }
 function collectAutomaticCandidates(){
-  const out=[];for(const p of userCandidates())addCandidate(out,p);
-  const u=process.env.USERPROFILE||'';
-  const bases=[path.dirname(ROOT),path.dirname(path.dirname(ROOT)),u&&path.join(u,'Documents'),u&&path.join(u,'Downloads'),u&&path.join(u,'Desktop'),'E:\\clientepromax'].filter(Boolean);
-  for(const b of bases)for(const p of shallowCollectData(b))addCandidate(out,p);
-  return out;
+  // Kept for diagnostics/tests, but discovery is intentionally disabled.
+  return [path.resolve(OFFICIAL_DATA_ROOT)];
 }
 function chooseBestDataRoot(){
   const profiles=collectAutomaticCandidates().filter(existsDir).map(inspectDataRoot).sort((a,b)=>b.score-a.score);
@@ -371,36 +350,27 @@ function assertRuntime(){for(const rel of ['node_modules/three/build/three.modul
 
 async function main(){
   console.log('================================================================');
-  console.log(' MUWEB R90 FIX44 - LORENCIA PC PARITY + PORT/CACHE AUTHORITY / OFFICIAL MuPromax 1.0.1 DATA');
+  console.log(' MUWEB R90 - STRICT DATA AUTHORITY / OFFICIAL MuPromax 1.0.1 ONLY');
   console.log('================================================================');
   console.log(`[R90] Source root: ${ROOT}`); assertRuntime();
   console.log(`[R90] Cliente oficial: ${OFFICIAL_CLIENT_ROOT}`);
   console.log(`[R90] Data oficial: ${OFFICIAL_DATA_ROOT}`);
 
-  let selected=null;
-  if(existsDir(OFFICIAL_DATA_ROOT)){
-    const official=inspectDataRoot(OFFICIAL_DATA_ROOT);
-    console.log(`[R90] Data oficial encontrada: ${profileSummary(official)} :: ${official.root}`);
-    if(!official.compatible) throw new Error(`A Data oficial existe, mas faltam assets CORE: ${official.coreMissing.join(', ')}`);
-    selected=official;
+  if(!existsDir(OFFICIAL_DATA_ROOT)){
+    throw new Error(`DATA OFICIAL OBRIGATORIA NAO ENCONTRADA: ${OFFICIAL_DATA_ROOT}. Nenhum outro cliente/Data sera aceito.`);
   }
-  const found=chooseBestDataRoot();
-  if(!selected) selected=found.exact || found.compatible;
-  if(!selected){
-    const picked=pickFolderWindows();
-    if(picked){const p=inspectDataRoot(picked);console.log(`[R90] Pasta escolhida: ${profileSummary(p)} :: ${p.root}`);if(p.compatible)selected=p;}
+  const selected=inspectDataRoot(OFFICIAL_DATA_ROOT);
+  console.log(`[R90] Data oficial encontrada: ${profileSummary(selected)} :: ${selected.root}`);
+  if(!selected.compatible){
+    throw new Error(`DATA OFICIAL INVALIDA/INCOMPLETA: ${OFFICIAL_DATA_ROOT}; CORE faltando: ${selected.coreMissing.join(', ')}`);
   }
-  if(!selected){
-    const best=chooseBestDataRoot().best;
-    const why=best?`Melhor candidato: ${profileSummary(best)} :: ${best.root}; core faltando: ${best.coreMissing.join(', ')}`:'nenhum candidato Data encontrado';
-    throw new Error(`Data compatível não encontrada. ${why}`);
-  }
+  console.log('[R90] DATA AUTHORITY LOCK: discovery/fallback/picker desativados; somente MuPromax 1.0.1 oficial.');
 
   persistDataRoot(selected.root);
   console.log(`[R90] DATA SELECIONADA ${norm(selected.root)===norm(OFFICIAL_DATA_ROOT)?'[OFICIAL MuPromax 1.0.1]':selected.exact?'[R53 EXATA]':'[COMPATÍVEL]'}: ${selected.root}`);
   console.log(`[R90] ${profileSummary(selected)}`);
   const dataAuthority=computeDataAuthorityRevision(selected.root);
-  console.log(`[R90 FIX44] Data authority=${dataAuthority.revision.slice(0,16)}... files=${dataAuthority.files}`);
+  console.log(`[R90] Data authority=${dataAuthority.revision.slice(0,16)}... files=${dataAuthority.files}`);
   if(!selected.exact){
     console.warn(`[R90] AVISO: Data é variante do cliente. World1=${selected.worldCount ?? '?'}; captura fisica tinha ${EXPECTED_WORLD1_OBJECT_COUNT}. Isso NÃO bloqueia o boot.`);
     if(selected.missing.length){

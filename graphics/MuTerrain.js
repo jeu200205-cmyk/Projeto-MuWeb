@@ -84,6 +84,16 @@ export function tileFileCandidates(slot, loginScenes = false, worldIndex = null)
             if (/\.OZJ$/i.test(primary)) exact.push(primary.replace(/\.OZJ$/i, '.jpg'));
             else if (/\.OZT$/i.test(primary)) exact.push(primary.replace(/\.OZT$/i, '.tga'));
         }
+        // FIX84 / current-client physical authority: Icarus terrain data lives
+        // in World11, but this exact MuPromax 1.0.1 Data stores the five Icarus
+        // MAPTILE owners absent from World11 under World10 with identical PC
+        // slot filenames. The live manifest proves World11 has only Grass01
+        // while World10 contains Grass02 + Rock01..04. This is an explicit
+        // current-client ownership mapping, not a visual-similarity fallback.
+        if (world === 11 && [1,7,8,9,10].includes(slot) && primary) {
+            exact.push(`@/World10/${primary}`);
+            if (/\.OZJ$/i.test(primary)) exact.push(`@/World10/${primary.replace(/\.OZJ$/i,'.jpg')}`);
+        }
         if (world === 52 && slot === 2) exact.push('AlphaTileGround01.OZT', 'AlphaTileGround01.OZJ');
         if (world === 40 && slot === 3) exact.push('AlphaTileGround02.OZT', 'AlphaTileGround02.OZJ');
         if (world >= 46 && world <= 51 && slot === 4) exact.push('AlphaTileGround03.OZT', 'AlphaTileGround03.OZJ');

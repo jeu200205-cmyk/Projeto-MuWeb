@@ -1,0 +1,265 @@
+diff -ruN '--exclude=node_modules' '--exclude=R90_FIX97_SOURCE_HASHES.json' /mnt/data/MUWEB_R90_FIX96_HELPER_EFFECTS_DINORANT_BOOT_2026-10-05/CURRENT_AUTHORITY.txt /mnt/data/MUWEB_R90_FIX97_CHARACTER_VISIBILITY_PARSE_OWNER_2026-10-05/CURRENT_AUTHORITY.txt
+--- /mnt/data/MUWEB_R90_FIX96_HELPER_EFFECTS_DINORANT_BOOT_2026-10-05/CURRENT_AUTHORITY.txt	2026-10-06 00:22:46.155465693 +0000
++++ /mnt/data/MUWEB_R90_FIX97_CHARACTER_VISIBILITY_PARSE_OWNER_2026-10-05/CURRENT_AUTHORITY.txt	2026-10-06 00:37:30.094802638 +0000
+@@ -1,24 +1,7 @@
+-MUWEB central authority: MUWEB_R90_FIX96_HELPER_EFFECTS_DINORANT_BOOT_2026-10-05_FULL.zip
+-Parent: MUWEB_R90_FIX95_CHARACTERHELPER_TABLE_RENDER_ROUTING_2026-10-05_FULL.zip
+-Status: DEVELOPMENT / NOT PROMOTED
+-
+-FIX96 closes/advances:
+-- Boot crash from MUSoundManager: RemoteAssets is the exported singleton, not a constructor. MUSoundManager now imports RemoteAssets and uses it directly.
+-- Hidden second boot crash fixed in the same module: MUSoundManager uses THREE.Vector3 and now imports three explicitly.
+-- MUTextureManager had the same stale `new RemoteAssets()` bug and now uses the singleton as well.
+-- CharacterHelper RENDER_HELPER field parser now distinguishes Effect from FootEffect by exact field boundary.
+-- Named Effect/Miniature tables are resolved when authored as references instead of inline tables.
+-- Audit against supplied 2.4 MB CharacterHelper.lua: 204 helper rows, 155 render owners, 1,208 model passes, 4,717 Effect rows, 2,901 Miniature rows and 155 FootEffect owners recognized.
+-- Deterministic helper EffectType 0/1 rows (RandTime=100, non-Black) now use exact bone->bitmap Sprite/Particle owners. Dynamic RandTime, Black semantics and EffectType 2 remain fail-closed by contract.
+-- Raw Type2 custom helpers are now routed through the Dinorant/Pegasus ride family proven by PC CheckHelperType mask 4 instead of remaining hidden or becoming flying pets.
+-- Type3 Fenrir and Type4 Horse routing from FIX95 is preserved for hero, Character Select, F3:72 and remote viewport actors.
+-
+-Not falsely claimed complete:
+-- Type5 Dragon movement/action law remains separate and fail-closed until its native owner is proven.
+-- Helper RenderShadowModel remains open; no fake planar blob was added.
+-- FootEffect and EffectType 2/CreateEffect remain open per native lifecycle, except previously proven stock Fenrir Foot Thunder.
+-- CharacterSetEffect CreateSkill second CreateEffect child and generic CustomCape CreateEffect/CreateJoint/Shadow remain open by family.
+-- Lorencia/Icarus physical visual/FPS validation still requires runtime logs/screenshots.
+-
+-Data authority remains exclusively:
+-C:\clientepromax\Nova pasta\MuPromax 1.0.1\Data
++MUWEB central authority: MUWEB_R90_FIX97_CHARACTER_VISIBILITY_PARSE_OWNER_2026-10-05_FULL.zip
++Parent: MUWEB_R90_FIX96_HELPER_EFFECTS_DINORANT_BOOT_2026-10-05_FULL.zip
++FIX97: restaura visibilidade de personagens. PlayerComposer volta a importar o parseBMD bruto usado pelas cinco peças Class, eliminando ReferenceError que zerava Helm/Armor/Pant/Glove/Boot.
++FIX97: Player.bmd continua em MUAssets.loadBMD; peças de classe continuam BMD bruto + extractPartMeshes contra Player.bones, preservando ownership PC RenderPartObject.
++FIX96 preservado: RemoteAssets/THREE boot fix, CharacterHelper table/effects, Dinorant routing, wings/ATT/DarkSpirit.
++Data authority: C:\clientepromax\Nova pasta\MuPromax 1.0.1\Data ONLY.
++No placeholders/fake meshes.
+diff -ruN '--exclude=node_modules' '--exclude=R90_FIX97_SOURCE_HASHES.json' /mnt/data/MUWEB_R90_FIX96_HELPER_EFFECTS_DINORANT_BOOT_2026-10-05/LIGAR_WEB_R90_FIX96.bat /mnt/data/MUWEB_R90_FIX97_CHARACTER_VISIBILITY_PARSE_OWNER_2026-10-05/LIGAR_WEB_R90_FIX96.bat
+--- /mnt/data/MUWEB_R90_FIX96_HELPER_EFFECTS_DINORANT_BOOT_2026-10-05/LIGAR_WEB_R90_FIX96.bat	2026-10-06 00:22:46.629173134 +0000
++++ /mnt/data/MUWEB_R90_FIX97_CHARACTER_VISIBILITY_PARSE_OWNER_2026-10-05/LIGAR_WEB_R90_FIX96.bat	1970-01-01 00:00:00.000000000 +0000
+@@ -1,11 +0,0 @@
+-@echo off
+-setlocal
+-cd /d "%~dp0"
+-where node >nul 2>nul || (echo [R90 FIX96] Node.js nao encontrado.& pause & exit /b 1)
+-if not exist node_modules\three (
+-  echo Dependencias ausentes. Instalando pelo lockfile...
+-  call npm ci --omit=dev || (echo [R90 FIX96] Falha ao instalar dependencias.& pause & exit /b 1)
+-)
+-node tools\start-r90-fix96-safe.cjs
+-if errorlevel 1 pause
+-endlocal
+diff -ruN '--exclude=node_modules' '--exclude=R90_FIX97_SOURCE_HASHES.json' /mnt/data/MUWEB_R90_FIX96_HELPER_EFFECTS_DINORANT_BOOT_2026-10-05/LIGAR_WEB_R90_FIX97.bat /mnt/data/MUWEB_R90_FIX97_CHARACTER_VISIBILITY_PARSE_OWNER_2026-10-05/LIGAR_WEB_R90_FIX97.bat
+--- /mnt/data/MUWEB_R90_FIX96_HELPER_EFFECTS_DINORANT_BOOT_2026-10-05/LIGAR_WEB_R90_FIX97.bat	1970-01-01 00:00:00.000000000 +0000
++++ /mnt/data/MUWEB_R90_FIX97_CHARACTER_VISIBILITY_PARSE_OWNER_2026-10-05/LIGAR_WEB_R90_FIX97.bat	2026-10-06 00:35:29.025091163 +0000
+@@ -0,0 +1,11 @@
++@echo off
++setlocal
++cd /d "%~dp0"
++where node >nul 2>nul || (echo [R90 FIX97] Node.js nao encontrado.& pause & exit /b 1)
++if not exist node_modules\three (
++  echo Dependencias ausentes. Instalando pelo lockfile...
++  call npm ci --omit=dev || (echo [R90 FIX97] Falha ao instalar dependencias.& pause & exit /b 1)
++)
++node tools\start-r90-fix97-safe.cjs
++if errorlevel 1 pause
++endlocal
+diff -ruN '--exclude=node_modules' '--exclude=R90_FIX97_SOURCE_HASHES.json' /mnt/data/MUWEB_R90_FIX96_HELPER_EFFECTS_DINORANT_BOOT_2026-10-05/MUWEB_R90_FIX97_FROM_FIX96.patch /mnt/data/MUWEB_R90_FIX97_CHARACTER_VISIBILITY_PARSE_OWNER_2026-10-05/MUWEB_R90_FIX97_FROM_FIX96.patch
+--- /mnt/data/MUWEB_R90_FIX96_HELPER_EFFECTS_DINORANT_BOOT_2026-10-05/MUWEB_R90_FIX97_FROM_FIX96.patch	1970-01-01 00:00:00.000000000 +0000
++++ /mnt/data/MUWEB_R90_FIX97_CHARACTER_VISIBILITY_PARSE_OWNER_2026-10-05/MUWEB_R90_FIX97_FROM_FIX96.patch	2026-10-06 00:38:15.245237071 +0000
+@@ -0,0 +1,65 @@
++diff -ruN '--exclude=node_modules' '--exclude=R90_FIX97_SOURCE_HASHES.json' /mnt/data/MUWEB_R90_FIX96_HELPER_EFFECTS_DINORANT_BOOT_2026-10-05/CURRENT_AUTHORITY.txt /mnt/data/MUWEB_R90_FIX97_CHARACTER_VISIBILITY_PARSE_OWNER_2026-10-05/CURRENT_AUTHORITY.txt
++--- /mnt/data/MUWEB_R90_FIX96_HELPER_EFFECTS_DINORANT_BOOT_2026-10-05/CURRENT_AUTHORITY.txt	2026-10-06 00:22:46.155465693 +0000
+++++ /mnt/data/MUWEB_R90_FIX97_CHARACTER_VISIBILITY_PARSE_OWNER_2026-10-05/CURRENT_AUTHORITY.txt	2026-10-06 00:37:30.094802638 +0000
++@@ -1,24 +1,7 @@
++-MUWEB central authority: MUWEB_R90_FIX96_HELPER_EFFECTS_DINORANT_BOOT_2026-10-05_FULL.zip
++-Parent: MUWEB_R90_FIX95_CHARACTERHELPER_TABLE_RENDER_ROUTING_2026-10-05_FULL.zip
++-Status: DEVELOPMENT / NOT PROMOTED
++-
++-FIX96 closes/advances:
++-- Boot crash from MUSoundManager: RemoteAssets is the exported singleton, not a constructor. MUSoundManager now imports RemoteAssets and uses it directly.
++-- Hidden second boot crash fixed in the same module: MUSoundManager uses THREE.Vector3 and now imports three explicitly.
++-- MUTextureManager had the same stale `new RemoteAssets()` bug and now uses the singleton as well.
++-- CharacterHelper RENDER_HELPER field parser now distinguishes Effect from FootEffect by exact field boundary.
++-- Named Effect/Miniature tables are resolved when authored as references instead of inline tables.
++-- Audit against supplied 2.4 MB CharacterHelper.lua: 204 helper rows, 155 render owners, 1,208 model passes, 4,717 Effect rows, 2,901 Miniature rows and 155 FootEffect owners recognized.
++-- Deterministic helper EffectType 0/1 rows (RandTime=100, non-Black) now use exact bone->bitmap Sprite/Particle owners. Dynamic RandTime, Black semantics and EffectType 2 remain fail-closed by contract.
++-- Raw Type2 custom helpers are now routed through the Dinorant/Pegasus ride family proven by PC CheckHelperType mask 4 instead of remaining hidden or becoming flying pets.
++-- Type3 Fenrir and Type4 Horse routing from FIX95 is preserved for hero, Character Select, F3:72 and remote viewport actors.
++-
++-Not falsely claimed complete:
++-- Type5 Dragon movement/action law remains separate and fail-closed until its native owner is proven.
++-- Helper RenderShadowModel remains open; no fake planar blob was added.
++-- FootEffect and EffectType 2/CreateEffect remain open per native lifecycle, except previously proven stock Fenrir Foot Thunder.
++-- CharacterSetEffect CreateSkill second CreateEffect child and generic CustomCape CreateEffect/CreateJoint/Shadow remain open by family.
++-- Lorencia/Icarus physical visual/FPS validation still requires runtime logs/screenshots.
++-
++-Data authority remains exclusively:
++-C:\clientepromax\Nova pasta\MuPromax 1.0.1\Data
+++MUWEB central authority: MUWEB_R90_FIX97_CHARACTER_VISIBILITY_PARSE_OWNER_2026-10-05_FULL.zip
+++Parent: MUWEB_R90_FIX96_HELPER_EFFECTS_DINORANT_BOOT_2026-10-05_FULL.zip
+++FIX97: restaura visibilidade de personagens. PlayerComposer volta a importar o parseBMD bruto usado pelas cinco peças Class, eliminando ReferenceError que zerava Helm/Armor/Pant/Glove/Boot.
+++FIX97: Player.bmd continua em MUAssets.loadBMD; peças de classe continuam BMD bruto + extractPartMeshes contra Player.bones, preservando ownership PC RenderPartObject.
+++FIX96 preservado: RemoteAssets/THREE boot fix, CharacterHelper table/effects, Dinorant routing, wings/ATT/DarkSpirit.
+++Data authority: C:\clientepromax\Nova pasta\MuPromax 1.0.1\Data ONLY.
+++No placeholders/fake meshes.
++diff -ruN '--exclude=node_modules' '--exclude=R90_FIX97_SOURCE_HASHES.json' /mnt/data/MUWEB_R90_FIX96_HELPER_EFFECTS_DINORANT_BOOT_2026-10-05/LIGAR_WEB_R90_FIX96.bat /mnt/data/MUWEB_R90_FIX97_CHARACTER_VISIBILITY_PARSE_OWNER_2026-10-05/LIGAR_WEB_R90_FIX96.bat
++--- /mnt/data/MUWEB_R90_FIX96_HELPER_EFFECTS_DINORANT_BOOT_2026-10-05/LIGAR_WEB_R90_FIX96.bat	2026-10-06 00:22:46.629173134 +0000
+++++ /mnt/data/MUWEB_R90_FIX97_CHARACTER_VISIBILITY_PARSE_OWNER_2026-10-05/LIGAR_WEB_R90_FIX96.bat	1970-01-01 00:00:00.000000000 +0000
++@@ -1,11 +0,0 @@
++-@echo off
++-setlocal
++-cd /d "%~dp0"
++-where node >nul 2>nul || (echo [R90 FIX96] Node.js nao encontrado.& pause & exit /b 1)
++-if not exist node_modules\three (
++-  echo Dependencias ausentes. Instalando pelo lockfile...
++-  call npm ci --omit=dev || (echo [R90 FIX96] Falha ao instalar dependencias.& pause & exit /b 1)
++-)
++-node tools\start-r90-fix96-safe.cjs
++-if errorlevel 1 pause
++-endlocal
++diff -ruN '--exclude=node_modules' '--exclude=R90_FIX97_SOURCE_HASHES.json' /mnt/data/MUWEB_R90_FIX96_HELPER_EFFECTS_DINORANT_BOOT_2026-10-05/LIGAR_WEB_R90_FIX97.bat /mnt/data/MUWEB_R90_FIX97_CHARACTER_VISIBILITY_PARSE_OWNER_2026-10-05/LIGAR_WEB_R90_FIX97.bat
++--- /mnt/data/MUWEB_R90_FIX96_HELPER_EFFECTS_DINORANT_BOOT_2026-10-05/LIGAR_WEB_R90_FIX97.bat	1970-01-01 00:00:00.000000000 +0000
+++++ /mnt/data/MUWEB_R90_FIX97_CHARACTER_VISIBILITY_PARSE_OWNER_2026-10-05/LIGAR_WEB_R90_FIX97.bat	2026-10-06 00:35:29.025091163 +0000
++@@ -0,0 +1,11 @@
+++@echo off
+++setlocal
+++cd /d "%~dp0"
+++where node >nul 2>nul || (echo [R90 FIX97] Node.js nao encontrado.& pause & exit /b 1)
+++if not exist node_modules\three (
+++  echo Dependencias ausentes. Instalando pelo lockfile...
+++  call npm ci --omit=dev || (echo [R90 FIX97] Falha ao instalar dependencias.& pause & exit /b 1)
+++)
+++node tools\start-r90-fix97-safe.cjs
+++if errorlevel 1 pause
+++endlocal
+diff -ruN '--exclude=node_modules' '--exclude=R90_FIX97_SOURCE_HASHES.json' /mnt/data/MUWEB_R90_FIX96_HELPER_EFFECTS_DINORANT_BOOT_2026-10-05/MUWEB_R90_FIX97_PORTABILITY.md /mnt/data/MUWEB_R90_FIX97_CHARACTER_VISIBILITY_PARSE_OWNER_2026-10-05/MUWEB_R90_FIX97_PORTABILITY.md
+--- /mnt/data/MUWEB_R90_FIX96_HELPER_EFFECTS_DINORANT_BOOT_2026-10-05/MUWEB_R90_FIX97_PORTABILITY.md	1970-01-01 00:00:00.000000000 +0000
++++ /mnt/data/MUWEB_R90_FIX97_CHARACTER_VISIBILITY_PARSE_OWNER_2026-10-05/MUWEB_R90_FIX97_PORTABILITY.md	2026-10-06 00:37:47.746314253 +0000
+@@ -0,0 +1,16 @@
++# MUWEB R90 FIX97 — Character visibility / parse owner repair
++
++Parent: FIX96.
++
++## Bug físico fechado
++O log real mostrou `PlayerComposer: peça ausente ... parseBMD is not defined` para Helm/Armor/Pant/Glove/Boot. Isso esvaziava a composição e tornava Character Select/herói invisíveis.
++
++## Correção
++- restaura `parseBMD` como import explícito de `graphics/BmdParser.js`;
++- mantém `Player/Player.bmd` no `MUAssets.loadBMD`;
++- mantém as cinco peças de classe no caminho bruto `fetchBinary -> parseBMD -> extractPartMeshes(...Player.bones)`, necessário para o bind-pose autoral;
++- adiciona gate contra remoção futura desse import;
++- nenhum placeholder/fake mesh.
++
++## Evidência do log
++As cinco famílias falhavam exclusivamente por ReferenceError e o renderer recusava corretamente BMD vazio.
+diff -ruN '--exclude=node_modules' '--exclude=R90_FIX97_SOURCE_HASHES.json' /mnt/data/MUWEB_R90_FIX96_HELPER_EFFECTS_DINORANT_BOOT_2026-10-05/core/GameApp.js /mnt/data/MUWEB_R90_FIX97_CHARACTER_VISIBILITY_PARSE_OWNER_2026-10-05/core/GameApp.js
+--- /mnt/data/MUWEB_R90_FIX96_HELPER_EFFECTS_DINORANT_BOOT_2026-10-05/core/GameApp.js	2026-10-06 00:24:00.048881188 +0000
++++ /mnt/data/MUWEB_R90_FIX97_CHARACTER_VISIBILITY_PARSE_OWNER_2026-10-05/core/GameApp.js	2026-10-06 00:35:28.811577577 +0000
+@@ -120,7 +120,7 @@
+ export const MUWEB_R90_FIX15_REVISION = 'MUWEB_R90_FIX15_BMD_INFLIGHT_MAP_CANCEL_2026-10-03_A';
+ export const MUWEB_R90_FIX46_REVISION = 'MUWEB_R90_FIX46_DARKSPIRIT_MONSTER_LUA_CONTRACTS_2026-10-04_A';
+ export const MUWEB_R90_FIX47_REVISION = 'MUWEB_R90_FIX47_CHARACTER_LUA_MONSTER_PRESENTATION_2026-10-04_A';
+-export const MUWEB_SOURCE_REVISION = 'MUWEB_R90_FIX96_HELPER_EFFECTS_DINORANT_BOOT_2026-10-05';
++export const MUWEB_SOURCE_REVISION = 'MUWEB_R90_FIX97_CHARACTER_VISIBILITY_COMPOSER_CACHE_2026-10-05';
+ export const MUWEB_PREVIOUS_SOURCE_REVISION = 'MUWEB_R78_ITEMVIEW_WORLDENTRY_ANIMATION_CHARSELECT_RECOVERY_2026-09-30_A';
+ export const MUWEB_R77_BASE_REVISION = 'MUWEB_R77_CANONICAL_WORLD_ROUTING_CUSTOMMOVE_PREFETCH_UTF8_2026-09-30_A';
+ 
+diff -ruN '--exclude=node_modules' '--exclude=R90_FIX97_SOURCE_HASHES.json' /mnt/data/MUWEB_R90_FIX96_HELPER_EFFECTS_DINORANT_BOOT_2026-10-05/graphics/CharacterPreview.js /mnt/data/MUWEB_R90_FIX97_CHARACTER_VISIBILITY_PARSE_OWNER_2026-10-05/graphics/CharacterPreview.js
+--- /mnt/data/MUWEB_R90_FIX96_HELPER_EFFECTS_DINORANT_BOOT_2026-10-05/graphics/CharacterPreview.js	2026-10-05 23:54:44.455345137 +0000
++++ /mnt/data/MUWEB_R90_FIX97_CHARACTER_VISIBILITY_PARSE_OWNER_2026-10-05/graphics/CharacterPreview.js	2026-10-06 00:37:30.094737672 +0000
+@@ -64,7 +64,7 @@
+ }
+ 
+ // io do composeCharacter: esqueleto via MUAssets (render-data com bones/actions),
+-// peças via fetchBinary + parseBMD puro (PlayerComposer.js:92 contrato)
++// Player.bmd via MUAssets; peças base via fetchBinary + parseBMD bruto para remap ao esqueleto Player
+ const composerIO = {
+     loadBMD: (p) => MUAssets.loadBMD(p),
+     fetchBinary: (p) => RemoteAssets.fetchBinary(p),
+diff -ruN '--exclude=node_modules' '--exclude=R90_FIX97_SOURCE_HASHES.json' /mnt/data/MUWEB_R90_FIX96_HELPER_EFFECTS_DINORANT_BOOT_2026-10-05/graphics/PlayerComposer.js /mnt/data/MUWEB_R90_FIX97_CHARACTER_VISIBILITY_PARSE_OWNER_2026-10-05/graphics/PlayerComposer.js
+--- /mnt/data/MUWEB_R90_FIX96_HELPER_EFFECTS_DINORANT_BOOT_2026-10-05/graphics/PlayerComposer.js	2026-10-06 00:16:21.548689873 +0000
++++ /mnt/data/MUWEB_R90_FIX97_CHARACTER_VISIBILITY_PARSE_OWNER_2026-10-05/graphics/PlayerComposer.js	2026-10-06 00:37:30.094508002 +0000
+@@ -20,7 +20,7 @@
+ 
+ import * as THREE from 'three';
+ import { RemoteAssets } from '../data/RemoteAssets.js';
+-import { angleQuaternion } from './BmdParser.js';
++import { angleQuaternion, parseBMD } from './BmdParser.js';
+ import { MUAssets } from '../assets/MUAssetLoader.js';
+ import { extractPartMeshes, extractRigidAttachment, buildBindWorldTransforms } from './BmdAdapter.js';
+ import { decodeCharacterEquipment } from '../data/CharacterEquipmentCodec.js';
+@@ -1200,8 +1200,12 @@
+   if (_composedCharacterInflight.has(cacheKey)) return _composedCharacterInflight.get(cacheKey);
+   const job = (async () => {
+   const { loadBMD, fetchBinary } = io;
++  if (typeof loadBMD !== 'function' || typeof fetchBinary !== 'function') throw new Error('composeCharacter: IO BMD incompleto');
+ 
+-  // Esqueleto-mestre + 284 ações (Player.bmd — 0 meshes, ZzzOpenData.cpp:119)
++  // Esqueleto-mestre + 284 ações (Player.bmd — 0 meshes, ZzzOpenData.cpp:119).
++  // O Player pode usar o cache adaptado global. As 5 peças de classe precisam
++  // do BMD bruto porque extractPartMeshes remapeia seus Vertex_t.Node para o
++  // bind-pose de Player.bmd (mesma ownership do RenderPartObject do PC).
+   const player = await loadBMD('Player/Player.bmd');
+   const playerBoneCount = player.bones.length;
+ 
+@@ -1221,6 +1225,7 @@
+       const buf = await fetchBinary(file);
+       if (!buf) return { prefix, file, missing:true };
+       const partModel = parseBMD(buf instanceof Uint8Array ? buf : new Uint8Array(buf));
++      if (!partModel || !Array.isArray(partModel.meshes)) return { prefix, file, missing:true, error:new Error('BMD bruto sem meshes') };
+       const partMeshes = extractPartMeshes(partModel, prefix.toLowerCase(), playerBoneCount, player.bones);
+       return { prefix, file, partMeshes };
+     } catch (e) {
+diff -ruN '--exclude=node_modules' '--exclude=R90_FIX97_SOURCE_HASHES.json' /mnt/data/MUWEB_R90_FIX96_HELPER_EFFECTS_DINORANT_BOOT_2026-10-05/test-r90-fix97-character-visibility-cache.mjs /mnt/data/MUWEB_R90_FIX97_CHARACTER_VISIBILITY_PARSE_OWNER_2026-10-05/test-r90-fix97-character-visibility-cache.mjs
+--- /mnt/data/MUWEB_R90_FIX96_HELPER_EFFECTS_DINORANT_BOOT_2026-10-05/test-r90-fix97-character-visibility-cache.mjs	1970-01-01 00:00:00.000000000 +0000
++++ /mnt/data/MUWEB_R90_FIX97_CHARACTER_VISIBILITY_PARSE_OWNER_2026-10-05/test-r90-fix97-character-visibility-cache.mjs	2026-10-06 00:37:30.094909346 +0000
+@@ -0,0 +1,15 @@
++import fs from 'node:fs';
++import assert from 'node:assert/strict';
++const pc=fs.readFileSync(new URL('./graphics/PlayerComposer.js',import.meta.url),'utf8');
++const preview=fs.readFileSync(new URL('./graphics/CharacterPreview.js',import.meta.url),'utf8');
++const scene=fs.readFileSync(new URL('./graphics/Scene.js',import.meta.url),'utf8');
++assert.match(pc,/import \{ angleQuaternion, parseBMD \} from '\.\/BmdParser\.js';/);
++assert.match(pc,/const \{ loadBMD, fetchBinary \} = io;/);
++assert.match(pc,/await loadBMD\('Player\/Player\.bmd'\)/);
++assert.match(pc,/const buf = await fetchBinary\(file\)/);
++assert.match(pc,/const partModel = parseBMD\(/);
++assert.match(pc,/extractPartMeshes\(partModel, prefix\.toLowerCase\(\), playerBoneCount, player\.bones\)/);
++assert.match(preview,/loadBMD:\s*\(p\)\s*=>\s*MUAssets\.loadBMD\(p\)/);
++assert.match(preview,/fetchBinary:\s*\(p\)\s*=>\s*RemoteAssets\.fetchBinary\(p\)/);
++assert.match(scene,/loadBMD:\s*\(p\)\s*=>\s*MUAssets\.loadBMD\(p\)/);
++console.log('PASS FIX97 character visibility: parseBMD owner restored for 5 raw class parts; Player skeleton remains MUAssets-owned');
+diff -ruN '--exclude=node_modules' '--exclude=R90_FIX97_SOURCE_HASHES.json' /mnt/data/MUWEB_R90_FIX96_HELPER_EFFECTS_DINORANT_BOOT_2026-10-05/tools/start-r90-fix97-safe.cjs /mnt/data/MUWEB_R90_FIX97_CHARACTER_VISIBILITY_PARSE_OWNER_2026-10-05/tools/start-r90-fix97-safe.cjs
+--- /mnt/data/MUWEB_R90_FIX96_HELPER_EFFECTS_DINORANT_BOOT_2026-10-05/tools/start-r90-fix97-safe.cjs	1970-01-01 00:00:00.000000000 +0000
++++ /mnt/data/MUWEB_R90_FIX97_CHARACTER_VISIBILITY_PARSE_OWNER_2026-10-05/tools/start-r90-fix97-safe.cjs	2026-10-06 00:35:29.026337749 +0000
+@@ -0,0 +1,30 @@
++const fs = require('node:fs');
++const path = require('node:path');
++const crypto = require('node:crypto');
++const root = path.resolve(__dirname, '..');
++const MUTABLE_RUNTIME = new Set(['runtime-config.js']);
++function sha256(p){return crypto.createHash('sha256').update(fs.readFileSync(p)).digest('hex');}
++function verifyBuild(){
++  const manifestPath = path.join(root, 'R90_FIX97_SOURCE_HASHES.json');
++  if(!fs.existsSync(manifestPath)) throw new Error('R90_FIX97_SOURCE_HASHES.json ausente');
++  const m = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
++  let n=0;
++  for(const [rel, expected] of Object.entries(m.files || {})){
++    if(MUTABLE_RUNTIME.has(rel)) continue;
++    const p = path.join(root, rel);
++    if(!fs.existsSync(p)) throw new Error(`FIX97 arquivo ausente: ${rel}`);
++    const actual = sha256(p);
++    if(actual !== expected) throw new Error(`FIX97 arquivo modificado/incompleto: ${rel}`);
++    n++;
++  }
++  console.log(`[R90 FIX97] ${m.build}: ${n} arquivos imutaveis verificados.`);
++  return m;
++}
++module.exports={verifyBuild};
++if(require.main===module){
++  try{
++    verifyBuild();
++    if(process.argv.includes('--verify-only')) process.exit(0);
++    require('./start-r90-safe.cjs').main().catch(e=>{console.error('[R90 FIX97] FALHA:', e.message); process.exitCode=1;});
++  }catch(e){console.error('[R90 FIX97] FALHA:', e.message); process.exitCode=1;}
++}

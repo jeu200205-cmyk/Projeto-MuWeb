@@ -114,6 +114,7 @@ export function createPcLorenciaFaunaOwner(gameScene){
   group.userData.update=(dt)=>{
     if(disposed)return;const d=Math.max(0,Number(dt)||0);elapsed+=d;acc+=d;
     let guard=0;while(acc+1e-9>=TICK&&guard++<8){acc-=TICK;tick();}
+    if(acc+1e-9>=TICK){const dropped=Math.floor(acc/TICK);acc-=dropped*TICK;group.userData.muPcDroppedBacklogTicks=(group.userData.muPcDroppedBacklogTicks||0)+dropped;}
     for(const b of birds)if(b.live)b.renderer?.update?.(d,elapsed);
     group.userData.muPcLiveBirds=birds.reduce((n,b)=>n+(b.live?1:0),0);
   };

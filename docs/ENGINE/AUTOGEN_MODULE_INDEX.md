@@ -26,7 +26,7 @@
 | `data/Inventory.js` | 240 | 2 | GRID_WIDTH, GRID_HEIGHT, GRID_SIZE, Inventory |
 | `data/Item.js` | 139 | 1 | EXCELLENT_OPTIONS, Item |
 | `data/ItemAttributeData.js` | 118 | 0 | generateCheckSum2, parseItemAttributeBmd, loadItemAttributes, itemAttributeFor, ITEM_ATTRIBUTE_MAX_ITEM |
-| `data/ItemEffectsLuaConfig.js` | 151 | 1 | ITEM_MODEL_BASE, ITEM_EFFECTS_PATHS, parseItemEffectsLua, loadItemEffectsLuaConfig, resetItemEffectsLuaConfigCacheForTests, itemTypeToModelType, resolveRuneAuraForEquipment |
+| `data/ItemEffectsLuaConfig.js` | 195 | 1 | ITEM_MODEL_BASE, ITEM_EFFECTS_PATHS, parseItemEffectsLua, loadItemEffectsLuaConfig, resetItemEffectsLuaConfigCacheForTests, itemTypeToModelType, groundItemEffectRuntimeContract, resolveRuneAuraForEquipment |
 | `data/ItemModelMap.js` | 540 | 0 | ITEM_MODEL_MAP |
 | `data/ItemModelResolver.js` | 176 | 5 | resolveWeaponModel, FENRIR_MODEL_BY_OPTION, FENRIR_KIND_BY_OPTION, resolveAccessoryModel, resolveCharacterModels |
 | `data/ItemTransparencyLua.js` | 54 | 2 | ITEM_TRANSPARENCY_PATHS, parseItemTransparencyLua, itemTransparencyForType, itemTransparencyStatus, itemTransparencySnapshot, loadItemTransparencyLua, resetItemTransparencyLuaForTests |
@@ -120,6 +120,7 @@
 | `graphics/ItemMaterialPresentation.js` | 667 | 8 | applyPcNativeRenderModelPresentation, pcIsStandardEquipment, pcRenderPartObjectLevel, pcRenderedItemLevel, pcEquipmentBaseTint, pcExcellentTint, pcIsSetExtOption, pcSetTint, pcImplicitMaterialTextureKind, pcMaterialTexture, pcStockMaterialPassPlan, applyPcRenderPartObjectSolidPresentation, applyPcStockItemPresentation |
 | `graphics/MuTerrain.js` | 1110 | 1 | TILE_SLOTS_LOGIN, TILE_SLOTS_NORMAL, tileFileCandidates, pcTerrainGrassEnabled, terrainGrassFileCandidates, pcTerrainGrassWind, createTerrainGrassQuarterOffsets, pcTerrainGrassQuad, parseTerrainMap, parseTerrainHeights, heightAt, buildPrimaryTerrainLight, samplePrimaryTerrainLight, addPrimaryTerrainLight, collectTerrainTileSlots, createMuTerrainMesh, buildMuTerrain |
 | `graphics/PcRuneAura.js` | 195 | 3 | PC_GM_AURORA_PATH, planTerrainAlphaBitmap, PcTerrainAlphaPass, PcRuneAura, resetPcRuneAuraTextureForTests |
+| `graphics/PcGroundItemEffects.js` | 159 | 4 | PC_GROUND_ITEM_EFFECT_BITMAPS, pcGroundItemEffectRuntimeContract, createPcGroundItemEffectOwner |
 | `graphics/PlayerComposer.js` | 1048 | 8 | PLAYER_WEAPON_LINK_BONE, accessoryAttachRule, MAX_CLASS, CLASS, pcCharacterScale, PLAYER_ACTIONS, getSkinModelIndex, getPcTextureSkinIndex, partFileName, idleActionFor, isFemaleClass, buildEquipmentAttach, mergeEquipmentBodyRenderData, playerVisualLoadIssues, unresolvedClassParts, applyBodyEquipmentPresentation, buildLinkedWeaponRenderer, weaponBackTransformFor, setLinkedWeaponSafeZonePresentation, buildAccessoryRenderer, clearComposedCharacterCache, composeCharacter, playerActionPlaySpeed, worldActionFor, buildAnimationControl |
 | `graphics/Scene.js` | 1590 | 12 | GameScene |
 | `graphics/TitleBackground.js` | 104 | 1 | TITLE_LAYOUT, ASSET_MU_LOGO, ASSET_WEBZEN_LOGO, mountTitleBackground |

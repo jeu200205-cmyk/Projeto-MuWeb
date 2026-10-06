@@ -82,6 +82,10 @@ import { applyMuUpAxis } from '../graphics/BmdAdapter.js';
 import { decodeCharacterEquipment } from '../data/CharacterEquipmentCodec.js';
 import { resolveCustomPreviewElements } from '../data/CustomPreviewElements.js';
 import { serverClassToClientClass, CLASS } from '../data/CharacterClassMap.js';
+import { PcTerrainAlphaPass } from '../graphics/PcRuneAura.js';
+import { pcBitmapTexture } from '../data/PcBitmapLuaOwners.js';
+import { MAP_SIZE } from '../world/TerrainWorld.js';
+import { applyPcCharacterHelperPresentation } from '../graphics/PcCharacterHelperPresentation.js';
 
 /** Actions do darkspirit.bmd — enum AI do PC (CSPetSystem.cpp:387-393). */
 export const PET_ACTIONS = { FLY: 0, FLYING: 1, STAND: 2, ATTACK: 3 };
@@ -173,10 +177,13 @@ async function _loadSparkTexture() {
  * @param {THREE.Scene} scene
  */
 export class Pet {
-    constructor(owner, scene, petModelPath = PET_BMD) {
+    constructor(owner, scene, petModelPath = PET_BMD, presentation = null) {
         this.owner = owner;
         this.scene = scene;
         this.petModelPath = petModelPath || PET_BMD;
+        this.presentation = presentation || null;
+        this._luaPresentationOwners = [];
+        this._luaPresentationUnresolved = [];
         this.level = 1;
         this.experience = 0;
         this.attackCooldown = 0;
@@ -188,6 +195,8 @@ export class Pet {
         this.root = null;
         this.sparkSprites = [];
         this.sparkTimer = 0;
+        this._sparkLive = [];
+        this._sparkPool = [];
         this._elapsed = 0;
     }
 
@@ -204,7 +213,35 @@ export class Pet {
         this.scene?.add?.(this.root);
         this.setAction(PET_ACTIONS.FLYING);
         _loadSparkTexture().catch(() => {});
+        await this._attachLuaPresentation();
         return this;
+    }
+
+
+    /** DarkSpirit.lua RenderModel/effect bridge. The normal MUModelRenderer already
+     * owns the exact RenderMesh(..., RENDER_TEXTURE=2, texture=-1, white light)
+     * profile used by the supplied ravenwhite script, so that profile must not
+     * create duplicate overlay draws. Bone sprites/particles remain separate PC
+     * Lua owners and are attached here. */
+    async _attachLuaPresentation() {
+        const rule=this.presentation; if(!rule||rule.owner!=='DarkSpirit.lua'||!this.renderer)return;
+        const rows=Array.isArray(rule.renderModel)?rule.renderModel:[];
+        const baseTextureProfile=rows.length===0||rows.every(r=>Number(r.renderType)!==1&&Number(r.effectLayer)===2&&Number(r.textureID)===-1&&Number(r.color3fv)===0&&Number(r.lightR)===1&&Number(r.lightG)===1&&Number(r.lightB)===1);
+        if(!baseTextureProfile)this._luaPresentationUnresolved.push(Object.freeze({kind:'render-model',reason:'non-base-render-flags',rows}));
+        else if(rows.length)this.renderer.setBodyLight?.(new THREE.Color(1,1,1));
+        for(const fx of (Array.isArray(rule.effects)?rule.effects:[])){
+            if(Number(fx.randTime)!==100){this._luaPresentationUnresolved.push(Object.freeze({kind:'effect',reason:'dynamic-randtime-not-owned',plan:fx}));continue;}
+            const map=await pcBitmapTexture(Number(fx.effectId));
+            if(!map){this._luaPresentationUnresolved.push(Object.freeze({kind:'effect',reason:'bitmap-id-unresolved',plan:fx}));continue;}
+            const common={boneIndex:Number(fx.bone),map,scale:Number(fx.size),color:new THREE.Color(Number(fx.r),Number(fx.g),Number(fx.b))};
+            const owner=Number(fx.type)===0
+                ? this.renderer.createBoneSprite?.(common)
+                : this.renderer.createBoneParticle?.({...common,subtype:Number(fx.effectLv),emitMs:40,poolSize:5});
+            if(!owner){this._luaPresentationUnresolved.push(Object.freeze({kind:'effect',reason:'bone-or-bitmap-invalid',plan:fx}));continue;}
+            if(Number(fx.type)===0&&owner.material)owner.material.rotation=Number(fx.black)||0;
+            this._luaPresentationOwners.push(owner);
+        }
+        this.root.userData.darkSpiritLua=Object.freeze({itemIndex:rule.itemIndex|0,renderBaseOwned:baseTextureProfile,attached:this._luaPresentationOwners.length,unresolved:Object.freeze([...this._luaPresentationUnresolved])});
     }
 
     /** SetAction PC (CSPetSystem.cpp:387-393) — índice = action do BMD. */
@@ -226,6 +263,7 @@ export class Pet {
         this.attackCooldown = Math.max(0, this.attackCooldown - dt);
         this._elapsed += dt;
         this.renderer.update(dt, this._elapsed);
+        this._updateSparkPool(dt);
 
         const ownerPos = this.owner.position;
 
@@ -307,29 +345,30 @@ export class Pet {
             if (sparkTexture === undefined) _loadSparkTexture().catch(() => {});
             return; // fail-closed: sem textura real, sem trail
         }
-        const mat = new THREE.SpriteMaterial({
-            map: sparkTexture,
-            color: new THREE.Color(SPARK_LIGHT[0], SPARK_LIGHT[1], SPARK_LIGHT[2]),
-            transparent: true,
-            blending: THREE.AdditiveBlending,
-            depthWrite: false,
-        });
-        const s = new THREE.Sprite(mat);
-        // scale 5 (CreateParticleFpsChecked arg) → 5×5 unidades mundo? O PC
-        // usa partícula pequena: Scale 0.8 → ~5×0.8*10 visual; aqui 6 units.
-        s.scale.setScalar(6);
-        s.position.copy(this.root.position);
-        this.scene.add(s);
-        const born = performance.now();
-        const iv = setInterval(() => {
-            const t = (performance.now() - born) / 1000;
-            s.material.opacity = Math.max(0, 1 - t / 0.5);
-            if (t >= 0.5) {
-                clearInterval(iv);
-                this.scene.remove(s);
-                s.material.dispose();
-            }
-        }, 50);
+        let rec=this._sparkPool.pop();
+        if(!rec){
+            const mat = new THREE.SpriteMaterial({
+                map: sparkTexture,
+                color: new THREE.Color(SPARK_LIGHT[0], SPARK_LIGHT[1], SPARK_LIGHT[2]),
+                transparent: true, blending: THREE.AdditiveBlending, depthWrite: false,
+            });
+            const sprite=new THREE.Sprite(mat); sprite.scale.setScalar(6);
+            rec={sprite,mat,life:0};
+        }
+        rec.life=.5; rec.mat.opacity=1; rec.sprite.visible=true;
+        rec.sprite.position.copy(this.root.position);
+        if(!rec.sprite.parent)this.scene.add(rec.sprite);
+        this._sparkLive.push(rec);
+    }
+
+    _updateSparkPool(dt){
+        if(!this._sparkLive.length)return;
+        const step=Math.max(0,Number(dt)||0);
+        for(let i=this._sparkLive.length-1;i>=0;i--){
+            const rec=this._sparkLive[i];rec.life-=step;rec.mat.opacity=Math.max(0,Math.min(1,rec.life/.5));
+            if(rec.life>0)continue;
+            rec.sprite.visible=false;this._sparkLive.splice(i,1);this._sparkPool.push(rec);
+        }
     }
 
     /** GIPetManager.cpp:351: dono level up → pet Eff_LevelUp (flash). */
@@ -360,9 +399,15 @@ export class Pet {
 
     dispose() {
         if (this.root && this.scene) this.scene.remove(this.root);
+        for(const owner of this._luaPresentationOwners||[]){try{owner?.dispose?.();}catch{}}
+        this._luaPresentationOwners=[];
         try { this.renderer?.dispose(); } catch { /* noop */ }
         this.renderer = null;
         this.root = null;
+        for(const rec of [...(this._sparkLive||[]),...(this._sparkPool||[])]){
+            try{rec.sprite?.parent?.remove?.(rec.sprite);rec.mat?.dispose?.();}catch{};
+        }
+        this._sparkLive=[];this._sparkPool=[];
     }
 }
 
@@ -384,10 +429,13 @@ export class MountCompanion {
         this.option = option ?? 0;
         // Espécie: fenrir (default histórico) ou rider unicon/pegasus
         // (HELPER:2/3 — MoveBug próprio GOBoid.cpp:495-601).
-        this.species = /Rider0?1\.bmd$/i.test(petModelPath) ? 'unicon'
+        this.species = visibility?.species || (/Rider0?1\.bmd$/i.test(petModelPath) ? 'unicon'
             : /Rider0?2\.bmd$/i.test(petModelPath) ? 'pegasus'
             : /DarkHorse\.bmd$/i.test(petModelPath) ? 'dark-horse'
-            : 'fenrir';
+            : 'fenrir');
+        this.behaviorSpecies = visibility?.behaviorSpecies || this.species;
+        this.presentation = visibility?.presentation || null;
+        this.authoredScale = Number.isFinite(Number(visibility?.scale)) ? Number(visibility.scale) : null;
         this.renderer = null;
         this.root = null;
         this._elapsed = 0;
@@ -396,6 +444,11 @@ export class MountCompanion {
         this._riderActionIdx = null;
         this._safeZone = typeof visibility?.safeZone === 'function'
             ? visibility.safeZone : () => false;
+        this._terrainHeightAt = typeof visibility?.terrainHeightAt === 'function' ? visibility.terrainHeightAt : null;
+        this._footThunder = [];
+        this._footThunderPool = [];
+        this._footThunderTextures = [];
+        this._footThunderEmitAcc = 0;
     }
 
     async init() {
@@ -410,9 +463,78 @@ export class MountCompanion {
         this.scene.add(this.root);
         // Scale CreateBugSub (GOBoid.cpp:104-111): fenrir 0.9, riders 0.9,
         // DARK_HORSE 1.0 (L106-107 — explícito e distinto dos riders).
-        this.root.scale.setScalar(this.species === 'dark-horse' ? 1.0 : 0.9);
+        this.root.scale.setScalar(this.authoredScale ?? (this.behaviorSpecies === 'dark-horse' ? 1.0 : 0.9));
+        if (this.presentation) await applyPcCharacterHelperPresentation(this.renderer, this.presentation);
         this.setAction(FENRIR_ACTIONS.STAND, 0.4);
+        if (this.species === 'fenrir' && this._terrainHeightAt) {
+            try {
+                const footThunderPaths = ['Effect/eff_lightinga01.OZJ','Effect/eff_lightinga02.OZJ','Effect/eff_lightinga03.OZJ','Effect/eff_lightinga04.OZJ','Effect/eff_lightinga05.OZJ'];
+                this._footThunderTextures = await Promise.all(footThunderPaths.map(path => MUAssets.loadTexture(path)));
+            } catch (_) { this._footThunderTextures = []; }
+        }
         return this;
+    }
+
+    _acquireFootThunderPass() {
+        let rec=this._footThunderPool.pop() || null;
+        if (!rec) {
+            const tex=this._footThunderTextures?.[0];
+            if (!tex?.isTexture || !this._terrainHeightAt) return null;
+            const pass=new PcTerrainAlphaPass(this.scene, tex, this._terrainHeightAt);
+            pass.mesh.visible=false;
+            rec={pass,life:0,frame:0,frameMs:0,alpha:1,pcX:0,pcY:0,light:new THREE.Color(1,1,1)};
+        }
+        rec.life=200; rec.frame=0; rec.frameMs=0; rec.alpha=1; rec.light.setRGB(1,1,1); rec.pass.mesh.visible=true;
+        return rec;
+    }
+
+    _releaseFootThunder(rec) {
+        if (!rec) return;
+        rec.pass.mesh.visible=false;
+        this._footThunderPool.push(rec);
+    }
+
+    _spawnFootThunderAtBone(boneIndex) {
+        const bone=this.renderer?.bones?.[boneIndex];
+        if (!bone?.isBone || !this._footThunderTextures?.[0]?.isTexture || !this._terrainHeightAt) return;
+        const pos=new THREE.Vector3(); bone.getWorldPosition(pos);
+        const rec=this._acquireFootThunderPass(); if (!rec) return;
+        rec.pcX=pos.x + MAP_SIZE/2; rec.pcY=MAP_SIZE/2 - pos.z;
+        rec.pass.material.map=this._footThunderTextures[0]; rec.pass.material.needsUpdate=true;
+        rec.pass.material.opacity=1;
+        rec.pass.update(rec.pcX,rec.pcY,0.6,0.6,0,rec.light);
+        this._footThunder.push(rec);
+    }
+
+    _emitFenrirFootThunder(dt) {
+        if (this.species !== 'fenrir' || !this.root?.visible || !this._terrainHeightAt || this._footThunderTextures.length !== 5) return;
+        this._footThunderEmitAcc += Math.max(0,Number(dt)||0);
+        if (this._footThunderEmitAcc < 0.04) return;
+        this._footThunderEmitAcc %= 0.04;
+        const a=this._currentFenrirAction|0, f=Number(this.renderer?.animationFrame)||0;
+        if (a === FENRIR_ACTIONS.WALK && f >= 0 && f <= 1.5) {
+            for (const b of [22,28,36,44]) this._spawnFootThunderAtBone(b);
+        } else if (a === FENRIR_ACTIONS.RUN) {
+            if (f > 1.0 && f <= 1.4) for (const b of [22,28]) this._spawnFootThunderAtBone(b);
+            else if (f > 4.8 && f <= 5.2) for (const b of [36,44]) this._spawnFootThunderAtBone(b);
+        }
+    }
+
+    _updateFenrirFootThunder(dt) {
+        const ms=Math.max(0,Number(dt)||0)*1000;
+        for (let i=this._footThunder.length-1;i>=0;i--) {
+            const rec=this._footThunder[i];
+            rec.frameMs += ms;
+            while (rec.frameMs > 200) { rec.frameMs -= 200; rec.frame++; }
+            rec.alpha -= 0.05 * ((Math.max(0,Number(dt)||0))/0.04);
+            if (rec.frame > 4 || rec.alpha <= 0) {
+                this._footThunder.splice(i,1); this._releaseFootThunder(rec); continue;
+            }
+            const tex=this._footThunderTextures[rec.frame % 5];
+            if (rec.pass.material.map !== tex) { rec.pass.material.map=tex; rec.pass.material.needsUpdate=true; }
+            rec.pass.material.opacity=Math.max(0,rec.alpha);
+            rec.pass.update(rec.pcX,rec.pcY,0.6,0.6,0,rec.light);
+        }
     }
 
     /**
@@ -464,12 +586,15 @@ export class MountCompanion {
         if (safeZone) {
             this._ownerAnimState = null;
             this._riderActionIdx = null;
+            this._updateFenrirFootThunder(dt);
             return;
         }
 
         // Avança animação própria (PlayAnimation com Velocity do SetAction)
         this._elapsed += dt;
         this.renderer.update(dt, this._elapsed);
+        this._emitFenrirFootThunder(dt);
+        this._updateFenrirFootThunder(dt);
 
         // Mapeamento action player → action fenrir (GOBoid.cpp:196-258)
         const control = this.owner.mesh?.userData?.animationControl;
@@ -490,15 +615,15 @@ export class MountCompanion {
         // DarkHorse — MoveBug GOBoid.cpp:338-428: PLAYER_ATTACK_DARKHORSE→3
         // vel 0.34, RUN_RIDE_HORSE→1 vel 0.34, ATTACK_RIDE_*→2, IDLE1/2→5/6,
         // default STAND 0 vel 0.3 (L425-427).
-        if (this.species === 'dark-horse') {
+        if (this.behaviorSpecies === 'dark-horse') {
             const A = DARKHORSE_ACTIONS;
             if (state === 'attack') { this.setAction(A.ATTACK, 0.34); }
             else if (state === 'walk' || state === 'run') { this.setAction(A.WALK, 0.34); }
             else { this.setAction(A.IDLE, 0.3); }
             return;
         }
-        if (this.species !== 'fenrir') {
-            const A = RIDER_ACTIONS[this.species === 'pegasus' ? 'PEGASUS' : 'UNICON'];
+        if (this.behaviorSpecies !== 'fenrir') {
+            const A = RIDER_ACTIONS[this.behaviorSpecies === 'pegasus' ? 'PEGASUS' : 'UNICON'];
             if (state === 'attack' || state === 'skill') {
                 this.setAction(state === 'skill' ? A.SKILL : A.ATTACK, 0.34);
             } else if (state === 'walk') {
@@ -650,6 +775,9 @@ export class MountCompanion {
     }
 
     dispose() {
+        for (const rec of this._footThunder || []) rec.pass?.dispose?.();
+        for (const rec of this._footThunderPool || []) rec.pass?.dispose?.();
+        this._footThunder=[]; this._footThunderPool=[]; this._footThunderTextures=[];
         if (this.root && this.scene) this.scene.remove(this.root);
         try { this.renderer?.dispose(); } catch { /* noop */ }
         this.renderer = null;
@@ -677,10 +805,19 @@ export class HelperCompanion {
         this.previewScale = previewScale;
         this.helperInfo = helperInfo || null;
         this.modelPath = helperInfo?.petModelPath || HELPER_BMD;
-        this.authoredScale = Number(helperInfo?.size) || 0.7;
-        this.authoredPreviewScale = Number(helperInfo?.sizeCharList) || this.authoredScale;
-        this.authoredMovement = Number(helperInfo?.movement) || 0;
-        this.authoredHeight = Number(helperInfo?.height) || 0;
+        const finiteOr = (value, fallback) => { const n=Number(value); return Number.isFinite(n) ? n : fallback; };
+        // FIX88: CharacterHelper.lua authored zero is a real value. Do not use `||`
+        // here: it rewrites Size/SizeCharList/SizeMiniature/VelocityMiniature=0
+        // after the parser had already preserved those exact Lua values.
+        this.authoredScale = finiteOr(helperInfo?.size, 0.7);
+        this.authoredPreviewScale = finiteOr(helperInfo?.sizeCharList, this.authoredScale);
+        this.authoredMovement = finiteOr(helperInfo?.movement, 0);
+        this.authoredHeight = finiteOr(helperInfo?.height, 0);
+        this.authoredMiniature = finiteOr(helperInfo?.miniature, 0);
+        this.authoredSizeMiniature = finiteOr(helperInfo?.sizeMiniature, this.authoredScale);
+        this.authoredVelocityMiniature = finiteOr(helperInfo?.velocityMiniature, 0);
+        this._sparkLive = [];
+        this._sparkPool = [];
         this.renderer = null;
         this.root = null;
         this._elapsed = 0;
@@ -693,6 +830,11 @@ export class HelperCompanion {
         this._yaw = 0;
         this._alpha = 0;               // CreateBugSub: Alpha 0 → AlphaTarget 1
         this._currentAuthoredAction = null;
+        this._helperPresentationState = null;
+        // HelperView applies VectorRotate(Direction) before writing the next tick's
+        // Direction[1]. Preserve that one-logical-tick ownership instead of
+        // moving immediately with the velocity calculated in the same update.
+        this._authoredDirectionY = 0;
     }
 
     async init() {
@@ -715,6 +857,7 @@ export class HelperCompanion {
         this.root.scale.setScalar(scale);
         this.scene?.add?.(this.root);
         this.renderer.playAction('action_0'); // CharacterHelper/stock authored action
+        if (this.helperInfo?.presentation) this._helperPresentationState = await applyPcCharacterHelperPresentation(this.renderer, this.helperInfo.presentation);
         _loadHelperSparkTexture().catch(() => {});
         return this;
     }
@@ -729,6 +872,7 @@ export class HelperCompanion {
         if (this.owner.isAlive && !this.owner.isAlive()) { this.dispose(); return; }
         this._elapsed += dt;
         this.renderer.update(dt, this._elapsed);
+        this._updateSparkPool(dt);
 
         // Alpha fade-in (CreateBugSub L88-89: Alpha 0 → AlphaTarget 1)
         if (this._alpha < 1) {
@@ -752,6 +896,17 @@ export class HelperCompanion {
         // while walking and action 0 when idle. Web x/z are PC x/y; Web y is PC z.
         if (this.helperInfo && Number(this.helperInfo.type) === 0 && this.authoredMovement === 2) {
             this._updateAuthoredWalking(dt, ownerPos, dx, dz, dist2);
+            return;
+        }
+
+        // FIX58 — HelperView::WorkdMovimentMiniature. Type 2/4/8/16 helpers
+        // become a miniature follower in safe-zone only when CharacterHelper.lua
+        // explicitly enables Miniature=1. No local inference/fallback.
+        const authoredType = Number(this.helperInfo?.type);
+        let safeZone = false;
+        try { safeZone = Boolean(typeof this.owner?.safeZone === 'function' ? this.owner.safeZone() : this.owner?.safeZone); } catch (_) { safeZone = false; }
+        if (this.helperInfo && this.authoredMiniature === 1 && safeZone && [2,4,8,16].includes(authoredType)) {
+            this._updateAuthoredMiniature(dt, ownerPos, dx, dz, dist2, authoredType);
             return;
         }
 
@@ -833,19 +988,72 @@ export class HelperCompanion {
             walking = true;
         }
 
+        // HelperView::WorkMoviment rotates the PREVIOUS Direction first, then
+        // computes Velocity and stores Direction[1] for the next logical tick.
+        const previousStep = Math.abs(this._authoredDirectionY) * 25 * dt;
+        this.root.position.x += Math.sin(this._yaw) * previousStep;
+        this.root.position.z += Math.cos(this._yaw) * previousStep;
+        this.root.rotation.y = this._yaw;
+
         let velocity = 0;
         if (dist2 > maxPos * maxPos) {
             if (dist2 >= Math.pow(maxPos * 2, 2)) velocity = Math.log(dist2) * 1.30;
             else if (dist2 >= Math.pow(maxPos + maxPos / 2, 2)) velocity = Math.log(dist2) * 1.20;
             else velocity = Math.log(dist2) * 1.05;
         }
-        // PC Direction[1] = -Velocity and rotates it by the helper angle.
-        // Keep the same logical 25Hz magnitude in world units.
-        const step = velocity * 25 * dt;
-        this.root.position.x += Math.sin(this._yaw) * step;
-        this.root.position.z += Math.cos(this._yaw) * step;
-        this.root.rotation.y = this._yaw;
+        this._authoredDirectionY = -velocity;
         this._playAuthoredAction(walking ? 2 : 0);
+    }
+
+    _updateAuthoredMiniature(dt, ownerPos, dx, dz, dist2, authoredType) {
+        // HelperView.cpp::WorkdMovimentMiniature — frameScale=0.6, MaxPos=150.
+        const frameScale = 0.6, maxPos = 150.0;
+        this.root.scale.setScalar(Number.isFinite(this.authoredSizeMiniature) ? this.authoredSizeMiniature : this.authoredScale);
+        this.root.position.y = ownerPos.y;
+        let walking = false;
+        if (dist2 < maxPos * maxPos * maxPos) {
+            if (dist2 >= maxPos * maxPos + 20) {
+                const targetYaw = Math.atan2(dx, dz) + THREE.MathUtils.degToRad(25);
+                let diff = targetYaw - this._yaw;
+                while (diff > Math.PI) diff -= Math.PI * 2;
+                while (diff < -Math.PI) diff += Math.PI * 2;
+                const maxTurn = THREE.MathUtils.degToRad(10) * Math.max(1, dt * 25);
+                this._yaw += THREE.MathUtils.clamp(diff, -maxTurn, maxTurn);
+                walking = true;
+                this._playAuthoredAction(authoredType === 16 ? 1 : 2);
+            }
+        } else {
+            this.root.position.copy(ownerPos);
+            const ownerYaw = Number(this.owner?.rotation?.y ?? this.owner?.root?.rotation?.y);
+            if (Number.isFinite(ownerYaw)) this._yaw = ownerYaw;
+        }
+        // WorkdMovimentMiniature also rotates the PREVIOUS Direction before
+        // assigning the next Direction. When owner/pet positions are exactly
+        // equal the PC substitutes VecPos=(40,120,0)*0.6 for this tick.
+        let stepX, stepZ;
+        if (dx === 0 && dz === 0) {
+            stepX = 40.0 * frameScale * 25 * dt;
+            stepZ = 120.0 * frameScale * 25 * dt;
+        } else {
+            const previousStep = Math.abs(this._authoredDirectionY) * 25 * dt;
+            stepX = Math.sin(this._yaw) * previousStep;
+            stepZ = Math.cos(this._yaw) * previousStep;
+        }
+        this.root.position.x += stepX;
+        this.root.position.z += stepZ;
+        this.root.rotation.y = this._yaw;
+
+        let velocity = 0;
+        if (dist2 > maxPos * maxPos) {
+            if (dist2 >= Math.pow(maxPos * 2, 2)) velocity = Math.log(dist2) * 1.30;
+            else if (dist2 >= Math.pow(maxPos + maxPos / 2, 2)) velocity = Math.log(dist2) * 1.20;
+            else velocity = Math.log(dist2) * 1.05;
+        }
+        this._authoredDirectionY = -velocity * frameScale;
+        // obj->Velocity is animation/runtime velocity ownership, not a second
+        // multiplier over Direction displacement. Keep it separately.
+        this.authoredRuntimeVelocity = this.authoredVelocityMiniature * frameScale;
+        if (!walking) this._playAuthoredAction(0);
     }
 
     _sparks(dt) {
@@ -857,30 +1065,36 @@ export class HelperCompanion {
             return;
         }
         for (let j = 0; j < 4; j++) {
-            const mat = new THREE.SpriteMaterial({
-                map: helperSparkTexture,
-                color: new THREE.Color(HELPER_SPARK_LIGHT[0], HELPER_SPARK_LIGHT[1], HELPER_SPARK_LIGHT[2]),
-                transparent: true, blending: THREE.AdditiveBlending, depthWrite: false,
-            });
-            const s = new THREE.Sprite(mat);
-            s.scale.setScalar(4);
-            // Position = o->Position + rand(±8) por eixo (L618-619)
+            let rec=this._sparkPool.pop();
+            if(!rec){
+                const mat = new THREE.SpriteMaterial({
+                    map: helperSparkTexture,
+                    color: new THREE.Color(HELPER_SPARK_LIGHT[0], HELPER_SPARK_LIGHT[1], HELPER_SPARK_LIGHT[2]),
+                    transparent: true, blending: THREE.AdditiveBlending, depthWrite: false,
+                });
+                const sprite = new THREE.Sprite(mat); sprite.scale.setScalar(4);
+                rec={sprite,mat,life:0};
+            }
+            const s=rec.sprite; rec.life=.5; rec.mat.opacity=1; s.visible=true;
             s.position.set(
                 this.root.position.x + (Math.random() * 16 - 8),
                 this.root.position.y + (Math.random() * 16 - 8),
                 this.root.position.z + (Math.random() * 16 - 8),
             );
-            this.scene.add(s);
-            const born = performance.now();
-            const iv = setInterval(() => {
-                const t = (performance.now() - born) / 1000;
-                s.material.opacity = Math.max(0, 1 - t / 0.5);
-                if (t >= 0.5) {
-                    clearInterval(iv);
-                    this.scene.remove(s);
-                    s.material.dispose();
-                }
-            }, 50);
+            if(!s.parent)this.scene.add(s);
+            this._sparkLive.push(rec);
+        }
+    }
+
+    _updateSparkPool(dt){
+        if(!this._sparkLive?.length)return;
+        const step=Math.max(0,Number(dt)||0);
+        for(let i=this._sparkLive.length-1;i>=0;i--){
+            const rec=this._sparkLive[i]; rec.life-=step;
+            rec.mat.opacity=Math.max(0,Math.min(1,rec.life/.5));
+            if(rec.life>0)continue;
+            rec.sprite.visible=false;
+            this._sparkLive.splice(i,1); this._sparkPool.push(rec);
         }
     }
 
@@ -889,13 +1103,18 @@ export class HelperCompanion {
         try { this.renderer?.dispose(); } catch { /* noop */ }
         this.renderer = null;
         this.root = null;
+        for(const rec of [...(this._sparkLive||[]),...(this._sparkPool||[])]){
+            try{rec.sprite?.parent?.remove?.(rec.sprite);rec.mat?.dispose?.();}catch{}
+        }
+        this._sparkLive=[];this._sparkPool=[];
     }
 }
 
 
 export class PetSystem {
-    constructor(scene = null) {
+    constructor(scene = null, options = null) {
         this.scene = scene;
+        this.terrainHeightAt = typeof options?.terrainHeightAt === 'function' ? options.terrainHeightAt : null;
         this.pets = new Map(); // character -> Pet (dark raven)
         this.mounts = new Map(); // character -> MountCompanion (fenrir)
         this.helpers = new Map(); // character -> HelperCompanion (HELPER:0)
@@ -911,7 +1130,7 @@ export class PetSystem {
         if (old) { old.dispose(); this.pets.delete(character); }
         if (!this.scene) return null;
         try {
-            const pet = new Pet(character, this.scene, petInfo?.petModelPath || PET_BMD);
+            const pet = new Pet(character, this.scene, petInfo?.petModelPath || PET_BMD, petInfo?.presentation || petInfo || null);
             await pet.init(); // throw = sem pet fake
             this.pets.set(character, pet);
             character.calculateStats?.();
@@ -939,7 +1158,9 @@ export class PetSystem {
         if (old) { old.dispose(); this.mounts.delete(character); }
         try {
             const mount = new MountCompanion(character, this.scene, fenrirInfo.petModelPath, fenrirInfo.option, {
-                safeZone: fenrirInfo.safeZone,
+                safeZone: fenrirInfo.safeZone, terrainHeightAt: this.terrainHeightAt,
+                species: fenrirInfo.species, behaviorSpecies: fenrirInfo.behaviorSpecies,
+                presentation: fenrirInfo.presentation || null, scale: fenrirInfo.size,
             });
             await mount.init(); // throw = sem mount fake
             this.mounts.set(character, mount);
@@ -1010,10 +1231,13 @@ export class PetSystem {
         let first = null, second = null;
         try {
             if (spec.first?.kind === 'dark-spirit') {
-                first = new Pet(character, this.scene, spec.first.petModelPath);
+                first = new Pet(character, this.scene, spec.first.petModelPath, spec.first.presentation || spec.first);
                 await first.init();
             } else if (spec.first?.kind === 'helper') {
                 first = new HelperCompanion(character, this.scene, 1.0, spec.first);
+                await first.init();
+            } else if (spec.first?.kind === 'mount') {
+                first = new MountCompanion(character,this.scene,spec.first.petModelPath,0,{safeZone:()=>Boolean(typeof character?.safeZone==='function'?character.safeZone():character?.safeZone),terrainHeightAt:this.terrainHeightAt,species:spec.first.species,behaviorSpecies:spec.first.behaviorSpecies,presentation:spec.first.presentation,scale:spec.first.size});
                 await first.init();
             }
         } catch (e) {
@@ -1023,6 +1247,9 @@ export class PetSystem {
         try {
             if (spec.second?.kind === 'helper') {
                 second = new HelperCompanion(character, this.scene, 1.0, spec.second);
+                await second.init();
+            } else if (spec.second?.kind === 'mount') {
+                second = new MountCompanion(character,this.scene,spec.second.petModelPath,0,{safeZone:()=>Boolean(typeof character?.safeZone==='function'?character.safeZone():character?.safeZone),terrainHeightAt:this.terrainHeightAt,species:spec.second.species,behaviorSpecies:spec.second.behaviorSpecies,presentation:spec.second.presentation,scale:spec.second.size});
                 await second.init();
             }
         } catch (e) {

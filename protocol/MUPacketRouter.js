@@ -353,6 +353,27 @@ export function routeMUPacket(packet, ctx = {}) {
                 }
                 return result === 1 ? 'character_create_success' : 'character_create_fail';
             }
+            if (subcode === 0x04) {
+                // F3:04 ReceiveRevival — Main 5.2 PRECEIVE_REVIVAL / ReceiveRevival.
+                // Native PC struct is exactly 36B including PBMSG_HEADER(3) + SubCode(1),
+                // therefore router payload after F3:04 is exactly 32B:
+                // [X][Y][Map][Angle][Life:u32LE][Mana:u32LE][Shield:u32LE]
+                // [SkillMana:u32LE][MasterExp:8B BE][Gold:u32LE].
+                // Reject truncation/trailers before publishing the authoritative revive snapshot.
+                if (!need(32, 'revival')) return 'payload_short';
+                if (payload.length !== 32) return 'payload_short';
+                const dv = new DataView(payload.buffer, payload.byteOffset, payload.byteLength);
+                const u32 = (o) => dv.getUint32(o, true);
+                let experience = 0n;
+                for (let i = 20; i < 28; i++) experience = (experience << 8n) | BigInt(payload[i]);
+                const msg = {
+                    x: payload[0], y: payload[1], map: payload[2], angle: payload[3],
+                    life: u32(4), mana: u32(8), shield: u32(12), skillMana: u32(16),
+                    experience, gold: u32(28),
+                };
+                if (ctx.onRevival) ctx.onRevival(msg);
+                return 'revival';
+            }
             if (subcode === 0x20) {
                 // F3:20 ReceiveSummonLife — WSclient.cpp:6565-6569.
                 // PHEADER_DEFAULT_SUBCODE = [PBMSG_HEADER][SubCode][Value], so
@@ -376,6 +397,18 @@ export function routeMUPacket(packet, ctx = {}) {
                 if ((payload.length - 2) % 4 !== 0) return 'payload_short';
                 const listType = payload[1];
                 const payloadValue = payload[0];
+                const entryCount = (payload.length - 2) / 4;
+                // WSclient.cpp::ReceiveMagicList owns the count contract, not the
+                // transport frame: 0xFF/0xFE consume exactly one Data2 entry;
+                // every other branch loops `i < Data->Value`.  Reject a frame
+                // whose byte count disagrees BEFORE mutating Skill[].  The old
+                // Web route accepted a truncated/oversized list and could commit
+                // a partial server-authoritative skill state.
+                const expectedEntries = (payloadValue === 0xFF || payloadValue === 0xFE) ? 1 : payloadValue;
+                if (entryCount !== expectedEntries) {
+                    log(`[MU] F3:11 magicList count invalido value=${payloadValue} entries=${entryCount}/${expectedEntries} — descartado`, 'warn');
+                    return 'payload_short';
+                }
                 const entries = [];
                 for (let off = 2; off + 4 <= payload.length; off += 4) {
                     entries.push({
@@ -508,7 +541,10 @@ export function routeMUPacket(packet, ctx = {}) {
                 // UI: gravíssimo para chars equiparem / re-equiparem heroes.
                 if (!need(20, 'equipment_snapshot')) return 'payload_short';
                 if (payload.length !== 20) return 'payload_short';
-                const key = (payload[0] << 8) | payload[1];
+                // Character keys are 15-bit viewport identities throughout the PC client.
+                // Keep the transport flag in bit15 out of the authoritative actor lookup,
+                // exactly as 0x12/0x13/0x14 and ReceiveMagic already do.
+                const key = ((payload[0] << 8) | payload[1]) & 0x7FFF;
                 const classByte = payload[2];
                 const equipment = Array.from(payload.subarray(3, 3 + 17));
                 if (ctx.onEquipment) ctx.onEquipment({ key, classByte, equipment });
@@ -556,6 +592,13 @@ export function routeMUPacket(packet, ctx = {}) {
                 // variants are 16B; extended variants are 56B and carry the
                 // complete authoritative point/stat/resource snapshot.
                 if (!need(16, 'addPointResult')) return 'payload_short';
+                // Same-lineage PcParseLevelUpPoint has only two proven wire bodies:
+                // legacy 16B and extended 56B. Reject every intermediate/oversized
+                // variant before publishing any authoritative stat/resource state.
+                if (payload.length !== 16 && payload.length !== 56) {
+                    log(`[MU] F3:06 ReceiveAddPoint tamanho inválido ${payload.length} (esperado 16 ou 56) — descartado`, 'warn');
+                    return 'payload_short';
+                }
                 const dv = new DataView(payload.buffer, payload.byteOffset, payload.byteLength);
                 const u32 = (o) => dv.getUint32(o, true);
                 const result = payload[0];
@@ -576,6 +619,85 @@ export function routeMUPacket(packet, ctx = {}) {
                 }
                 if (ctx.onAddPointResult) ctx.onAddPointResult(msg);
                 return 'add_point_result';
+            }
+            if (subcode === 0x23) {
+                // F3:23 ReceiveSoccerScore / PRECEIVE_SOCCER_SCORE (Main 5.2).
+                // After F3:23 is consumed, wire body is exactly 18 bytes:
+                // Name1[8], Score1, Name2[8], Score2. All members are BYTE,
+                // so there is no alignment ambiguity. Publish only after exact closure.
+                if (!payload || payload.length !== 18) {
+                    log(`[MU] F3:23 SoccerScore tamanho inválido ${payload?.length ?? 0}/18 — descartado`, 'warn');
+                    return 'payload_short';
+                }
+                const decodeName8 = (off) => {
+                    let end = off;
+                    while (end < off + 8 && payload[end] !== 0) end++;
+                    return String.fromCharCode(...payload.subarray(off, end));
+                };
+                const msg = {
+                    team1: decodeName8(0),
+                    score1: payload[8],
+                    team2: decodeName8(9),
+                    score2: payload[17],
+                    observer: payload[8] !== 0xFF,
+                };
+                if (ctx.onSoccerScore) ctx.onSoccerScore(msg);
+                return 'soccer_score';
+            }
+            if (subcode === 0x24) {
+                // F3:24 ReceiveWTMatchResult / PMSG_MATCH_RESULT (Main 5.2).
+                // MAX_ID_SIZE is 10. With the default MSVC struct alignment the
+                // body after the already-consumed subcode is exactly 26 bytes:
+                // [Type][Name1 x10][pad][Score1 LE16][Name2 x10][Score2 LE16].
+                // Desktop only publishes Type 0..2; all other types are ignored.
+                if (!payload || payload.length !== 26) {
+                    log(`[MU] F3:24 WTMatchResult tamanho inválido ${payload?.length ?? 0}/26 — descartado`, 'warn');
+                    return 'payload_short';
+                }
+                const type = payload[0];
+                if (type > 2) return 'wt_match_result_ignored_type';
+                const decodeName10 = (off) => {
+                    let end = off;
+                    while (end < off + 10 && payload[end] !== 0) end++;
+                    return String.fromCharCode(...payload.subarray(off, end));
+                };
+                const msg = Object.freeze({
+                    type,
+                    team1: decodeName10(1),
+                    score1: payload[12] | (payload[13] << 8),
+                    team2: decodeName10(14),
+                    score2: payload[24] | (payload[25] << 8),
+                });
+                if (ctx.onWTMatchResult) ctx.onWTMatchResult(msg);
+                return 'wt_match_result';
+            }
+            if (subcode === 0x25) {
+                // F3:25 ReceiveWTBattleSoccerGoalIn / PMSG_SOCCER_GOALIN.
+                // Exact body is [x][y]. The supplied Main 5.2 handler body is
+                // completely commented out, so accepting the frame has no visual
+                // or gameplay side effect. Preserve that no-op instead of inventing FX.
+                if (!payload || payload.length !== 2) {
+                    log(`[MU] F3:25 WTBattleSoccerGoalIn tamanho inválido ${payload?.length ?? 0}/2 — descartado`, 'warn');
+                    return 'payload_short';
+                }
+                return 'wt_soccer_goal_noop';
+            }
+            if (subcode === 0x22) {
+                // F3:22 ReceiveWTTimeLeft / PMSG_MATCH_TIMEVIEW (Main 5.2).
+                // Default MSVC layout: PBMSG_HEADER[3], subCode, Type, one
+                // alignment byte, WORD Time. The router already consumed the
+                // subcode, therefore the exact remaining body is 4B:
+                // [Type][pad][TimeLo][TimeHi]. Publish only after exact closure.
+                if (!payload || payload.length !== 4) {
+                    log(`[MU] F3:22 WTTimeLeft tamanho inválido ${payload?.length ?? 0}/4 — descartado`, 'warn');
+                    return 'payload_short';
+                }
+                const msg = {
+                    type: payload[0],
+                    time: payload[2] | (payload[3] << 8),
+                };
+                if (ctx.onWTTimeLeft) ctx.onWTTimeLeft(msg);
+                return 'wt_time_left';
             }
             if (subcode === 0x30) {
                 // Evidence same-protocol mobile/PC parity owner PcParseOptionF330:
@@ -620,12 +742,65 @@ export function routeMUPacket(packet, ctx = {}) {
                 if (ctx.onMasterLevelInfo) ctx.onMasterLevelInfo(msg);
                 return 'master_level_info';
             }
+            if (subcode === 0x51) {
+                // F3:51 Receive_Master_LevelUp — same-lineage Main 5.2 parity owner
+                // PcParseMasterLevelUpF351 / PMSG_MASTERLEVEL_UP. Body after subcode
+                // is exactly eight LE WORDs (16B): level, awarded points, level-up
+                // points, max point, max life/mana/shield/BP. Reject variants before
+                // publishing the server-authoritative master-level-up snapshot.
+                if (!payload || payload.length !== 16) {
+                    log(`[MU] F3:51 MasterLevelUp tamanho inválido ${payload?.length ?? 0}/16 — descartado`, 'warn');
+                    return 'payload_short';
+                }
+                const rd16 = (o) => payload[o] | (payload[o + 1] << 8);
+                const msg = {
+                    masterLevel: rd16(0),
+                    awardedMasterPoints: rd16(2),
+                    masterLevelUpPoints: rd16(4),
+                    masterMaxPoint: rd16(6),
+                    masterMaxLife: rd16(8),
+                    masterMaxMana: rd16(10),
+                    masterMaxShield: rd16(12),
+                    masterMaxBp: rd16(14),
+                };
+                if (ctx.onMasterLevelUp) ctx.onMasterLevelUp(msg);
+                return 'master_level_up';
+            }
+            if (subcode === 0x52) {
+                // F3:52 PMSG_ANS_MASTERLEVEL_SKILL from Main 5.2. Body after
+                // subcode is exactly 11B: BYTE result, short nMLPoint LE,
+                // int nSkillNum LE, int nSkillLevel LE. The PC only mutates
+                // Skill[] when result==1 and skillNum>-1; routing stays
+                // server-authoritative and leaves that semantic mutation to
+                // the consumer instead of guessing master-skill constants.
+                if (!payload || payload.length !== 11) {
+                    log(`[MU] F3:52 MasterLevelGetSkill tamanho inválido ${payload?.length ?? 0}/11 — descartado`, 'warn');
+                    return 'payload_short';
+                }
+                const dv = new DataView(payload.buffer, payload.byteOffset, payload.byteLength);
+                const msg = {
+                    result: payload[0],
+                    masterLevelUpPoints: dv.getInt16(1, true),
+                    skillNumber: dv.getInt32(3, true),
+                    skillLevel: dv.getInt32(7, true),
+                };
+                if (ctx.onMasterLevelGetSkill) ctx.onMasterLevelGetSkill(msg);
+                return 'master_level_get_skill';
+            }
             if (subcode === 0xE0) {
                 // Exact current-client/mobile PcParseNewCharacterInfo. Body is
                 // after F3/E0. WORD Level is naturally aligned, so the first
                 // DWORD begins at +4. Base view is 84B; GAMESERVER_EXTRA==0
                 // appends the authoritative full-width View* block through 144B.
                 if (!need(84, 'newCharacterInfo')) return 'payload_short';
+                // Same-lineage PcParseNewCharacterInfo exposes exactly two proven
+                // physical bodies: 84B base and 144B with the GAMESERVER_EXTRA==0
+                // View* block. Reject intermediate/oversized variants atomically;
+                // otherwise a truncated extra block could publish a mixed snapshot.
+                if (payload.length !== 84 && payload.length !== 144) {
+                    log(`[MU] F3:E0 NewCharacterInfo tamanho inválido ${payload.length} (esperado 84 ou 144) — descartado`, 'warn');
+                    return 'payload_short';
+                }
                 const dv = new DataView(payload.buffer, payload.byteOffset, payload.byteLength);
                 const u32 = (o) => dv.getUint32(o, true);
                 const msg = {
@@ -753,7 +928,7 @@ export function routeMUPacket(packet, ctx = {}) {
                 // header/head/sub, so the exact body is 3 bytes.
                 if (!need(3, 'pk')) return 'payload_short';
                 if (payload.length !== 3) return 'payload_short';
-                const msg = { key: (payload[0] << 8) | payload[1], pk: payload[2] };
+                const msg = { key: (((payload[0] << 8) | payload[1]) & 0x7FFF), pk: payload[2] };
                 if (ctx.onPkChange) ctx.onPkChange(msg);
                 return 'pk';
             }
@@ -763,6 +938,7 @@ export function routeMUPacket(packet, ctx = {}) {
                 // pós-sub: [DamageH][DamageL][ShieldDamageH][ShieldDamageL] = 4B.
                 // É o dano SOFRIDO pelo herói (monstro acertou) — feedback HUD.
                 if (!need(4, 'damage')) return 'payload_short';
+                if (payload.length !== 4) return 'payload_short';
                 const msg = {
                     damage: (payload[0] << 8) | payload[1],
                     shieldDamage: (payload[2] << 8) | payload[3],
@@ -1280,6 +1456,55 @@ export function routeMUPacket(packet, ctx = {}) {
             return 'inventory_delete';
         }
 
+        case MAIN_OPCODE.HELPER_ITEM: { // 0x29 — ReceiveHelperItem / PRECEIVE_HELPER_ITEM
+            // Main 5.2 exact body after opcode: [Index][TimeLo][TimeHi].
+            // ReceiveHelperItem accepts helper ability indexes 0..2 and stores
+            // Time*24 animation ticks. Fail closed before publishing gameplay state.
+            if (!payload || payload.length !== 3) {
+                log(`[MU] 0x29 HelperItem tamanho inválido ${payload?.length ?? 0}/3 — descartado`, 'warn');
+                return 'payload_short';
+            }
+            const index = payload[0];
+            if (index > 2) {
+                log(`[MU] 0x29 HelperItem index inválido ${index} — descartado`, 'warn');
+                return 'payload_invalid';
+            }
+            const time = payload[1] | (payload[2] << 8);
+            const msg = { index, time, animationTicks: time * 24 };
+            if (ctx.onHelperItem) ctx.onHelperItem(msg);
+            return 'helper_item';
+        }
+
+        case MAIN_OPCODE.USE_STATE_ITEM: { // 0x2C — ReceiveUseStatFruit / PMSG_USE_STAT_FRUIT
+            // Main 5.2 receive body after opcode is compact and exact:
+            // [Result:BYTE][Points:DWORD LE][Fruit:BYTE] = 6 bytes.  The DWORD
+            // begins at absolute packet offset 4 (PBMSG_HEADER is 3 bytes), so
+            // there is no compiler padding in the wire body.  Publish atomically.
+            if (!payload || payload.length !== 6) {
+                log(`[MU] 0x2C StatFruit tamanho inválido ${payload?.length ?? 0}/6 — descartado`, 'warn');
+                return 'payload_short';
+            }
+            const result = payload[0];
+            const points = ((payload[1]) | (payload[2] << 8) | (payload[3] << 16) | (payload[4] << 24)) >>> 0;
+            const fruit = payload[5];
+            const msg = Object.freeze({ result, points, fruit });
+            if (ctx.onStatFruit) ctx.onStatFruit(msg);
+            return 'stat_fruit';
+        }
+
+        case MAIN_OPCODE.DISPLAY_EFFECT: { // 0x48 — DISPLAYEREFFECT_NOTIFYINFO
+            // Main 5.2 exact body: [KeyH][KeyL][Type]. Key is network-order
+            // viewport identity in this packet family. Keep the visual consumer
+            // separate; this parser publishes only the authoritative wire event.
+            if (!payload || payload.length !== 3) {
+                log(`[MU] 0x48 DisplayEffect tamanho inválido ${payload?.length ?? 0}/3 — descartado`, 'warn');
+                return 'payload_short';
+            }
+            const msg = Object.freeze({ key: ((payload[0] << 8) | payload[1]) & 0xffff, type: payload[2] });
+            if (ctx.onDisplayEffect) ctx.onDisplayEffect(msg);
+            return 'display_effect';
+        }
+
         case MAIN_OPCODE.TALK: { // 0x30 — ReceiveTalk, PHEADER_DEFAULT
             if (!need(1, 'talk')) return 'payload_short';
             if (payload.length !== 1) { log(`[MU] 0x30 talk tamanho inválido (${payload.length}/1)`, 'warn'); return 'payload_short'; }
@@ -1433,6 +1658,80 @@ export function routeMUPacket(packet, ctx = {}) {
             return subCode === 0 ? 'equipment_item' : 'equipment_item_sub';
         }
 
+
+        case 0xA0: { // ReceiveQuestHistory — PRECEIVE_QUEST_HISTORY (WSclient.h)
+            // PBMSG_HEADER + BYTE Count + BYTE Quest[50] => payload exact 51B.
+            if (!need(51, 'questHistory')) return 'payload_short';
+            if (payload.length !== 51) {
+                log(`[MU] 0xA0 quest-history tamanho inválido (${payload.length}/51)`, 'warn');
+                return 'payload_short';
+            }
+            const count = payload[0];
+            if (count > 50) {
+                log(`[MU] 0xA0 quest-history count inválido ${count}/50`, 'warn');
+                return 'payload_short';
+            }
+            const slots = Array.from(payload.subarray(1, 51));
+            const quests = slots.slice(0, count);
+            if (ctx.onQuestHistory) ctx.onQuestHistory({ count, quests, slots });
+            return 'quest_history';
+        }
+
+        case 0xA1: { // ReceiveQuestState — PRECEIVE_QUEST_STATE
+            if (!need(2, 'questState')) return 'payload_short';
+            if (payload.length !== 2) {
+                log(`[MU] 0xA1 quest-state tamanho inválido (${payload.length}/2)`, 'warn');
+                return 'payload_short';
+            }
+            const msg = { questIndex: payload[0], state: payload[1] };
+            if (ctx.onQuestState) ctx.onQuestState(msg);
+            return 'quest_state';
+        }
+
+        case 0xA2: { // ReceiveQuestResult — PRECEIVE_QUEST_RESULT
+            if (!need(3, 'questResult')) return 'payload_short';
+            if (payload.length !== 3) {
+                log(`[MU] 0xA2 quest-result tamanho inválido (${payload.length}/3)`, 'warn');
+                return 'payload_short';
+            }
+            const msg = { questIndex: payload[0], result: payload[1], state: payload[2] };
+            if (ctx.onQuestResult) ctx.onQuestResult(msg);
+            return 'quest_result';
+        }
+
+        case 0xA3: { // ReceiveQuestPrize — PRECEIVE_QUEST_REPARATION
+            if (!need(4, 'questPrize')) return 'payload_short';
+            if (payload.length !== 4) {
+                log(`[MU] 0xA3 quest-prize tamanho inválido (${payload.length}/4)`, 'warn');
+                return 'payload_short';
+            }
+            const key = (((payload[0] << 8) | payload[1]) & 0x7fff) >>> 0;
+            const msg = { key, reparation: payload[2], number: payload[3] };
+            if (ctx.onQuestPrize) ctx.onQuestPrize(msg);
+            return 'quest_prize';
+        }
+
+        case 0xA4: { // ReceiveQuestMonKillInfo — PMSG_ANS_QUEST_MONKILL_INFO
+            // PBMSG_HEADER2 consumes subcode in protocol parser; body is
+            // byResult + byQuestIndex + int32[10] (42 bytes), little-endian x86.
+            if (subcode !== 0x00) {
+                const key=`a4:${subcode}`;
+                if(!_loggedUnknownPackets.has(key)){_loggedUnknownPackets.add(key);log(`[MU] 0xA4 sub não roteado: 0x${subcode?.toString(16)} — log único`,'info');}
+                return 'unknown';
+            }
+            if (!need(42, 'questMonKillInfo')) return 'payload_short';
+            if (payload.length !== 42) {
+                log(`[MU] 0xA4:00 quest-mon-kill tamanho inválido (${payload.length}/42)`, 'warn');
+                return 'payload_short';
+            }
+            const dv = new DataView(payload.buffer, payload.byteOffset, payload.byteLength);
+            const killCounts = [];
+            for (let i=0;i<10;i++) killCounts.push(dv.getInt32(2+i*4,true));
+            const msg={result:payload[0],questIndex:payload[1],killCounts};
+            if(ctx.onQuestMonKillInfo)ctx.onQuestMonKillInfo(msg);
+            return 'quest_mon_kill';
+        }
+
         case 0xD2: { // IGS family — WSclient.cpp dispatcher, PeriodItem sub 0x11/0x12
             // PMSG_PERIODITEMEX_ITEMCOUNT: PBMSG_HEADER2 + BYTE count.
             if (subcode === 0x11) {
@@ -1487,6 +1786,36 @@ export function routeMUPacket(packet, ctx = {}) {
             return 'notice';
         }
 
+        case 0xC0: { // ReceiveFriendList — WSclient.cpp:8990 / WSclient.h:1860
+            // FS_FRIEND_LIST_HEADER = PWMSG_HEADER + MemoCount + MaxMemo + Count.
+            // RealMUProtocol already consumed the C2 header/headcode, so payload
+            // begins at these 3 bytes. Each FS_FRIEND_LIST_DATA is Name[10]+Server.
+            if (!need(3, 'friendListHeader')) return 'payload_short';
+            const memoCount = payload[0] & 0xff;
+            const maxMemo = payload[1] & 0xff;
+            const count = payload[2] & 0xff;
+            const rowSize = 11;
+            const expected = 3 + count * rowSize;
+            // Exact atomic layout: never publish a partial list or accept trailing bytes.
+            if (payload.length !== expected) {
+                log(`[MU] 0xC0 friend list: tamanho inválido ${payload.length}/${expected} count=${count} — descartado`, 'warn');
+                return 'payload_short';
+            }
+            const td = new TextDecoder();
+            const friends = [];
+            let off = 3;
+            for (let i = 0; i < count; i++, off += rowSize) {
+                const rawName = payload.subarray(off, off + 10);
+                const nul = rawName.indexOf(0);
+                const name = td.decode(nul >= 0 ? rawName.subarray(0, nul) : rawName).trim();
+                const server = payload[off + 10] & 0xff;
+                friends.push(Object.freeze({ name, server }));
+            }
+            const msg = Object.freeze({ memoCount, maxMemo, count, friends: Object.freeze(friends) });
+            if (ctx.onFriendList) ctx.onFriendList(msg);
+            return 'friend_list';
+        }
+
         case 0x0F: { // ReceiveWeather — WSclient.cpp dispatcher L13300
             // PRECEIVE_WEATHER (WSclient.h): {PBMSG_HEADER hdr; BYTE Weather}
             // — payload = 1 byte. Frame real do wire: 'c1 04 0f 00' (probe
@@ -1507,8 +1836,6 @@ export function routeMUPacket(packet, ctx = {}) {
                 // roteados acima — removidos daqui (não são 'desconhecidos').
                 0xD2: 'ReceiveIGS_* (family sub)',
                 0xBF: 'ReceiveCursedTempleEntryResult / ReceiveCursedTemplerResult',
-                0xA0: 'ReceiveQuestHistory',
-                0xC0: 'ReceiveFriendList',
                 0xF6: 'ReceiveTimeLimitQuest (inativo)',
             };
             const unk = `head:${headcode?.toString(16)}:sub:${subcode ?? 'x'}`;

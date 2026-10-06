@@ -22,6 +22,7 @@ Base direta atual: FIX27, preservando FIX26, FIX25, FIX24, FIX23, FIX22, FIX21, 
 16. [Índice automático de módulos](AUTOGEN_MODULE_INDEX.md)
 17. [Índice automático de testes](AUTOGEN_TEST_INDEX.md)
 18. [Pré-check de segurança para GitHub](GITHUB_SECURITY_PRECHECK.md)
+19. [FIX99 — auditoria de effect runtime e pools de mapas](16_FIX99_EFFECT_RUNTIME_AUDIT.md)
 
 ## Validação atual
 

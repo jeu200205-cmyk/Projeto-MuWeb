@@ -589,6 +589,13 @@ export class MUAssetLoader {
         // In-memory caches
         this._bmdCache = new Map();
         this._bmdInflight = new Map();
+        // FIX98: raw BMD authority cache. Equipment/body attachments require
+        // Vertex_t/Normal_t/Triangle_t2, while MUModelRenderer consumes the
+        // adapted flat render-data. Keep both contracts explicit and derive
+        // adapted data from the same raw parse so equip never receives a
+        // render-data object with no m.triangles.
+        this._bmdRawCache = new Map();
+        this._bmdRawInflight = new Map();
         this._bmdAuthority = this.remoteAssets.authorityKey;
         this._bmdEpoch = 0;
         this._textureCache = new Map();
@@ -637,6 +644,48 @@ export class MUAssetLoader {
      * @param {string} relPath - e.g. 'Player/Knight.bmd' or 'Monster/bullfighter01.bmd'
      * @returns {Promise<Object>} { meshes, bones, actions, version, source }
      */
+    async loadBMDRaw(relPath) {
+        const authority = this.remoteAssets.authorityKey;
+        if (authority !== this._bmdAuthority) {
+            this._bmdAuthority = authority;
+            this._bmdEpoch++;
+            this._bmdCache.clear();
+            this._bmdInflight.clear();
+            this._bmdRawCache.clear();
+            this._bmdRawInflight.clear();
+        }
+        if (this._bmdRawCache.has(relPath)) return this._bmdRawCache.get(relPath);
+        if (this._bmdRawInflight.has(relPath)) return this._bmdRawInflight.get(relPath);
+        const epoch = this._bmdEpoch;
+        const assertCurrent = () => {
+            if (epoch !== this._bmdEpoch || authority !== this.remoteAssets.authorityKey) {
+                const error = new Error(`BMD raw load superseded: ${relPath}`);
+                error.code = 'MUWEB_STALE_ASSET_LOAD';
+                throw error;
+            }
+        };
+        const job = (async () => {
+            const buf = await this.remoteAssets.fetchBinary(relPath);
+            assertCurrent();
+            if (!buf) throw new Error(`Failed to fetch BMD raw: ${relPath}`);
+            const fmt = detectBMDFormat(buf);
+            if (fmt !== 'v12' && fmt !== 'v10') {
+                throw new Error(`BMD raw contract unsupported (${fmt}): ${relPath}`);
+            }
+            const raw = parseBMD(buf);
+            assertCurrent();
+            if (!raw || !Array.isArray(raw.meshes) || !Array.isArray(raw.bones)) {
+                throw new Error(`BMD raw inválido: ${relPath}`);
+            }
+            this._bmdRawCache.set(relPath, raw);
+            return raw;
+        })().finally(() => {
+            if (this._bmdRawInflight.get(relPath) === job) this._bmdRawInflight.delete(relPath);
+        });
+        this._bmdRawInflight.set(relPath, job);
+        return job;
+    }
+
     async loadBMD(relPath) {
         const authority = this.remoteAssets.authorityKey;
         if (authority !== this._bmdAuthority) {
@@ -644,6 +693,8 @@ export class MUAssetLoader {
             this._bmdEpoch++;
             this._bmdCache.clear();
             this._bmdInflight.clear();
+            this._bmdRawCache.clear();
+            this._bmdRawInflight.clear();
         }
         // Check memory cache
         if (this._bmdCache.has(relPath)) return this._bmdCache.get(relPath);
@@ -689,12 +740,11 @@ export class MUAssetLoader {
         let parsed;
 
         if (fmt === 'v12' || fmt === 'v10') {
-            // REAL — Main 5.2 BMD v12: decrypt MapFileDecrypt
-            // (ZzzLodTerrain.h:150) + layout BMD::Open2 (ZzzBMD.cpp:2876).
-            // v10: MESMO layout, payload LIMPO do offset 4 (sem decrypt) —
-            // ZzzBMD.cpp:17924-17932; provado em Monster01/03/10 + peças MG
-            // Class04 (probe .port_scratch/probe-bmd-v10-layout.mjs).
-            const model = parseBMD(buf);
+            // FIX98: renderer and equipment share one authority-scoped raw
+            // parse. loadBMDRaw() owns Triangle_t2/Vertex_t structures; this
+            // lane only adapts them for Three.js.
+            const model = await this.loadBMDRaw(relPath);
+            assertCurrent();
             parsed = bmdToRenderData(model, relPath);
         } else if (fmt === 'old') {
             parsed = this.useWorkers ? await runWorker('parseBMD', buf, relPath)

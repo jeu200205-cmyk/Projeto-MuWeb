@@ -25,7 +25,8 @@
 
 import * as THREE from 'three';
 import { muDirectionToThreeYaw } from './MUDirection.js';
-import { composeCharacter, buildEquipmentAttach, buildAccessoryRenderer, buildLinkedWeaponRenderer, buildAnimationControl, setLinkedWeaponSafeZonePresentation, mergeEquipmentBodyRenderData, applyBodyEquipmentPresentation, pcCharacterScale, getPcTextureSkinIndex, playerVisualLoadIssues, unresolvedClassParts } from '../graphics/PlayerComposer.js';
+import { composeCharacter, buildEquipmentAttach, buildAccessoryRenderer, buildLinkedWeaponRenderer, buildAnimationControl, setLinkedWeaponSafeZonePresentation, mergeEquipmentBodyRenderData, applyBodyEquipmentPresentation, pcCharacterScale, getPcTextureSkinIndex, playerVisualLoadIssues, unresolvedClassParts, characterEquipmentVisualSignature } from '../graphics/PlayerComposer.js';
+import { attachCapeCloth } from '../graphics/PcCapeCloth.js';
 import { applyMuUpAxis } from '../graphics/BmdAdapter.js';
 import { MUModelRenderer } from '../assets/MUModelRenderer.js';
 import { MUAssets } from '../assets/MUAssetLoader.js';
@@ -34,7 +35,7 @@ import { serverClassToClientClass } from '../data/CharacterClassMap.js';
 import { BuffContainer } from './BuffSystem.js';
 import { Movement } from './Movement.js';
 import { pcWorldActiveFromAssetWorld, pcInBloodCastle, pcInChaosCastle, pcInSwimLocomotionWorld } from './PcMapContext.js';
-import { HelperCompanion, Pet } from './PetSystem.js';
+import { HelperCompanion, Pet, MountCompanion } from './PetSystem.js';
 import { resolveCustomPreviewElements } from '../data/CustomPreviewElements.js';
 
 
@@ -318,6 +319,7 @@ export class PlayerViewportManager {
         try { entry.renderer?.dispose?.(); } catch (_ignore) { /* noop */ }
         for (const wr of entry.extras || []) { try { wr.dispose?.(); } catch (_ignore) { /* noop */ } }
         try { entry.customHelperCompanion?.dispose?.(); } catch (_ignore) { /* noop */ }
+        try { entry.mountCompanion?.dispose?.(); } catch (_ignore) { /* noop */ }
         try { entry.elementCompanions?.first?.dispose?.(); } catch (_ignore) { /* noop */ }
         try { entry.elementCompanions?.second?.dispose?.(); } catch (_ignore) { /* noop */ }
     }
@@ -353,6 +355,15 @@ export class PlayerViewportManager {
                 Number(requestedPreview?.element?.[1] || 0) !== Number(old.customPreview?.element?.[1] || 0)
             );
             if (!meta.forcePreview && !previewChanged && sig === old.appearanceSignature && playerVisualLoadIssues(old.renderer, old.extras, old.equipment).length === 0) return false;
+            // FIX87: remote F3:13/0x25 may churn wire option bytes that do not
+            // change any resolved BMD/material/helper/wing owner.  With many
+            // players this used to rebuild a complete Player graph per packet.
+            const nextVisualSignature = characterEquipmentVisualSignature([Number(classByte)&0xFF, ...eq], requestedPreview);
+            if (!meta.forcePreview && !previewChanged && nextVisualSignature && nextVisualSignature === old.visualSignature &&
+                playerVisualLoadIssues(old.renderer, old.extras, old.equipment).length === 0) {
+                old.classByte=Number(classByte)&0xFF; old.equipmentBytes=eq.slice(); old.appearanceSignature=sig;
+                return false;
+            }
             const spawnSpec = {
                 key, id: old.id, classByte: Number(classByte) & 0xFF, equipment: eq,
                 x: Number.isInteger(old.serverTileX) ? old.serverTileX : Math.max(0, Math.min(255, Math.floor((old.outer.position.x + 12800) / 100))),
@@ -481,7 +492,7 @@ export class PlayerViewportManager {
         let renderData = composed.renderData;
         let attach = null;
         if (charset) {
-            attach = await buildEquipmentAttach(charset, this.io, renderData.bones, renderData.bones.length, { customPreview: e.customPreview || null });
+            attach = await buildEquipmentAttach(charset, this.io, renderData.bones, renderData.bones.length, { customPreview: e.customPreview || null, classId });
             if (attach.missing.length || attach.bodyMissing?.length) {
                 console.info(`[PlayerViewport] ${e.id} equipamento ausente (fail-closed): ${JSON.stringify({ attachments:attach.missing, body:attach.bodyMissing || [] })}`);
             }
@@ -534,6 +545,16 @@ export class PlayerViewportManager {
             }
         }
 
+        if (attach?.wing?.itemModelType != null) {
+            try {
+                await attachCapeCloth(renderer, {
+                    itemModelType: attach.wing.itemModelType,
+                    classId,
+                    custom: Boolean(attach.wing.customWing && attach.wing.isCape),
+                });
+            } catch (err) { console.warn(`[PlayerViewport] cape cloth ${e.id} falhou: ${err?.message || err}`); }
+        }
+
         const linkedWeapons = [];
         for (const spec of [attach?.weaponRightSpec, attach?.weaponLeftSpec]) {
             if (!spec) continue;
@@ -560,7 +581,7 @@ export class PlayerViewportManager {
         let customHelperCompanion = null;
         if (attach?.customHelper?.petModelPath) {
             try {
-                const helperOwner = { position: outer.position, isAlive: () => !customHelperCompanion?.disposed };
+                const helperOwner = { position: outer.position, rotation: outer.rotation, isAlive: () => !customHelperCompanion?.disposed, safeZone: () => Boolean(this.scene?.terrainWallAt?.(outer.position.x, outer.position.z) & 0x0001) };
                 customHelperCompanion = new HelperCompanion(helperOwner, this.scene.scene, 1.0, attach.customHelper);
                 await customHelperCompanion.init();
             } catch (err) {
@@ -569,18 +590,38 @@ export class PlayerViewportManager {
             }
         }
 
+        // FIX95: stock/custom rider lane is a physical CreateBug companion for
+        // remote players too. Previously only the local hero/character-select built it.
+        let mountCompanion = null;
+        const mountSpec = attach?.rider?.petModelPath ? attach.rider : attach?.fenrir?.petModelPath ? attach.fenrir : null;
+        if (mountSpec?.petModelPath) {
+            try {
+                const mountOwner = { position: outer.position, mesh: outer, isAlive: () => !mountCompanion?.disposed };
+                mountCompanion = new MountCompanion(mountOwner, this.scene.scene, mountSpec.petModelPath, mountSpec.option, {
+                    safeZone: () => Boolean(this.scene?.terrainWallAt?.(outer.position.x, outer.position.z) & 0x0001),
+                    terrainHeightAt: (x,z) => this.scene?.terrainHeightAt?.(x,z), species: mountSpec.species,
+                    behaviorSpecies: mountSpec.behaviorSpecies, presentation: mountSpec.presentation || null,
+                    scale: mountSpec.size,
+                });
+                await mountCompanion.init();
+            } catch (err) { mountCompanion?.dispose?.(); mountCompanion=null; console.warn(`[PlayerViewport] mount ${e.id} falhou (fail-closed): ${err?.message || err}`); }
+        }
+
         // FIX53: F3:72 Element[0]/Element[1] are physical companions in
         // ZzzCharacter.cpp, independent of PetIndex. Resolve only through the
         // real DarkSpirit.lua / CharacterHelper.lua registries.
         const elementCompanions = { first:null, second:null };
         const elementSpec = resolveCustomPreviewElements(e.customPreview || null);
-        const elementOwner = { position: outer.position, isAlive: () => true };
+        const elementOwner = { position: outer.position, rotation: outer.rotation, isAlive: () => true, safeZone: () => Boolean(this.scene?.terrainWallAt?.(outer.position.x, outer.position.z) & 0x0001) };
         try {
             if (elementSpec.first?.kind === 'dark-spirit') {
-                elementCompanions.first = new Pet(elementOwner, this.scene.scene, elementSpec.first.petModelPath);
+                elementCompanions.first = new Pet(elementOwner, this.scene.scene, elementSpec.first.petModelPath, elementSpec.first.presentation || elementSpec.first);
                 await elementCompanions.first.init();
             } else if (elementSpec.first?.kind === 'helper') {
                 elementCompanions.first = new HelperCompanion(elementOwner, this.scene.scene, 1.0, elementSpec.first);
+                await elementCompanions.first.init();
+            } else if (elementSpec.first?.kind === 'mount') {
+                elementCompanions.first = new MountCompanion({...elementOwner,mesh:outer},this.scene.scene,elementSpec.first.petModelPath,0,{safeZone:elementOwner.safeZone,terrainHeightAt:(x,z)=>this.scene?.terrainHeightAt?.(x,z),species:elementSpec.first.species,behaviorSpecies:elementSpec.first.behaviorSpecies,presentation:elementSpec.first.presentation,scale:elementSpec.first.size});
                 await elementCompanions.first.init();
             }
         } catch (err) {
@@ -590,6 +631,9 @@ export class PlayerViewportManager {
         try {
             if (elementSpec.second?.kind === 'helper') {
                 elementCompanions.second = new HelperCompanion(elementOwner, this.scene.scene, 1.0, elementSpec.second);
+                await elementCompanions.second.init();
+            } else if (elementSpec.second?.kind === 'mount') {
+                elementCompanions.second = new MountCompanion({...elementOwner,mesh:outer},this.scene.scene,elementSpec.second.petModelPath,0,{safeZone:elementOwner.safeZone,terrainHeightAt:(x,z)=>this.scene?.terrainHeightAt?.(x,z),species:elementSpec.second.species,behaviorSpecies:elementSpec.second.behaviorSpecies,presentation:elementSpec.second.presentation,scale:elementSpec.second.size});
                 await elementCompanions.second.init();
             }
         } catch (err) {
@@ -624,10 +668,11 @@ export class PlayerViewportManager {
         const entry = {
             renderer, outer, extras, t: 0, poseAccumulator: 0, id: e.id, key: e.key, classId,
             classByte, equipmentBytes, appearanceSignature: equipmentSignature(classByte, equipmentBytes),
+            visualSignature: characterEquipmentVisualSignature([classByte, ...equipmentBytes], e.customPreview || null),
             serverTileX: e.x, serverTileY: e.y, serverDir: e.dir ?? ((e.path >> 4) & 7),
             serverBuffSnapshot: Array.from(e.buffs || []),
             customPreview: e.customPreview || null,
-            weaponRightSpec: attach?.weaponRightSpec || null, equipment: attach, customHelperCompanion, elementCompanions,
+            weaponRightSpec: attach?.weaponRightSpec || null, equipment: attach, customHelperCompanion, mountCompanion, elementCompanions,
             moveTarget: null,
             motionChar: { classId, _muRunProgress: 0, mesh: outer },
             bodyLightColor: new THREE.Color(1, 1, 1),
@@ -696,6 +741,7 @@ export class PlayerViewportManager {
                 renderer.update(poseDt, entry.t);
                 for (const wr of extras) wr.update(poseDt, entry.t);
                 customHelperCompanion?.update?.(poseDt);
+                mountCompanion?.update?.(poseDt, renderer);
                 elementCompanions.first?.update?.(poseDt, []);
                 elementCompanions.second?.update?.(poseDt);
                 poseSteps++;

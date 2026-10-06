@@ -22,7 +22,8 @@ import {
     buildWorldTerrain, applyMuCamera, LOGIN_CAMERA, CHAR_CAMERA,
     MAP_SIZE, TERRAIN_SCALE, TERRAIN_SIZE, TW,
 } from '../world/TerrainWorld.js';
-import { composeCharacter, buildAnimationControl, buildEquipmentAttach, buildAccessoryRenderer, buildLinkedWeaponRenderer, setLinkedWeaponSafeZonePresentation, mergeEquipmentBodyRenderData, applyBodyEquipmentPresentation, pcCharacterScale, getPcTextureSkinIndex, playerVisualLoadIssues, unresolvedClassParts } from './PlayerComposer.js';
+import { composeCharacter, buildAnimationControl, buildEquipmentAttach, buildAccessoryRenderer, buildLinkedWeaponRenderer, setLinkedWeaponSafeZonePresentation, mergeEquipmentBodyRenderData, applyBodyEquipmentPresentation, pcCharacterScale, getPcTextureSkinIndex, playerVisualLoadIssues, unresolvedClassParts, characterEquipmentVisualSignature, characterBodyGeometrySignature, refreshLinkedItemPresentation } from './PlayerComposer.js';
+import { attachCapeCloth } from './PcCapeCloth.js';
 import { applyMuUpAxis, bmdToRenderData } from './BmdAdapter.js';
 import { MUModelRenderer } from '../assets/MUModelRenderer.js';
 import { MUAssets } from '../assets/MUAssetLoader.js';
@@ -31,6 +32,7 @@ import { TerrainObjectLayer, prefetchWorldTerrainObjects } from '../world/Terrai
 import { pcWorldActiveFromAssetWorld, pcInBloodCastle, pcInChaosCastle, pcInSwimLocomotionWorld } from '../game/PcMapContext.js';
 import { loadItemEffectsLuaConfig, resolveRuneAuraForEquipment } from '../data/ItemEffectsLuaConfig.js';
 import { PcRuneAura } from './PcRuneAura.js';
+import { decodeCharacterEquipment } from '../data/CharacterEquipmentCodec.js';
 
 // Paridade PC (t-muhklmi5-a): Winmain.cpp:2142-2170 — clear color POR MAPA.
 // Convenção de pasta↔WorldActive documentada no header (World95↔94,
@@ -334,6 +336,8 @@ export class GameScene {
             this.cameraMode = 'login';
             applyMuCamera(this.camera.threeCamera, LOGIN_CAMERA);
             this._reportWorldStatus?.('World95 aplicado (oceano/ilha reais, câmera SceneLogin -84°/-45°).');
+            // FIX81: World95/login is outside loadRealMap(), therefore it must
+            // not call the local _publishMapEntryProfile closure owned by loadRealMap.
             return true;
         } catch (e) {
             this._reportWorldStatus?.(`Mundo de login indisponível: ${e.message}`);
@@ -543,7 +547,7 @@ export class GameScene {
         let heroAttach = null;
         if (Array.isArray(opts.charset) && opts.charset.length >= 18) {
             try {
-                heroAttach = await buildEquipmentAttach(opts.charset, { fetchBinary: (p) => RemoteAssets.fetchBinary(p) }, renderDataBase.bones, renderDataBase.bones.length, { customPreview: opts.customPreview || null });
+                heroAttach = await buildEquipmentAttach(opts.charset, { fetchBinary: (p) => RemoteAssets.fetchBinary(p) }, renderDataBase.bones, renderDataBase.bones.length, { customPreview: opts.customPreview || null, classId });
                 renderData = mergeEquipmentBodyRenderData(renderDataBase, heroAttach);
                 if (heroAttach.weaponRenderMode !== 'render-link-object' && heroAttach.meshes.length) {
                     renderData = {
@@ -619,6 +623,20 @@ export class GameScene {
             }
         }
 
+        // FIX58: PC RenderCharacter owns cape cloth on the PLAYER skeleton,
+        // independently from the rigid wing/cape BMD. Stock WING+39/+40 and
+        // current-client custom capes execute through the same CPhysicsCloth lane.
+        if (heroAttach?.wing?.itemModelType != null) {
+            try {
+                const cloth = await attachCapeCloth(renderer, {
+                    itemModelType: heroAttach.wing.itemModelType,
+                    classId,
+                    custom: Boolean(heroAttach.wing.customWing && heroAttach.wing.isCape),
+                });
+                if (cloth.length) console.info(`[World] cape cloth PC ativo: ${cloth.length} cloth(s) type=${heroAttach.wing.itemModelType}`);
+            } catch (e) { console.warn(`[World] cape cloth falhou (rigid owner mantido): ${e?.message || e}`); }
+        }
+
         // Held weapons/shields use their OWN BMD hierarchy under the authored
         // player hand bone (RenderLinkObject semantics). The old Web shortcut
         // remapped item vertices into Player.bmd and produced the visibly wrong
@@ -664,6 +682,9 @@ export class GameScene {
         // Single terrain/equipment source of truth for both clip selection and
         // physical presentation speed. This prevents SafeZone from changing the
         // weapon pose while Movement keeps an unrelated Web-only run state.
+        try { outer.userData.muBodyWireSignature = JSON.stringify(['helm','armor','pants','gloves','boots'].map((k)=>{const x=decodeCharacterEquipment(opts.charset)?.body?.[k]||null;return x?[x.extType??null,x.level??0,x.option1??0,x.extOption??0,Boolean(x.baseSkin)]:null;})); } catch (_) { outer.userData.muBodyWireSignature = null; }
+        outer.userData.muEquipmentVisualSignature = characterEquipmentVisualSignature(opts.charset, opts.customPreview || null);
+        outer.userData.muBodyGeometrySignature = characterBodyGeometrySignature(opts.charset);
         outer.userData.muMovementContext = {
             safeZone: heroSafeZone,
             equipment: heroAttach,
@@ -848,6 +869,19 @@ export class GameScene {
         }
         const currentAttach = outer.userData?.muMovementContext?.equipment || null;
         if (!currentAttach) return { status: 'requires-full' };
+        // FIX85: reject protocol-only CharSet churn before any BMD fetch/parse.
+        // This is common while moving items: F3:13 can carry changed wire bytes
+        // that resolve to the exact same rendered body/weapons/wing/helper.
+        const nextVisualSig = characterEquipmentVisualSignature(charset, opts.customPreview || null);
+        const currentVisualSig = outer.userData?.muEquipmentVisualSignature ?? null;
+        if (nextVisualSig && currentVisualSig && nextVisualSig === currentVisualSig) {
+            const movementCtx = outer.userData.muMovementContext || {};
+            movementCtx.equipment = currentAttach;
+            movementCtx.classId = classId;
+            outer.userData.muMovementContext = movementCtx;
+            console.info('[World R85] equipment visual no-op: CharSet wire mudou sem alterar owners visuais');
+            return { status:'applied', object:outer, attach:currentAttach, noOp:true };
+        }
         const revision = this._playerVisualGeneration = (this._playerVisualGeneration || 0) + 1;
         const accepts = () => revision === this._playerVisualGeneration && this.mainObject === outer &&
             this._playerRenderer === renderer && (typeof opts.acceptPublish !== 'function' || opts.acceptPublish() === true);
@@ -865,16 +899,50 @@ export class GameScene {
             viaCacheKey:x.viaCacheKey || null,
         }) : 'null';
         const sameSpec = (a,b) => specSig(a) === specSig(b);
+        // FIX87: separate linked-item geometry from material/FX state. +level,
+        // excellent and custom colors do not require reparsing/recreating the BMD.
+        const linkedGeometrySig = (x) => x ? JSON.stringify({
+            path:x.path || '', side:x.side || null, linkBone:x.linkBone ?? null,
+            attach:x.attach || null, viaCacheKey:x.viaCacheKey || null, kind:x.kind || null,
+            customWing:Boolean(x.customWing), isCape:Boolean(x.isCape), isCapeCount:x.isCapeCount || 0,
+        }) : 'null';
+        const sameLinkedGeometry = (a,b) => linkedGeometrySig(a) === linkedGeometrySig(b);
 
+        // FIX83: determine whether the five body families are byte/semantic-identical
+        // before composing the next attachment graph. Weapon/wing/helper changes must not
+        // re-fetch/re-parse body BMDs or rebuild their mesh arrays.
+        const bodyWireSig = (cs) => {
+            try {
+                const d = decodeCharacterEquipment(cs);
+                const b = d?.body || {};
+                return JSON.stringify(['helm','armor','pants','gloves','boots'].map((k) => {
+                    const x=b[k] || null;
+                    return x ? [x.extType ?? null,x.level ?? 0,x.option1 ?? 0,x.extOption ?? 0,Boolean(x.baseSkin)] : null;
+                }));
+            } catch (_) { return null; }
+        };
+        const nextBodySig = bodyWireSig(charset);
+        const currentBodySig = outer.userData?.muBodyWireSignature ?? null;
+        const nextBodyGeometrySig = characterBodyGeometrySignature(charset);
+        const currentBodyGeometrySig = outer.userData?.muBodyGeometrySignature ?? null;
+        const sameBodyGeometry = nextBodyGeometrySig != null && currentBodyGeometrySig != null && nextBodyGeometrySig === currentBodyGeometrySig;
+        const exactBodyState = nextBodySig != null && currentBodySig != null && nextBodySig === currentBodySig;
         const nextAttach = await buildEquipmentAttach(
             charset,
             { fetchBinary: (p) => RemoteAssets.fetchBinary(p) },
             renderer.bones,
             renderer.bones?.length || 0,
-            { customPreview: opts.customPreview || null },
+            {
+                customPreview: opts.customPreview || null,
+                reuseBodyAttach: sameBodyGeometry ? currentAttach : null,
+                refreshReusableBodySpecs: sameBodyGeometry && !exactBodyState,
+                reuseLinkedAttach: currentAttach,
+            },
         );
         if (!accepts()) return { status:'stale' };
-        if (nextAttach.missing.length || nextAttach.bodyMissing.length || bodySig(currentAttach) !== bodySig(nextAttach)) return { status:'requires-full', attach:nextAttach };
+        // A real body BMD change still requires an atomic graph replacement. Material-
+        // only changes stay on the live renderer and are refreshed below.
+        if (nextAttach.missing.length || nextAttach.bodyMissing.length || !sameBodyGeometry) return { status:'requires-full', attach:nextAttach };
 
         const oldExtras = Array.isArray(this._playerExtras) ? [...this._playerExtras] : [];
         const oldRuneAura = this._playerRuneAura || null;
@@ -887,9 +955,15 @@ export class GameScene {
             wr?.userData?.path === path && (side == null || wr?.userData?.side === side));
         const retainOrBuildAccessory = async (nextSpec, currentSpec, tag) => {
             if (!nextSpec) return null;
-            if (sameSpec(nextSpec, currentSpec)) {
-                const retained = oldByPath(nextSpec.path);
-                if (retained) { newExtras.push(retained); return retained; }
+            const retained = oldByPath(nextSpec.path);
+            if (retained && sameSpec(nextSpec, currentSpec)) { newExtras.push(retained); return retained; }
+            // Custom capes own a RenderCapeModel GPU program whose branch can be
+            // dynamic; keep their atomic rebuild semantics. Ordinary wings/IMP
+            // can refresh item materials/Lua children on the resident BMD.
+            if (retained && sameLinkedGeometry(nextSpec,currentSpec) && !nextSpec.isCape) {
+                await refreshLinkedItemPresentation(retained,nextSpec,tag);
+                retained.userData.kind=tag; newExtras.push(retained);
+                return retained;
             }
             const wr = await buildAccessoryRenderer({ scene:this.scene, camera:this.camera.threeCamera }, nextSpec);
             if (wr) newlyBuilt.push(wr);
@@ -903,9 +977,11 @@ export class GameScene {
         };
         const retainOrBuildWeapon = async (nextSpec, currentSpec) => {
             if (!nextSpec) return null;
-            if (sameSpec(nextSpec, currentSpec)) {
-                const retained = oldByPath(nextSpec.path, nextSpec.side);
-                if (retained) { newExtras.push(retained); linkedWeapons.push({wr:retained,spec:nextSpec}); return retained; }
+            const retained = oldByPath(nextSpec.path, nextSpec.side);
+            if (retained && sameSpec(nextSpec,currentSpec)) { newExtras.push(retained); linkedWeapons.push({wr:retained,spec:nextSpec}); return retained; }
+            if (retained && sameLinkedGeometry(nextSpec,currentSpec)) {
+                await refreshLinkedItemPresentation(retained,nextSpec,`weapon:${nextSpec.side}`);
+                newExtras.push(retained); linkedWeapons.push({wr:retained,spec:nextSpec}); return retained;
             }
             const wr = await buildLinkedWeaponRenderer({ scene:this.scene, camera:this.camera.threeCamera }, nextSpec);
             if (wr) newlyBuilt.push(wr);
@@ -950,6 +1026,11 @@ export class GameScene {
             const issues = playerVisualLoadIssues(renderer, newExtras, nextAttach);
             if (issues.length) throw new Error(`accessory assets incompletos: ${issues.join(', ')}`);
 
+            if (!exactBodyState) {
+                await applyBodyEquipmentPresentation(renderer, nextAttach);
+                if (!accepts()) return { status:'stale' };
+            }
+
             const bodyLight = this.terrainLightAt(outer.position.x, outer.position.z, this._bodyLightColor);
             if (bodyLight) for (const wr of newExtras) wr?.setBodyLight?.(bodyLight);
 
@@ -986,15 +1067,18 @@ export class GameScene {
             movementCtx.equipment = nextAttach;
             movementCtx.classId = classId;
             outer.userData.muMovementContext = movementCtx;
+            outer.userData.muBodyWireSignature = nextBodySig;
+            outer.userData.muEquipmentVisualSignature = nextVisualSig;
+            outer.userData.muBodyGeometrySignature = nextBodyGeometrySig;
             outer.userData.animationControl = nextControl;
 
-            console.info(`[World R81] equipment incremental publish: reused=${newExtras.length-newlyBuilt.length} rebuilt=${newlyBuilt.length} body=unchanged`);
+            console.info(`[World R87] equipment incremental publish: reused=${newExtras.length-newlyBuilt.length} rebuilt=${newlyBuilt.length} body=${exactBodyState?'unchanged':'material-refresh'}`);
             return { status:'applied', object:outer, attach:nextAttach };
         } catch (e) {
             for (const wr of newlyBuilt) { try { wr.group?.parent?.remove?.(wr.group); wr.dispose?.(); } catch (_) {} }
             try { nextRuneAura?.dispose?.(); } catch (_) {}
             if (!accepts()) return { status:'stale' };
-            console.warn('[World R81] incremental accessory rebuild falhou; full rebuild será usado:', e?.message || e);
+            console.warn('[World R87] incremental equipment rebuild falhou; full rebuild será usado:', e?.message || e);
             return { status:'requires-full', attach:nextAttach };
         }
     }
@@ -1039,12 +1123,26 @@ export class GameScene {
         // de jogo. O epoch descarta terrain/objects atrasados antes do commit.
         this._invalidateCharacterWorldLoad(`game-world-${worldNumber}`);
         // PERF world-entry / map-change physical diagnostics.
-        const _t = { start: performance.now() };
+        const _t = { start: performance.now(), phases: Object.create(null) };
         const _phase = (name) => {
             const now = performance.now();
             const ms = Math.round(now - (_t.last ?? _t.start));
             _t.last = now;
+            _t.phases[name] = ms;
             console.info(`[PERF] loadRealMap World${worldNumber}: ${name}=${ms}ms (total ${Math.round(now - _t.start)}ms)`);
+        };
+        const _publishMapEntryProfile = (status) => {
+            const end = performance.now();
+            const profile = Object.freeze({
+                worldNumber: worldNumber | 0,
+                atomic: options?.atomic === true,
+                status: String(status || 'unknown'),
+                totalMs: Math.round(end - _t.start),
+                phases: Object.freeze({ ..._t.phases }),
+            });
+            this.scene.userData.muMapEntryProfile = profile;
+            globalThis.__MUWEB_MAP_ENTRY_PROFILE__ = profile;
+            return profile;
         };
         let built = null;
         let builtCommitted = false;
@@ -1110,6 +1208,7 @@ export class GameScene {
                     this._disposeBuiltTerrain(built);
                     built = null;
                     console.info(`[Scene R81] World${worldNumber} staged map stale descartado antes do publish`);
+                    _publishMapEntryProfile('stale-before-publish');
                     return false;
                 }
 
@@ -1179,15 +1278,18 @@ export class GameScene {
             this._reportWorldStatus?.(
                 `World${worldNumber} REAL aplicado (mapNumber=${worldState.mapNumber}, ` +
                 `alturas OZB ×1.5, tiles L1/L2, walls=${worldState.walls ? 'OK' : 'ausentes'}${atomic ? ', commit atômico' : ''}).`);
+            _publishMapEntryProfile('ready');
             return true;
         } catch (e) {
             if (stagedLayer) { try { stagedLayer.dispose(); } catch (_) {} }
             if (built && !builtCommitted) this._disposeBuiltTerrain(built);
             if (e?.code === 'MUWEB_STALE_WORLD_LOAD') {
                 console.info(`[Scene R89] World${worldNumber} staging cancelado por destino mais novo`);
+                _publishMapEntryProfile('stale');
                 return false;
             }
             this._reportWorldStatus?.(`Mapa real indisponível: ${e.message} (sem fallback procedural — política 0 simulação)`);
+            _publishMapEntryProfile('failed');
             return false;
         } finally {
             objectWarmupController.abort();

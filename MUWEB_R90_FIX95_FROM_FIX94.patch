@@ -1,0 +1,867 @@
+diff -ruN '--exclude=R90_FIX95_SOURCE_HASHES.json' /mnt/data/MUWEB_R90_FIX94_LARGE_PORT_WINGS_LUA_TERRAIN_DARKSPIRIT_2026-10-05/CURRENT_AUTHORITY.txt /mnt/data/MUWEB_R90_FIX95_CHARACTERHELPER_TABLE_RENDER_ROUTING_2026-10-05/CURRENT_AUTHORITY.txt
+--- /mnt/data/MUWEB_R90_FIX94_LARGE_PORT_WINGS_LUA_TERRAIN_DARKSPIRIT_2026-10-05/CURRENT_AUTHORITY.txt	2026-10-05 23:34:53.337247096 +0000
++++ /mnt/data/MUWEB_R90_FIX95_CHARACTERHELPER_TABLE_RENDER_ROUTING_2026-10-05/CURRENT_AUTHORITY.txt	2026-10-05 23:57:40.314141697 +0000
+@@ -1,35 +1,28 @@
+-MUWEB central authority: MUWEB_R90_FIX94_LARGE_PORT_WINGS_LUA_TERRAIN_DARKSPIRIT_2026-10-05_FULL.zip
+-Parent: MUWEB_R90_FIX93_FENRIR_FOOT_THUNDER_SET_FX_2026-10-05_FULL.zip
++MUWEB central authority: MUWEB_R90_FIX95_CHARACTERHELPER_TABLE_RENDER_ROUTING_2026-10-05_FULL.zip
++Parent: MUWEB_R90_FIX94_LARGE_PORT_WINGS_LUA_TERRAIN_DARKSPIRIT_2026-10-05_FULL.zip
+ Status: DEVELOPMENT / NOT PROMOTED
+ 
+-Integrated: all FIX81-FIX93 ports plus FIX94 large compatibility/owner tranche.
++Integrated: every FIX81-FIX94 closure plus FIX95 CharacterHelper table/render/routing tranche.
+ 
+-FIX94 closes/advances:
+-- CustomWing loader accepts both native Main 5.2 23-argument LoadWing and the current-client extended 25-argument format without changing the native contract.
+-- Extended 25-arg wing paths such as Data\\Item\\ are normalized to exact Data-relative BMD paths; the trailing field is retained as opaque authored metadata rather than guessed.
+-- 2->1 Lua layout is supported: LoadWing rows embedded in LoadItens.lua are authoritative even when CustomWings.lua does not exist; a dedicated CustomWings.lua can override by ItemID without creating a second loader.
+-- Real user CustomWings(1).lua audit: 304/304 LoadWing rows use the extended 25-argument format.
+-- CharacterEffectItens now supports CreateSpriteS6Item/CreateParticleS6Item in all three source-proven ABI layouts, including exact owner-handle disambiguation and XYZ bone offsets.
+-- Main 5.2 terrain ATT flags restored exactly: SAFEZONE=0x01, CHARACTER=0x02, NOMOVE=0x04, NOGROUND=0x08, WATER=0x10, ACTION=0x20, HEIGHT=0x40, CAMERA_UP=0x80. Path grid/zones/spawn now consume the correct semantics.
+-- DarkSpirit.lua parser now supports the real table-driven DARK_SPIRIT_INFO layout instead of requiring literal SetDarkSpirit calls; model/object names are loaded from Item/ as in the PC AccessModel owner.
+-- DARK_SPIRIT_RENDER_MODEL and DARK_SPIRIT_EFFECT tables are retained per ItemID. The supplied ravenwhite profile is recognized as the base RENDER_TEXTURE path (no duplicate draw), while its exact bone FX are attached through pcBitmapTexture/createBoneSprite.
+-- DarkSpirit presentation is propagated through equipped-owner and F3:72 preview paths; unsupported/dynamic render profiles remain explicit fail-closed.
+-
+-Preserved:
+-- FIX93 Fenrir Foot Thunder owner;
+-- FIX92 CreateOperate/SafeZone/Sit/Pose;
+-- FIX91 healing joint owner;
+-- FIX90 protocol/DisplayEffect owners;
+-- FIX89 cape dynamic runner/SkillDelay/Icarus;
+-- FIX88 shared BMD cache;
+-- FIX87+ Icarus batching/inventory/equipment performance work;
+-- FIX81 map regression recovery.
++FIX95 closes/advances:
++- CharacterHelper.lua consolidated HELPER_CONFIG table is parsed directly; it no longer requires literal SetHelper(...) rows.
++- Real supplied CharacterHelper.lua audit: 204 helper rows recovered. Raw Type census: Type0=83, Type2=3, Type3=55, Type4=61, Type5=2.
++- Exact model ownership is retained: item Model follows its authored Data\\Item path; Type>0 runtime creature uses ObjectModel from its authored Data\\Skill path. Explicit ModelDir/ObjectModelDir are honored.
++- Real supplied RENDER_HELPER audit: 155 ItemID owners, 1,208 model passes, 561 non-base passes, 143 Shadow owners and 155 FootEffect owners.
++- 647 plain RENDER_TEXTURE/default-texture passes fold into the already-resident BMD mesh instead of duplicating draws; 561 non-base RenderMesh passes use the MU fixed-function overlay owner.
++- The eight dynamic render rows keep their WorldTime/GetDoubleRender-style color/UV update lane. Unknown textures/timers stay fail-closed.
++- CharacterHelper raw category routing is no longer collapsed to a flying HelperCompanion: raw Type0 -> helper/fly; raw Type3 -> custom Fenrir behavior; raw Type4 -> custom Horse/DarkHorse behavior.
++- Raw Type2 (3 rows) and Type5 (2 rows) remain explicit fail-closed movement debt rather than being rendered as the wrong category.
++- Custom helper/rider routing is propagated through hero equipment, Character Select, F3:72 Element[], and remote viewport actors. Remote stock/custom riders now materialize a MountCompanion lane as well.
++- CharacterHelper presentation is propagated with the model owner so custom mounts/pets keep their authored mesh passes in hero/select/viewport paths.
+ 
+ Not falsely claimed complete:
+-- full Lorencia material/Object/BlendMesh physical parity still needs live visual validation and remaining source owners;
+-- generic CustomCape CreateEffect/CreateJoint/RenderShadowModel families remain per-family work;
+-- CharacterSetEffect CreateSkill second CreateEffect child remains unresolved for EffectIDs without a proven lifecycle;
+-- remaining skills/maps/events/custom helpers/mounts/items and user-hardware FPS validation remain open.
++- CharacterHelper RenderShadowModel planar/native projection remains unresolved; no fake circle/plane shadow was added.
++- CharacterHelper FootEffect/CreateEffectsInHorse/Fenrir lifecycle remains open per family; stock Fenrir's existing proven Foot Thunder owner is preserved.
++- Raw Type2 Dinorant and Type5 Dragon movement/action owners still need source-exact lanes.
++- Generic CharacterSetEffect CreateSkill second CreateEffect child remains unresolved where EffectID lifecycle is not proven.
++- CustomCape global CreateEffect/CreateJoint/RenderShadowModel remain open until a source-exact consumer exists.
++- Lorencia/Icarus/map visual parity and physical FPS still require live validation and remaining source owners.
+ 
+ Data authority remains exclusively:
+ C:\clientepromax\Nova pasta\MuPromax 1.0.1\Data
+diff -ruN '--exclude=R90_FIX95_SOURCE_HASHES.json' /mnt/data/MUWEB_R90_FIX94_LARGE_PORT_WINGS_LUA_TERRAIN_DARKSPIRIT_2026-10-05/LIGAR_WEB_R90_FIX94.bat /mnt/data/MUWEB_R90_FIX95_CHARACTERHELPER_TABLE_RENDER_ROUTING_2026-10-05/LIGAR_WEB_R90_FIX94.bat
+--- /mnt/data/MUWEB_R90_FIX94_LARGE_PORT_WINGS_LUA_TERRAIN_DARKSPIRIT_2026-10-05/LIGAR_WEB_R90_FIX94.bat	2026-10-05 23:34:53.333742738 +0000
++++ /mnt/data/MUWEB_R90_FIX95_CHARACTERHELPER_TABLE_RENDER_ROUTING_2026-10-05/LIGAR_WEB_R90_FIX94.bat	1970-01-01 00:00:00.000000000 +0000
+@@ -1,11 +0,0 @@
+-@echo off
+-setlocal
+-cd /d "%~dp0"
+-where node >nul 2>nul || (echo [R90 FIX94] Node.js nao encontrado.& pause & exit /b 1)
+-if not exist node_modules\three (
+-  echo Dependencias ausentes. Instalando pelo lockfile...
+-  call npm ci --omit=dev || (echo [R90 FIX94] Falha ao instalar dependencias.& pause & exit /b 1)
+-)
+-node tools\start-r90-fix94-safe.cjs
+-if errorlevel 1 pause
+-endlocal
+diff -ruN '--exclude=R90_FIX95_SOURCE_HASHES.json' /mnt/data/MUWEB_R90_FIX94_LARGE_PORT_WINGS_LUA_TERRAIN_DARKSPIRIT_2026-10-05/LIGAR_WEB_R90_FIX95.bat /mnt/data/MUWEB_R90_FIX95_CHARACTERHELPER_TABLE_RENDER_ROUTING_2026-10-05/LIGAR_WEB_R90_FIX95.bat
+--- /mnt/data/MUWEB_R90_FIX94_LARGE_PORT_WINGS_LUA_TERRAIN_DARKSPIRIT_2026-10-05/LIGAR_WEB_R90_FIX95.bat	1970-01-01 00:00:00.000000000 +0000
++++ /mnt/data/MUWEB_R90_FIX95_CHARACTERHELPER_TABLE_RENDER_ROUTING_2026-10-05/LIGAR_WEB_R90_FIX95.bat	2026-10-05 23:57:40.975131041 +0000
+@@ -0,0 +1,11 @@
++@echo off
++setlocal
++cd /d "%~dp0"
++where node >nul 2>nul || (echo [R90 FIX95] Node.js nao encontrado.& pause & exit /b 1)
++if not exist node_modules\three (
++  echo Dependencias ausentes. Instalando pelo lockfile...
++  call npm ci --omit=dev || (echo [R90 FIX95] Falha ao instalar dependencias.& pause & exit /b 1)
++)
++node tools\start-r90-fix95-safe.cjs
++if errorlevel 1 pause
++endlocal
+diff -ruN '--exclude=R90_FIX95_SOURCE_HASHES.json' /mnt/data/MUWEB_R90_FIX94_LARGE_PORT_WINGS_LUA_TERRAIN_DARKSPIRIT_2026-10-05/MUWEB_R90_FIX95_FROM_FIX94.patch /mnt/data/MUWEB_R90_FIX95_CHARACTERHELPER_TABLE_RENDER_ROUTING_2026-10-05/MUWEB_R90_FIX95_FROM_FIX94.patch
+--- /mnt/data/MUWEB_R90_FIX94_LARGE_PORT_WINGS_LUA_TERRAIN_DARKSPIRIT_2026-10-05/MUWEB_R90_FIX95_FROM_FIX94.patch	1970-01-01 00:00:00.000000000 +0000
++++ /mnt/data/MUWEB_R90_FIX95_CHARACTERHELPER_TABLE_RENDER_ROUTING_2026-10-05/MUWEB_R90_FIX95_FROM_FIX94.patch	2026-10-05 23:59:04.323244512 +0000
+@@ -0,0 +1,89 @@
++diff -ruN '--exclude=R90_FIX95_SOURCE_HASHES.json' /mnt/data/MUWEB_R90_FIX94_LARGE_PORT_WINGS_LUA_TERRAIN_DARKSPIRIT_2026-10-05/CURRENT_AUTHORITY.txt /mnt/data/MUWEB_R90_FIX95_CHARACTERHELPER_TABLE_RENDER_ROUTING_2026-10-05/CURRENT_AUTHORITY.txt
++--- /mnt/data/MUWEB_R90_FIX94_LARGE_PORT_WINGS_LUA_TERRAIN_DARKSPIRIT_2026-10-05/CURRENT_AUTHORITY.txt	2026-10-05 23:34:53.337247096 +0000
+++++ /mnt/data/MUWEB_R90_FIX95_CHARACTERHELPER_TABLE_RENDER_ROUTING_2026-10-05/CURRENT_AUTHORITY.txt	2026-10-05 23:57:40.314141697 +0000
++@@ -1,35 +1,28 @@
++-MUWEB central authority: MUWEB_R90_FIX94_LARGE_PORT_WINGS_LUA_TERRAIN_DARKSPIRIT_2026-10-05_FULL.zip
++-Parent: MUWEB_R90_FIX93_FENRIR_FOOT_THUNDER_SET_FX_2026-10-05_FULL.zip
+++MUWEB central authority: MUWEB_R90_FIX95_CHARACTERHELPER_TABLE_RENDER_ROUTING_2026-10-05_FULL.zip
+++Parent: MUWEB_R90_FIX94_LARGE_PORT_WINGS_LUA_TERRAIN_DARKSPIRIT_2026-10-05_FULL.zip
++ Status: DEVELOPMENT / NOT PROMOTED
++ 
++-Integrated: all FIX81-FIX93 ports plus FIX94 large compatibility/owner tranche.
+++Integrated: every FIX81-FIX94 closure plus FIX95 CharacterHelper table/render/routing tranche.
++ 
++-FIX94 closes/advances:
++-- CustomWing loader accepts both native Main 5.2 23-argument LoadWing and the current-client extended 25-argument format without changing the native contract.
++-- Extended 25-arg wing paths such as Data\\Item\\ are normalized to exact Data-relative BMD paths; the trailing field is retained as opaque authored metadata rather than guessed.
++-- 2->1 Lua layout is supported: LoadWing rows embedded in LoadItens.lua are authoritative even when CustomWings.lua does not exist; a dedicated CustomWings.lua can override by ItemID without creating a second loader.
++-- Real user CustomWings(1).lua audit: 304/304 LoadWing rows use the extended 25-argument format.
++-- CharacterEffectItens now supports CreateSpriteS6Item/CreateParticleS6Item in all three source-proven ABI layouts, including exact owner-handle disambiguation and XYZ bone offsets.
++-- Main 5.2 terrain ATT flags restored exactly: SAFEZONE=0x01, CHARACTER=0x02, NOMOVE=0x04, NOGROUND=0x08, WATER=0x10, ACTION=0x20, HEIGHT=0x40, CAMERA_UP=0x80. Path grid/zones/spawn now consume the correct semantics.
++-- DarkSpirit.lua parser now supports the real table-driven DARK_SPIRIT_INFO layout instead of requiring literal SetDarkSpirit calls; model/object names are loaded from Item/ as in the PC AccessModel owner.
++-- DARK_SPIRIT_RENDER_MODEL and DARK_SPIRIT_EFFECT tables are retained per ItemID. The supplied ravenwhite profile is recognized as the base RENDER_TEXTURE path (no duplicate draw), while its exact bone FX are attached through pcBitmapTexture/createBoneSprite.
++-- DarkSpirit presentation is propagated through equipped-owner and F3:72 preview paths; unsupported/dynamic render profiles remain explicit fail-closed.
++-
++-Preserved:
++-- FIX93 Fenrir Foot Thunder owner;
++-- FIX92 CreateOperate/SafeZone/Sit/Pose;
++-- FIX91 healing joint owner;
++-- FIX90 protocol/DisplayEffect owners;
++-- FIX89 cape dynamic runner/SkillDelay/Icarus;
++-- FIX88 shared BMD cache;
++-- FIX87+ Icarus batching/inventory/equipment performance work;
++-- FIX81 map regression recovery.
+++FIX95 closes/advances:
+++- CharacterHelper.lua consolidated HELPER_CONFIG table is parsed directly; it no longer requires literal SetHelper(...) rows.
+++- Real supplied CharacterHelper.lua audit: 204 helper rows recovered. Raw Type census: Type0=83, Type2=3, Type3=55, Type4=61, Type5=2.
+++- Exact model ownership is retained: item Model follows its authored Data\\Item path; Type>0 runtime creature uses ObjectModel from its authored Data\\Skill path. Explicit ModelDir/ObjectModelDir are honored.
+++- Real supplied RENDER_HELPER audit: 155 ItemID owners, 1,208 model passes, 561 non-base passes, 143 Shadow owners and 155 FootEffect owners.
+++- 647 plain RENDER_TEXTURE/default-texture passes fold into the already-resident BMD mesh instead of duplicating draws; 561 non-base RenderMesh passes use the MU fixed-function overlay owner.
+++- The eight dynamic render rows keep their WorldTime/GetDoubleRender-style color/UV update lane. Unknown textures/timers stay fail-closed.
+++- CharacterHelper raw category routing is no longer collapsed to a flying HelperCompanion: raw Type0 -> helper/fly; raw Type3 -> custom Fenrir behavior; raw Type4 -> custom Horse/DarkHorse behavior.
+++- Raw Type2 (3 rows) and Type5 (2 rows) remain explicit fail-closed movement debt rather than being rendered as the wrong category.
+++- Custom helper/rider routing is propagated through hero equipment, Character Select, F3:72 Element[], and remote viewport actors. Remote stock/custom riders now materialize a MountCompanion lane as well.
+++- CharacterHelper presentation is propagated with the model owner so custom mounts/pets keep their authored mesh passes in hero/select/viewport paths.
++ 
++ Not falsely claimed complete:
++-- full Lorencia material/Object/BlendMesh physical parity still needs live visual validation and remaining source owners;
++-- generic CustomCape CreateEffect/CreateJoint/RenderShadowModel families remain per-family work;
++-- CharacterSetEffect CreateSkill second CreateEffect child remains unresolved for EffectIDs without a proven lifecycle;
++-- remaining skills/maps/events/custom helpers/mounts/items and user-hardware FPS validation remain open.
+++- CharacterHelper RenderShadowModel planar/native projection remains unresolved; no fake circle/plane shadow was added.
+++- CharacterHelper FootEffect/CreateEffectsInHorse/Fenrir lifecycle remains open per family; stock Fenrir's existing proven Foot Thunder owner is preserved.
+++- Raw Type2 Dinorant and Type5 Dragon movement/action owners still need source-exact lanes.
+++- Generic CharacterSetEffect CreateSkill second CreateEffect child remains unresolved where EffectID lifecycle is not proven.
+++- CustomCape global CreateEffect/CreateJoint/RenderShadowModel remain open until a source-exact consumer exists.
+++- Lorencia/Icarus/map visual parity and physical FPS still require live validation and remaining source owners.
++ 
++ Data authority remains exclusively:
++ C:\clientepromax\Nova pasta\MuPromax 1.0.1\Data
++diff -ruN '--exclude=R90_FIX95_SOURCE_HASHES.json' /mnt/data/MUWEB_R90_FIX94_LARGE_PORT_WINGS_LUA_TERRAIN_DARKSPIRIT_2026-10-05/LIGAR_WEB_R90_FIX94.bat /mnt/data/MUWEB_R90_FIX95_CHARACTERHELPER_TABLE_RENDER_ROUTING_2026-10-05/LIGAR_WEB_R90_FIX94.bat
++--- /mnt/data/MUWEB_R90_FIX94_LARGE_PORT_WINGS_LUA_TERRAIN_DARKSPIRIT_2026-10-05/LIGAR_WEB_R90_FIX94.bat	2026-10-05 23:34:53.333742738 +0000
+++++ /mnt/data/MUWEB_R90_FIX95_CHARACTERHELPER_TABLE_RENDER_ROUTING_2026-10-05/LIGAR_WEB_R90_FIX94.bat	1970-01-01 00:00:00.000000000 +0000
++@@ -1,11 +0,0 @@
++-@echo off
++-setlocal
++-cd /d "%~dp0"
++-where node >nul 2>nul || (echo [R90 FIX94] Node.js nao encontrado.& pause & exit /b 1)
++-if not exist node_modules\three (
++-  echo Dependencias ausentes. Instalando pelo lockfile...
++-  call npm ci --omit=dev || (echo [R90 FIX94] Falha ao instalar dependencias.& pause & exit /b 1)
++-)
++-node tools\start-r90-fix94-safe.cjs
++-if errorlevel 1 pause
++-endlocal
++diff -ruN '--exclude=R90_FIX95_SOURCE_HASHES.json' /mnt/data/MUWEB_R90_FIX94_LARGE_PORT_WINGS_LUA_TERRAIN_DARKSPIRIT_2026-10-05/LIGAR_WEB_R90_FIX95.bat /mnt/data/MUWEB_R90_FIX95_CHARACTERHELPER_TABLE_RENDER_ROUTING_2026-10-05/LIGAR_WEB_R90_FIX95.bat
++--- /mnt/data/MUWEB_R90_FIX94_LARGE_PORT_WINGS_LUA_TERRAIN_DARKSPIRIT_2026-10-05/LIGAR_WEB_R90_FIX95.bat	1970-01-01 00:00:00.000000000 +0000
+++++ /mnt/data/MUWEB_R90_FIX95_CHARACTERHELPER_TABLE_RENDER_ROUTING_2026-10-05/LIGAR_WEB_R90_FIX95.bat	2026-10-05 23:57:40.975131041 +0000
++@@ -0,0 +1,11 @@
+++@echo off
+++setlocal
+++cd /d "%~dp0"
+++where node >nul 2>nul || (echo [R90 FIX95] Node.js nao encontrado.& pause & exit /b 1)
+++if not exist node_modules\three (
+++  echo Dependencias ausentes. Instalando pelo lockfile...
+++  call npm ci --omit=dev || (echo [R90 FIX95] Falha ao instalar dependencias.& pause & exit /b 1)
+++)
+++node tools\start-r90-fix95-safe.cjs
+++if errorlevel 1 pause
+++endlocal
+diff -ruN '--exclude=R90_FIX95_SOURCE_HASHES.json' /mnt/data/MUWEB_R90_FIX94_LARGE_PORT_WINGS_LUA_TERRAIN_DARKSPIRIT_2026-10-05/MUWEB_R90_FIX95_PORTABILITY.md /mnt/data/MUWEB_R90_FIX95_CHARACTERHELPER_TABLE_RENDER_ROUTING_2026-10-05/MUWEB_R90_FIX95_PORTABILITY.md
+--- /mnt/data/MUWEB_R90_FIX94_LARGE_PORT_WINGS_LUA_TERRAIN_DARKSPIRIT_2026-10-05/MUWEB_R90_FIX95_PORTABILITY.md	1970-01-01 00:00:00.000000000 +0000
++++ /mnt/data/MUWEB_R90_FIX95_CHARACTERHELPER_TABLE_RENDER_ROUTING_2026-10-05/MUWEB_R90_FIX95_PORTABILITY.md	2026-10-05 23:58:00.626226722 +0000
+@@ -0,0 +1,79 @@
++# MUWEB R90 FIX95 — CharacterHelper table/render/routing closure
++
++Parent: **FIX94**. Status: **DEVELOPMENT / NOT PROMOTED**.
++
++## Why this was a large port
++
++The current client's `CharacterHelper.lua` is table-driven. Its 2.4 MB source defines `HELPER_CONFIG = {...}` and only later loops over that table to invoke `SetHelper`. The old Web parser looked primarily for literal `SetHelper(GET_ITEM(...), ...)` calls. On the consolidated current-client layout that can yield zero helper owners even though all data is present.
++
++FIX95 reads the authored table itself and keeps the existing single loader/registry. It does not create a second helper manager.
++
++## Current-client audit
++
++The supplied `CharacterHelper.lua` produced:
++
++- **204** helper config rows;
++- raw type distribution: **83 Type0**, **3 Type2**, **55 Type3**, **61 Type4**, **2 Type5**;
++- **155** `RENDER_HELPER[ItemID]` owners;
++- **1,208** model/render rows;
++- **647** plain `RENDER_TEXTURE` rows;
++- **561** additional fixed-function passes;
++- **143** helper-level shadow owners;
++- **155** FootEffect blocks.
++
++These counts are an audit of the supplied Lua source, not hard-coded runtime content. Runtime still reads the official client's Data.
++
++## Model ownership
++
++PC `HelperSystem/OpenItems` semantics are retained:
++
++- `Model` is the inventory/item BMD, normally under `Data\Item\`;
++- `ObjectModel` is the creature BMD for Type>0, normally under `Data\Skill\`;
++- Type0 renders its item model directly;
++- Type>0 receives the ObjectModel/synthetic model identity;
++- explicit `ModelDir` and `ObjectModelDir` from the Lua are preserved.
++
++This prevents the previous class of errors where a flying pet's icon/item BMD could be used as the creature model, or a mount/helper could be routed to the wrong family.
++
++## RENDER_HELPER presentation
++
++`PcCharacterHelperPresentation.js` consumes deterministic model passes from the real Lua table.
++
++- `Glow=2 / RENDER_TEXTURE / Texture=-1` uses the already resident BMD mesh, avoiding duplicate base draws.
++- Other authored flags create an overlay on the same geometry/skeleton.
++- RGB, mesh index, repetition Value, numeric texture override and authored dynamic UV/color formulas are retained where they are representable 1:1.
++- unsupported texture IDs, dynamic chance/timer branches, native shadow projection and foot-effect lifecycle are recorded fail-closed rather than replaced by generic graphics.
++
++## Category routing
++
++The Lua `RenderHelper` dispatcher proves separate domains. FIX95 stops treating every custom helper as a flying helper:
++
++- raw Type0 -> flying/helper lane;
++- raw Type3 -> custom Fenrir behavior lane;
++- raw Type4 -> custom Horse/DarkHorse behavior lane;
++- raw Type2 and Type5 -> explicit unresolved movement owner for now.
++
++This routing is propagated to hero equipment, Character Select, F3:72 elements and other players in the viewport. The viewport also materializes stock/custom rider companions, which previously could be visible on the local hero but absent on remote players.
++
++## Explicit remaining debt
++
++- `RenderShadowModel`: needs the exact native projection/terrain owner; no fake blob shadow.
++- FootEffect: requires exact Horse/Fenrir/other helper effect lifecycle per family.
++- Type2 Dinorant and Type5 Dragon movement/action semantics.
++- CharacterSetEffect `CreateSkill` second `CreateEffect` child for IDs without proven lifecycle.
++- CustomCape global effect/joint/shadow families.
++- Remaining map/material/skill/event and physical performance validation.
++
++## Validation gates
++
++FIX95 includes gates for:
++
++- HELPER_CONFIG parsing and Item/Skill ownership;
++- RENDER_HELPER parser/owner;
++- helper category routing;
++- helper presentation structural behavior;
++- inherited FIX45 helper/Lua gate;
++- FIX93 Fenrir Foot Thunder gate;
++- FIX94 large-port gate;
++- whole-tree JS/MJS/CJS syntax;
++- immutable source hash verification.
+diff -ruN '--exclude=R90_FIX95_SOURCE_HASHES.json' /mnt/data/MUWEB_R90_FIX94_LARGE_PORT_WINGS_LUA_TERRAIN_DARKSPIRIT_2026-10-05/data/CharacterHelperLua.js /mnt/data/MUWEB_R90_FIX95_CHARACTERHELPER_TABLE_RENDER_ROUTING_2026-10-05/data/CharacterHelperLua.js
+--- /mnt/data/MUWEB_R90_FIX94_LARGE_PORT_WINGS_LUA_TERRAIN_DARKSPIRIT_2026-10-05/data/CharacterHelperLua.js	2026-10-05 13:11:31.000000000 +0000
++++ /mnt/data/MUWEB_R90_FIX95_CHARACTERHELPER_TABLE_RENDER_ROUTING_2026-10-05/data/CharacterHelperLua.js	2026-10-05 23:49:57.639757065 +0000
+@@ -40,26 +40,88 @@
+ function num(v){const s=String(v??'').trim();if(!/^[+-]?(?:\d+(?:\.\d*)?|\.\d+)$/.test(s))return null;const n=Number(s);return Number.isFinite(n)?n:null;}
+ function str(v){const m=/^(['"])([\s\S]*)\1$/.exec(String(v??'').trim());return m?m[2]:null;}
+ function item(v){const s=String(v??'').trim();let m=/^GET_ITEM(?:_MODEL)?\s*\(\s*(\d+)\s*,\s*(\d+)\s*\)$/i.exec(s);if(m)return Number(m[1])*512+Number(m[2]);const n=num(s);return Number.isInteger(n)?n:null;}
+-function modelPath(model){if(!model)return null;let p=String(model).replace(/\\/g,'/').replace(/^Data\//i,'').replace(/^\.\//,'');if(!/\.bmd$/i.test(p))p += '.bmd';return p;}
++function modelPath(model,baseDir){if(!model)return null;let p=String(model).replace(/\\/g,'/').replace(/\/{2,}/g,'/').replace(/^Data\//i,'').replace(/^\.\//,'').replace(/^\//,'');if(!p.includes('/'))p=`${baseDir}/${p}`;if(!/\.bmd$/i.test(p))p += '.bmd';return p;}
++
++
++function findMatchingBrace(text,start){let d=0,q=null;for(let i=start;i<text.length;i++){const c=text[i];if(q){if(c==='\\')i++;else if(c===q)q=null;continue;}if(c==='"'||c==="'"){q=c;continue;}if(c==='{')d++;else if(c==='}'&&--d===0)return i;}return -1;}
++function tableField(body,key){
++  const re=new RegExp(`(?:^|[,\\n\\r])\\s*${key}\\s*=\\s*`,'i'); const m=re.exec(body); if(!m)return null;
++  let i=m.index+m[0].length,start=i,d=0,q=null;
++  for(;i<body.length;i++){const c=body[i];if(q){if(c==='\\')i++;else if(c===q)q=null;continue;}if(c==='"'||c==="'"){q=c;continue;}if(c==='('||c==='{'||c==='[')d++;else if(c===')'||c==='}'||c===']'){if(d===0)break;d--;}else if(c===','&&d===0)break;else if((c==='\n'||c==='\r')&&d===0)break;}
++  return body.slice(start,i).trim();
++}
++function boolVal(v){const s=String(v??'').trim().toLowerCase();return s==='true'?true:s==='false'?false:null;}
++function parseActions(v){const m=/^\{([\s\S]*)\}$/.exec(String(v??'').trim());if(!m)return Object.freeze([]);const a=m[1].split(',').map(x=>num(x.trim())).filter(Number.isFinite);return Object.freeze(a);}
++function rowActions(row){const m=/\bActions\s*=\s*\{([^}]*)\}/i.exec(row);return m?parseActions(`{${m[1]}}`):Object.freeze([]);}
++function parseRecordTables(body){const out=[];let i=0;while(i<body.length){const p=body.indexOf('{',i);if(p<0)break;const e=findMatchingBrace(body,p);if(e<0)break;const row=body.slice(p+1,e);out.push(row);i=e+1;}return out;}
++function namedTableBody(block,key){const re=new RegExp(`${key}\\s*=\\s*\\{`,'i');const m=re.exec(block);if(!m)return null;const p=m.index+m[0].lastIndexOf('{');const e=findMatchingBrace(block,p);return e>=0?block.slice(p+1,e):null;}
++function parseRenderRow(row){
++  const actions=rowActions(row); const n=(k,d=null)=>{const v=num(tableField(row,k));return v==null?d:v;};
++  const b=(k,d=false)=>{const v=boolVal(tableField(row,k));return v==null?d:v;};
++  const mesh=n('Mesh');const glow=n('Glow'); if(mesh==null||glow==null)return null;
++  return Object.freeze({actions,mesh,glow,r:n('R',-1),g:n('G',-1),b:n('B',-1),shadow:b('Shadow'),render:b('Render'),effect:n('Effect',-1),fixEffect:b('FixEffect'),value:n('Value',1),renOpacity:n('RenOpacity',0),renSpeed:n('RenSpeed',0),renColor:n('RenColor',1),color:b('Color'),rr:n('RR',1),rg:n('RG',1),rb:n('RB',1),timer:n('Timer',100),texture:n('Texture',-1)});
++}
++function parseEffectRow(row){
++  const actions=rowActions(row);const n=(k,d=null)=>{const v=num(tableField(row,k));return v==null?d:v;};const b=(k,d=false)=>{const v=boolVal(tableField(row,k));return v==null?d:v;};
++  const effectType=n('EffectType'),effectIndex=n('EffectIndex'),bone=n('Bone');if(effectType==null||effectIndex==null||bone==null)return null;
++  return Object.freeze({actions,effectType,effectIndex,effectLevel:n('EffectLevel',0),bone,size:n('Size',1),r:n('R',1),g:n('G',1),b:n('B',1),posX:n('PosX',0),posY:n('PosY',0),posZ:n('PosZ',0),black:b('Black'),randTime:n('RandTime',100)});
++}
++export function parseCharacterHelperRenderTables(input){
++  const text=stripComments(input),out=new Map();const re=/RENDER_HELPER\s*\[\s*GET_ITEM(?:_MODEL)?\s*\(\s*(\d+)\s*,\s*(\d+)\s*\)\s*\]\s*=\s*\{/gi;let m;
++  while((m=re.exec(text))){const start=m.index+m[0].lastIndexOf('{'),end=findMatchingBrace(text,start);if(end<0)break;const block=text.slice(start+1,end);const itemIndex=Number(m[1])*512+Number(m[2]);
++    const modelBody=namedTableBody(block,'Model');const effectBody=namedTableBody(block,'Effect');const miniatureBody=namedTableBody(block,'Miniature');const footBody=namedTableBody(block,'FootEffect');
++    const model=Object.freeze((modelBody?parseRecordTables(modelBody):[]).map(parseRenderRow).filter(Boolean));
++    const effects=Object.freeze((effectBody?parseRecordTables(effectBody):[]).map(parseEffectRow).filter(Boolean));
++    const miniature=Object.freeze((miniatureBody?parseRecordTables(miniatureBody):[]).map(parseEffectRow).filter(Boolean));
++    out.set(itemIndex,Object.freeze({itemIndex,shadow:boolVal(tableField(block,'Shadow'))===true,model,effects,miniature,footEffectRows:footBody?parseRecordTables(footBody).length:0,owner:'CharacterHelper.lua'}));
++    re.lastIndex=end+1;
++  }
++  return out;
++}
++
++function parseHelperConfigTable(text,out){
++  const m=/\bHELPER_CONFIG\s*=\s*\{/i.exec(text);if(!m)return;
++  const start=m.index+m[0].lastIndexOf('{'),end=findMatchingBrace(text,start);if(end<0)return;
++  const body=text.slice(start+1,end);
++  for(const row of parseRecordTables(body)){
++    const itemIndex=item(tableField(row,'ItemIndex'));const rawType=num(tableField(row,'Type'));const movement=num(tableField(row,'Movement'));const height=num(tableField(row,'Height'));const size=num(tableField(row,'Size'));const sizeCharList=num(tableField(row,'SizeSelectChar'));const miniature=num(tableField(row,'Miniature'));const sizeMiniature=num(tableField(row,'SizeMiniature'));const velocityMiniature=num(tableField(row,'VelocityMiniature'));const model=str(tableField(row,'Model'));const objectModel=str(tableField(row,'ObjectModel'));
++    if(!Number.isInteger(itemIndex)||[rawType,movement,height,size,sizeCharList,miniature,sizeMiniature,velocityMiniature].some(v=>v==null)||model==null||objectModel==null)continue;
++    const type=rawType===1?2:rawType===2?4:rawType===3?8:rawType===4?16:rawType;
++    const modelDir=str(tableField(row,'ModelDir'))||'Data\\Item\\';const objectModelDir=str(tableField(row,'ObjectModelDir'))||(rawType===0?'Data\\Item\\':'Data\\Skill\\');
++    const dirBase=(d,fallback)=>{let x=String(d||'').replace(/\\/g,'/').replace(/\/{2,}/g,'/').replace(/^Data\//i,'').replace(/^\//,'').replace(/\/$/,'');return x||fallback;};
++    const itemModelPath=modelPath(model,dirBase(modelDir,'Item'));const objectModelPath=modelPath(objectModel,dirBase(objectModelDir,rawType===0?'Item':'Skill'));const renderModelPath=rawType===0?itemModelPath:objectModelPath;
++    out.set(itemIndex,Object.freeze({itemIndex,type,rawType,movement,height,size,sizeCharList,miniature,sizeMiniature,velocityMiniature,model,objectModel,modelDir,objectModelDir,separateModel:num(tableField(row,'SeparateModel')),defenseSkill:num(tableField(row,'DefenseSkill')),fileType:num(tableField(row,'FileType')),modelPath:itemModelPath,itemModelPath,objectModelPath,renderModelPath,owner:'CharacterHelper.lua'}));
++  }
++}
+ 
+ export function parseCharacterHelperLua(input){
+   const text=stripComments(input),out=new Map();
++  parseHelperConfigTable(text,out);
+   for(const a of scanCalls(text,'SetHelper')){
+     if(a.length<11)continue;
+     const itemIndex=item(a[0]); const vals=a.slice(1,9).map(num); const model=str(a[9]),objectModel=str(a[10]);
+     if(!Number.isInteger(itemIndex)||vals.some(v=>v==null)||model==null||objectModel==null)continue;
+     const [rawType,movement,height,size,sizeCharList,miniature,sizeMiniature,velocityMiniature]=vals;
+     const type=rawType===1?2:rawType===2?4:rawType===3?8:rawType===4?16:rawType;
+-    out.set(itemIndex,Object.freeze({itemIndex,type,rawType,movement,height,size,sizeCharList,miniature,sizeMiniature,velocityMiniature,model,objectModel,modelPath:modelPath(model),objectModelPath:modelPath(objectModel),owner:'CharacterHelper.lua'}));
++    const itemModelPath=modelPath(model,'Item');
++    const objectModelPath=modelPath(objectModel,'Skill');
++    // PC OpenItems/HelperSystem: Model is the inventory/item BMD under Data\Item.
++    // Type==0 renders that item model directly; Type>0 receives a synthetic ModelID
++    // whose BMD is ObjectModel loaded from Data\Skill. Keep both identities and expose
++    // the exact runtime selection so flying pets are never mistaken for mount models.
++    const renderModelPath=type===0?itemModelPath:objectModelPath;
++    out.set(itemIndex,Object.freeze({itemIndex,type,rawType,movement,height,size,sizeCharList,miniature,sizeMiniature,velocityMiniature,model,objectModel,modelPath:itemModelPath,itemModelPath,objectModelPath,renderModelPath,owner:'CharacterHelper.lua'}));
+   }
+   return out;
+ }
+-let registry=new Map(),status=Object.freeze({loaded:false,count:0,path:null}),inflight=null;
++let registry=new Map(),renderRegistry=new Map(),status=Object.freeze({loaded:false,count:0,renderCount:0,path:null}),inflight=null;
+ export function characterHelperRule(itemIndex){return registry.get(Number(itemIndex))||null;}
++export function characterHelperRenderRule(itemIndex){return renderRegistry.get(Number(itemIndex))||null;}
++export function characterHelperRenderSnapshot(){return new Map(renderRegistry);}
+ export function characterHelperStatus(){return status;}
+ export function characterHelperSnapshot(){return new Map(registry);}
+ export async function loadCharacterHelperLua(fetchBinary=(p)=>RemoteAssets.fetchBinary(p)){
+   if(status.loaded)return status;if(inflight)return inflight;
+-  inflight=(async()=>{let last=null;for(const path of CHARACTER_HELPER_PATHS){try{const b=await fetchBinary(path);if(!b)continue;const next=parseCharacterHelperLua(decodePcLuaText(b));if(!next.size)throw new Error(`${path}: nenhum SetHelper ativo reconhecido`);registry=next;status=Object.freeze({loaded:true,count:next.size,path});console.info(`[CharacterHelper] owner real ${path} rows=${next.size}`);return status;}catch(e){last=e;}}throw last||new Error('CharacterHelper.lua ausente');})().finally(()=>{inflight=null;});return inflight;
++  inflight=(async()=>{let last=null;for(const path of CHARACTER_HELPER_PATHS){try{const b=await fetchBinary(path);if(!b)continue;const decoded=decodePcLuaText(b);const next=parseCharacterHelperLua(decoded);if(!next.size)throw new Error(`${path}: nenhum SetHelper ativo reconhecido`);const renderNext=parseCharacterHelperRenderTables(decoded);registry=next;renderRegistry=renderNext;status=Object.freeze({loaded:true,count:next.size,renderCount:renderNext.size,path});console.info(`[CharacterHelper] owner real ${path} rows=${next.size} renderRows=${renderNext.size}`);return status;}catch(e){last=e;}}throw last||new Error('CharacterHelper.lua ausente');})().finally(()=>{inflight=null;});return inflight;
+ }
+-export function resetCharacterHelperLuaForTests(){registry=new Map();status=Object.freeze({loaded:false,count:0,path:null});inflight=null;}
++export function resetCharacterHelperLuaForTests(){registry=new Map();renderRegistry=new Map();status=Object.freeze({loaded:false,count:0,renderCount:0,path:null});inflight=null;}
+diff -ruN '--exclude=R90_FIX95_SOURCE_HASHES.json' /mnt/data/MUWEB_R90_FIX94_LARGE_PORT_WINGS_LUA_TERRAIN_DARKSPIRIT_2026-10-05/data/CustomPreviewElements.js /mnt/data/MUWEB_R90_FIX95_CHARACTERHELPER_TABLE_RENDER_ROUTING_2026-10-05/data/CustomPreviewElements.js
+--- /mnt/data/MUWEB_R90_FIX94_LARGE_PORT_WINGS_LUA_TERRAIN_DARKSPIRIT_2026-10-05/data/CustomPreviewElements.js	2026-10-05 23:32:13.190974662 +0000
++++ /mnt/data/MUWEB_R90_FIX95_CHARACTERHELPER_TABLE_RENDER_ROUTING_2026-10-05/data/CustomPreviewElements.js	2026-10-05 23:54:43.846369374 +0000
+@@ -9,12 +9,22 @@
+  * The wire WORD is the extended item index used before MODEL_ITEM is added for
+  * model-space tests, so the Lua registries are queried with the wire value.
+  */
+-import { characterHelperRule } from './CharacterHelperLua.js';
++import { characterHelperRule, characterHelperRenderRule } from './CharacterHelperLua.js';
+ import { darkSpiritRule } from './DarkSpiritLua.js';
+ 
++function helperElementSpec(itemIndex,h,presentation,slot){
++  if(!h?.renderModelPath&&!h?.modelPath)return null;
++  const common={itemIndex,petModelPath:h.renderModelPath||h.modelPath,size:h.size,sizeCharList:h.sizeCharList,movement:h.movement,height:h.height,type:h.type,rawType:h.rawType,miniature:h.miniature,sizeMiniature:h.sizeMiniature,velocityMiniature:h.velocityMiniature,presentation,owner:'CharacterHelper.lua',slot};
++  if(Number(h.rawType)===0)return Object.freeze({kind:'helper',...common});
++  if(Number(h.rawType)===3)return Object.freeze({kind:'mount',species:'custom-fenrir',behaviorSpecies:'fenrir',...common});
++  if(Number(h.rawType)===4)return Object.freeze({kind:'mount',species:'custom-horse',behaviorSpecies:'dark-horse',...common});
++  return Object.freeze({kind:'unresolved-helper',reason:`rawType=${h.rawType} movement owner pending`,...common});
++}
++
+ export function resolveCustomPreviewElements(customPreview, {
+   darkSpiritLookup = darkSpiritRule,
+   helperLookup = characterHelperRule,
++  helperRenderLookup = characterHelperRenderRule,
+ } = {}) {
+   const raw = Array.isArray(customPreview?.element) ? customPreview.element : [0, 0];
+   const first = Number(raw[0] || 0) & 0xFFFF;
+@@ -30,25 +40,13 @@
+       });
+     } else {
+       const h = helperLookup(first);
+-      if (h?.modelPath) out.first = Object.freeze({
+-        kind: 'helper', itemIndex: first, petModelPath: h.modelPath,
+-        size: h.size, sizeCharList: h.sizeCharList, movement: h.movement,
+-        height: h.height, type: h.type, miniature: h.miniature,
+-        sizeMiniature: h.sizeMiniature, velocityMiniature: h.velocityMiniature,
+-        owner: 'CharacterHelper.lua', slot: 0,
+-      });
++      if (h?.renderModelPath || h?.modelPath) out.first = helperElementSpec(first,h,helperRenderLookup(first),0);
+     }
+   }
+ 
+   if (second > 0) {
+     const h = helperLookup(second);
+-    if (h?.modelPath) out.second = Object.freeze({
+-      kind: 'helper', itemIndex: second, petModelPath: h.modelPath,
+-      size: h.size, sizeCharList: h.sizeCharList, movement: h.movement,
+-      height: h.height, type: h.type, miniature: h.miniature,
+-      sizeMiniature: h.sizeMiniature, velocityMiniature: h.velocityMiniature,
+-      owner: 'CharacterHelper.lua', slot: 1,
+-    });
++    if (h?.renderModelPath || h?.modelPath) out.second = helperElementSpec(second,h,helperRenderLookup(second),1);
+   }
+ 
+   return Object.freeze(out);
+diff -ruN '--exclude=R90_FIX95_SOURCE_HASHES.json' /mnt/data/MUWEB_R90_FIX94_LARGE_PORT_WINGS_LUA_TERRAIN_DARKSPIRIT_2026-10-05/data/ItemModelResolver.js /mnt/data/MUWEB_R90_FIX95_CHARACTERHELPER_TABLE_RENDER_ROUTING_2026-10-05/data/ItemModelResolver.js
+--- /mnt/data/MUWEB_R90_FIX94_LARGE_PORT_WINGS_LUA_TERRAIN_DARKSPIRIT_2026-10-05/data/ItemModelResolver.js	2026-10-05 01:23:18.000000000 +0000
++++ /mnt/data/MUWEB_R90_FIX95_CHARACTERHELPER_TABLE_RENDER_ROUTING_2026-10-05/data/ItemModelResolver.js	2026-10-05 23:49:21.309964205 +0000
+@@ -18,7 +18,7 @@
+ 
+ import { ITEM_MODEL_MAP } from './ItemModelMap.js';
+ import { customItemModelForType } from './CustomItemModelMap.js';
+-import { characterHelperRule } from './CharacterHelperLua.js';
++import { characterHelperRule, characterHelperRenderRule } from './CharacterHelperLua.js';
+ import { darkSpiritRule } from './DarkSpiritLua.js';
+ import { resolvePcPlayerBodyModel } from './PcPlayerBodyModelMap.js';
+ import { NO_EQUIPMENT_12BIT } from './CharacterEquipmentCodec.js';
+@@ -105,10 +105,11 @@
+   const itemType = (entry.family === 'helper' ? 13 : 12) * 512 + Number(entry.offset || 0);
+   const custom = customItemModelForType(itemType);
+   const helper = entry.family === 'helper' ? characterHelperRule(itemType) : null;
++  const helperPresentation = entry.family === 'helper' ? characterHelperRenderRule(itemType) : null;
+   const darkSpirit = entry.family === 'helper' ? darkSpiritRule(itemType) : null;
+-  const path = custom?.path || darkSpirit?.modelPath || helper?.modelPath || ITEM_MODEL_MAP[key] || null;
++  const path = custom?.path || darkSpirit?.modelPath || helper?.renderModelPath || helper?.modelPath || ITEM_MODEL_MAP[key] || null;
+   return {
+-    path, key, custom: custom || null, helper: helper || null, darkSpirit: darkSpirit || null, color: custom?.color || null,
++    path, key, custom: custom || null, helper: helper || null, helperPresentation: helperPresentation || null, darkSpirit: darkSpirit || null, color: custom?.color || null,
+     effectType: custom?.effectType ?? 0,
+     missing: path ? null : `sem-registro-PC/Lua:${key}`,
+     kind: entry.kind || null, option: entry.option, itemType,
+diff -ruN '--exclude=R90_FIX95_SOURCE_HASHES.json' /mnt/data/MUWEB_R90_FIX94_LARGE_PORT_WINGS_LUA_TERRAIN_DARKSPIRIT_2026-10-05/game/PetSystem.js /mnt/data/MUWEB_R90_FIX95_CHARACTERHELPER_TABLE_RENDER_ROUTING_2026-10-05/game/PetSystem.js
+--- /mnt/data/MUWEB_R90_FIX94_LARGE_PORT_WINGS_LUA_TERRAIN_DARKSPIRIT_2026-10-05/game/PetSystem.js	2026-10-05 23:33:41.706052918 +0000
++++ /mnt/data/MUWEB_R90_FIX95_CHARACTERHELPER_TABLE_RENDER_ROUTING_2026-10-05/game/PetSystem.js	2026-10-05 23:56:57.470664487 +0000
+@@ -85,6 +85,7 @@
+ import { PcTerrainAlphaPass } from '../graphics/PcRuneAura.js';
+ import { pcBitmapTexture } from '../data/PcBitmapLuaOwners.js';
+ import { MAP_SIZE } from '../world/TerrainWorld.js';
++import { applyPcCharacterHelperPresentation } from '../graphics/PcCharacterHelperPresentation.js';
+ 
+ /** Actions do darkspirit.bmd — enum AI do PC (CSPetSystem.cpp:387-393). */
+ export const PET_ACTIONS = { FLY: 0, FLYING: 1, STAND: 2, ATTACK: 3 };
+@@ -428,10 +429,13 @@
+         this.option = option ?? 0;
+         // Espécie: fenrir (default histórico) ou rider unicon/pegasus
+         // (HELPER:2/3 — MoveBug próprio GOBoid.cpp:495-601).
+-        this.species = /Rider0?1\.bmd$/i.test(petModelPath) ? 'unicon'
++        this.species = visibility?.species || (/Rider0?1\.bmd$/i.test(petModelPath) ? 'unicon'
+             : /Rider0?2\.bmd$/i.test(petModelPath) ? 'pegasus'
+             : /DarkHorse\.bmd$/i.test(petModelPath) ? 'dark-horse'
+-            : 'fenrir';
++            : 'fenrir');
++        this.behaviorSpecies = visibility?.behaviorSpecies || this.species;
++        this.presentation = visibility?.presentation || null;
++        this.authoredScale = Number.isFinite(Number(visibility?.scale)) ? Number(visibility.scale) : null;
+         this.renderer = null;
+         this.root = null;
+         this._elapsed = 0;
+@@ -459,7 +463,8 @@
+         this.scene.add(this.root);
+         // Scale CreateBugSub (GOBoid.cpp:104-111): fenrir 0.9, riders 0.9,
+         // DARK_HORSE 1.0 (L106-107 — explícito e distinto dos riders).
+-        this.root.scale.setScalar(this.species === 'dark-horse' ? 1.0 : 0.9);
++        this.root.scale.setScalar(this.authoredScale ?? (this.behaviorSpecies === 'dark-horse' ? 1.0 : 0.9));
++        if (this.presentation) await applyPcCharacterHelperPresentation(this.renderer, this.presentation);
+         this.setAction(FENRIR_ACTIONS.STAND, 0.4);
+         if (this.species === 'fenrir' && this._terrainHeightAt) {
+             try {
+@@ -610,15 +615,15 @@
+         // DarkHorse — MoveBug GOBoid.cpp:338-428: PLAYER_ATTACK_DARKHORSE→3
+         // vel 0.34, RUN_RIDE_HORSE→1 vel 0.34, ATTACK_RIDE_*→2, IDLE1/2→5/6,
+         // default STAND 0 vel 0.3 (L425-427).
+-        if (this.species === 'dark-horse') {
++        if (this.behaviorSpecies === 'dark-horse') {
+             const A = DARKHORSE_ACTIONS;
+             if (state === 'attack') { this.setAction(A.ATTACK, 0.34); }
+             else if (state === 'walk' || state === 'run') { this.setAction(A.WALK, 0.34); }
+             else { this.setAction(A.IDLE, 0.3); }
+             return;
+         }
+-        if (this.species !== 'fenrir') {
+-            const A = RIDER_ACTIONS[this.species === 'pegasus' ? 'PEGASUS' : 'UNICON'];
++        if (this.behaviorSpecies !== 'fenrir') {
++            const A = RIDER_ACTIONS[this.behaviorSpecies === 'pegasus' ? 'PEGASUS' : 'UNICON'];
+             if (state === 'attack' || state === 'skill') {
+                 this.setAction(state === 'skill' ? A.SKILL : A.ATTACK, 0.34);
+             } else if (state === 'walk') {
+@@ -825,6 +830,7 @@
+         this._yaw = 0;
+         this._alpha = 0;               // CreateBugSub: Alpha 0 → AlphaTarget 1
+         this._currentAuthoredAction = null;
++        this._helperPresentationState = null;
+         // HelperView applies VectorRotate(Direction) before writing the next tick's
+         // Direction[1]. Preserve that one-logical-tick ownership instead of
+         // moving immediately with the velocity calculated in the same update.
+@@ -851,6 +857,7 @@
+         this.root.scale.setScalar(scale);
+         this.scene?.add?.(this.root);
+         this.renderer.playAction('action_0'); // CharacterHelper/stock authored action
++        if (this.helperInfo?.presentation) this._helperPresentationState = await applyPcCharacterHelperPresentation(this.renderer, this.helperInfo.presentation);
+         _loadHelperSparkTexture().catch(() => {});
+         return this;
+     }
+@@ -1151,8 +1158,9 @@
+         if (old) { old.dispose(); this.mounts.delete(character); }
+         try {
+             const mount = new MountCompanion(character, this.scene, fenrirInfo.petModelPath, fenrirInfo.option, {
+-                safeZone: fenrirInfo.safeZone,
+-                terrainHeightAt: this.terrainHeightAt,
++                safeZone: fenrirInfo.safeZone, terrainHeightAt: this.terrainHeightAt,
++                species: fenrirInfo.species, behaviorSpecies: fenrirInfo.behaviorSpecies,
++                presentation: fenrirInfo.presentation || null, scale: fenrirInfo.size,
+             });
+             await mount.init(); // throw = sem mount fake
+             this.mounts.set(character, mount);
+@@ -1228,6 +1236,9 @@
+             } else if (spec.first?.kind === 'helper') {
+                 first = new HelperCompanion(character, this.scene, 1.0, spec.first);
+                 await first.init();
++            } else if (spec.first?.kind === 'mount') {
++                first = new MountCompanion(character,this.scene,spec.first.petModelPath,0,{safeZone:()=>Boolean(typeof character?.safeZone==='function'?character.safeZone():character?.safeZone),terrainHeightAt:this.terrainHeightAt,species:spec.first.species,behaviorSpecies:spec.first.behaviorSpecies,presentation:spec.first.presentation,scale:spec.first.size});
++                await first.init();
+             }
+         } catch (e) {
+             first?.dispose?.(); first = null;
+@@ -1237,6 +1248,9 @@
+             if (spec.second?.kind === 'helper') {
+                 second = new HelperCompanion(character, this.scene, 1.0, spec.second);
+                 await second.init();
++            } else if (spec.second?.kind === 'mount') {
++                second = new MountCompanion(character,this.scene,spec.second.petModelPath,0,{safeZone:()=>Boolean(typeof character?.safeZone==='function'?character.safeZone():character?.safeZone),terrainHeightAt:this.terrainHeightAt,species:spec.second.species,behaviorSpecies:spec.second.behaviorSpecies,presentation:spec.second.presentation,scale:spec.second.size});
++                await second.init();
+             }
+         } catch (e) {
+             second?.dispose?.(); second = null;
+diff -ruN '--exclude=R90_FIX95_SOURCE_HASHES.json' /mnt/data/MUWEB_R90_FIX94_LARGE_PORT_WINGS_LUA_TERRAIN_DARKSPIRIT_2026-10-05/game/PlayerViewportManager.js /mnt/data/MUWEB_R90_FIX95_CHARACTERHELPER_TABLE_RENDER_ROUTING_2026-10-05/game/PlayerViewportManager.js
+--- /mnt/data/MUWEB_R90_FIX94_LARGE_PORT_WINGS_LUA_TERRAIN_DARKSPIRIT_2026-10-05/game/PlayerViewportManager.js	2026-10-05 23:32:13.191452482 +0000
++++ /mnt/data/MUWEB_R90_FIX95_CHARACTERHELPER_TABLE_RENDER_ROUTING_2026-10-05/game/PlayerViewportManager.js	2026-10-05 23:56:57.470921274 +0000
+@@ -35,7 +35,7 @@
+ import { BuffContainer } from './BuffSystem.js';
+ import { Movement } from './Movement.js';
+ import { pcWorldActiveFromAssetWorld, pcInBloodCastle, pcInChaosCastle, pcInSwimLocomotionWorld } from './PcMapContext.js';
+-import { HelperCompanion, Pet } from './PetSystem.js';
++import { HelperCompanion, Pet, MountCompanion } from './PetSystem.js';
+ import { resolveCustomPreviewElements } from '../data/CustomPreviewElements.js';
+ 
+ 
+@@ -319,6 +319,7 @@
+         try { entry.renderer?.dispose?.(); } catch (_ignore) { /* noop */ }
+         for (const wr of entry.extras || []) { try { wr.dispose?.(); } catch (_ignore) { /* noop */ } }
+         try { entry.customHelperCompanion?.dispose?.(); } catch (_ignore) { /* noop */ }
++        try { entry.mountCompanion?.dispose?.(); } catch (_ignore) { /* noop */ }
+         try { entry.elementCompanions?.first?.dispose?.(); } catch (_ignore) { /* noop */ }
+         try { entry.elementCompanions?.second?.dispose?.(); } catch (_ignore) { /* noop */ }
+     }
+@@ -589,6 +590,23 @@
+             }
+         }
+ 
++        // FIX95: stock/custom rider lane is a physical CreateBug companion for
++        // remote players too. Previously only the local hero/character-select built it.
++        let mountCompanion = null;
++        const mountSpec = attach?.rider?.petModelPath ? attach.rider : attach?.fenrir?.petModelPath ? attach.fenrir : null;
++        if (mountSpec?.petModelPath) {
++            try {
++                const mountOwner = { position: outer.position, mesh: outer, isAlive: () => !mountCompanion?.disposed };
++                mountCompanion = new MountCompanion(mountOwner, this.scene.scene, mountSpec.petModelPath, mountSpec.option, {
++                    safeZone: () => Boolean(this.scene?.terrainWallAt?.(outer.position.x, outer.position.z) & 0x0001),
++                    terrainHeightAt: (x,z) => this.scene?.terrainHeightAt?.(x,z), species: mountSpec.species,
++                    behaviorSpecies: mountSpec.behaviorSpecies, presentation: mountSpec.presentation || null,
++                    scale: mountSpec.size,
++                });
++                await mountCompanion.init();
++            } catch (err) { mountCompanion?.dispose?.(); mountCompanion=null; console.warn(`[PlayerViewport] mount ${e.id} falhou (fail-closed): ${err?.message || err}`); }
++        }
++
+         // FIX53: F3:72 Element[0]/Element[1] are physical companions in
+         // ZzzCharacter.cpp, independent of PetIndex. Resolve only through the
+         // real DarkSpirit.lua / CharacterHelper.lua registries.
+@@ -602,6 +620,9 @@
+             } else if (elementSpec.first?.kind === 'helper') {
+                 elementCompanions.first = new HelperCompanion(elementOwner, this.scene.scene, 1.0, elementSpec.first);
+                 await elementCompanions.first.init();
++            } else if (elementSpec.first?.kind === 'mount') {
++                elementCompanions.first = new MountCompanion({...elementOwner,mesh:outer},this.scene.scene,elementSpec.first.petModelPath,0,{safeZone:elementOwner.safeZone,terrainHeightAt:(x,z)=>this.scene?.terrainHeightAt?.(x,z),species:elementSpec.first.species,behaviorSpecies:elementSpec.first.behaviorSpecies,presentation:elementSpec.first.presentation,scale:elementSpec.first.size});
++                await elementCompanions.first.init();
+             }
+         } catch (err) {
+             elementCompanions.first?.dispose?.(); elementCompanions.first = null;
+@@ -611,6 +632,9 @@
+             if (elementSpec.second?.kind === 'helper') {
+                 elementCompanions.second = new HelperCompanion(elementOwner, this.scene.scene, 1.0, elementSpec.second);
+                 await elementCompanions.second.init();
++            } else if (elementSpec.second?.kind === 'mount') {
++                elementCompanions.second = new MountCompanion({...elementOwner,mesh:outer},this.scene.scene,elementSpec.second.petModelPath,0,{safeZone:elementOwner.safeZone,terrainHeightAt:(x,z)=>this.scene?.terrainHeightAt?.(x,z),species:elementSpec.second.species,behaviorSpecies:elementSpec.second.behaviorSpecies,presentation:elementSpec.second.presentation,scale:elementSpec.second.size});
++                await elementCompanions.second.init();
+             }
+         } catch (err) {
+             elementCompanions.second?.dispose?.(); elementCompanions.second = null;
+@@ -648,7 +672,7 @@
+             serverTileX: e.x, serverTileY: e.y, serverDir: e.dir ?? ((e.path >> 4) & 7),
+             serverBuffSnapshot: Array.from(e.buffs || []),
+             customPreview: e.customPreview || null,
+-            weaponRightSpec: attach?.weaponRightSpec || null, equipment: attach, customHelperCompanion, elementCompanions,
++            weaponRightSpec: attach?.weaponRightSpec || null, equipment: attach, customHelperCompanion, mountCompanion, elementCompanions,
+             moveTarget: null,
+             motionChar: { classId, _muRunProgress: 0, mesh: outer },
+             bodyLightColor: new THREE.Color(1, 1, 1),
+@@ -717,6 +741,7 @@
+                 renderer.update(poseDt, entry.t);
+                 for (const wr of extras) wr.update(poseDt, entry.t);
+                 customHelperCompanion?.update?.(poseDt);
++                mountCompanion?.update?.(poseDt, renderer);
+                 elementCompanions.first?.update?.(poseDt, []);
+                 elementCompanions.second?.update?.(poseDt);
+                 poseSteps++;
+diff -ruN '--exclude=R90_FIX95_SOURCE_HASHES.json' /mnt/data/MUWEB_R90_FIX94_LARGE_PORT_WINGS_LUA_TERRAIN_DARKSPIRIT_2026-10-05/graphics/CharacterPreview.js /mnt/data/MUWEB_R90_FIX95_CHARACTERHELPER_TABLE_RENDER_ROUTING_2026-10-05/graphics/CharacterPreview.js
+--- /mnt/data/MUWEB_R90_FIX94_LARGE_PORT_WINGS_LUA_TERRAIN_DARKSPIRIT_2026-10-05/graphics/CharacterPreview.js	2026-10-05 04:45:52.000000000 +0000
++++ /mnt/data/MUWEB_R90_FIX95_CHARACTERHELPER_TABLE_RENDER_ROUTING_2026-10-05/graphics/CharacterPreview.js	2026-10-05 23:54:44.455345137 +0000
+@@ -317,7 +317,7 @@
+                         const previewOwner = { position: outer.position, mesh: outer, isAlive: () => true };
+                         const mount = new MountCompanion(
+                             previewOwner, this.gameScene.scene, previewMount.petModelPath, previewMount.option,
+-                            { safeZone: () => false },
++                            { safeZone: () => false, species: previewMount.species, behaviorSpecies: previewMount.behaviorSpecies, presentation: previewMount.presentation || null, scale: previewMount.sizeCharList ?? previewMount.size },
+                         );
+                         await mount.init();
+                         slot.mount = mount;
+diff -ruN '--exclude=R90_FIX95_SOURCE_HASHES.json' /mnt/data/MUWEB_R90_FIX94_LARGE_PORT_WINGS_LUA_TERRAIN_DARKSPIRIT_2026-10-05/graphics/PcCharacterHelperPresentation.js /mnt/data/MUWEB_R90_FIX95_CHARACTERHELPER_TABLE_RENDER_ROUTING_2026-10-05/graphics/PcCharacterHelperPresentation.js
+--- /mnt/data/MUWEB_R90_FIX94_LARGE_PORT_WINGS_LUA_TERRAIN_DARKSPIRIT_2026-10-05/graphics/PcCharacterHelperPresentation.js	1970-01-01 00:00:00.000000000 +0000
++++ /mnt/data/MUWEB_R90_FIX95_CHARACTERHELPER_TABLE_RENDER_ROUTING_2026-10-05/graphics/PcCharacterHelperPresentation.js	2026-10-05 23:49:20.810193362 +0000
+@@ -0,0 +1,75 @@
++import * as THREE from 'three';
++import { pcBitmapTexture } from '../data/PcBitmapLuaOwners.js';
++
++// CharacterHelper.lua presentation owner. The script's RenderHelper replaces the
++// stock helper body. The Web renderer already owns one resident RENDER_TEXTURE
++// draw per BMD mesh, so plain flag=2 rows are folded into that draw; every other
++// authored RenderMesh becomes one overlay pass on the same skeleton/geometry.
++export async function applyPcCharacterHelperPresentation(renderer, rule) {
++  if (!renderer || !rule || rule.owner !== 'CharacterHelper.lua') return null;
++  const attached=[]; const unresolved=[]; let baseRows=0, overlayRows=0;
++  const rows=Array.isArray(rule.model)?rule.model:[];
++  for (const row of rows) {
++    if (Number(row.timer)!==100) { unresolved.push({kind:'render',reason:'dynamic-timer',row}); continue; }
++    if (Array.isArray(row.actions)&&row.actions.length&&!row.actions.includes(-1)) { unresolved.push({kind:'render',reason:'action-gated',row}); continue; }
++    const meshIndex=Number(row.mesh), flags=Number(row.glow), textureId=Number(row.texture);
++    if (!Number.isInteger(meshIndex)||!Number.isFinite(flags)) { unresolved.push({kind:'render',reason:'bad-mesh-or-flags',row}); continue; }
++    const source=renderer.meshes?.find?.(m=>Number(m?.userData?.muMeshIndex)===meshIndex);
++    if (!source) { unresolved.push({kind:'render',reason:'mesh-missing',row}); continue; }
++    const color=(Number(row.r)>=0&&Number(row.g)>=0&&Number(row.b)>=0)?new THREE.Color(Number(row.r),Number(row.g),Number(row.b)):null;
++    let map=null;
++    if (textureId>=0) {
++      try { map=await pcBitmapTexture(textureId); } catch (_) { map=null; }
++      if (!map) { unresolved.push({kind:'render',reason:'texture-id-unresolved',row}); continue; }
++    }
++    // Exact RENDER_TEXTURE/default-texture row: consume the already resident base
++    // mesh instead of publishing a duplicate draw.
++    if (flags===2 && textureId===-1 && row.render!==true) {
++      if (color) {
++        if (source.material?.color?.copy) source.material.color.copy(color);
++        if (source.material?.uniforms?.diffuse?.value?.copy) source.material.uniforms.diffuse.value.copy(color);
++        source.userData ??={}; source.userData.muCharacterHelperBodyLight=color.clone();
++      }
++      source.visible=true; baseRows++; continue;
++    }
++    const repeat=Math.max(1,Math.min(32,Number(row.value)||1));
++    for(let i=0;i<repeat;i++){
++      const pass=renderer.createOverlayPass?.(flags,{map,color:color||new THREE.Color(1,1,1),alpha:1,meshFilter:m=>Number(m?.userData?.muMeshIndex)===meshIndex,passOrder:2+i*0.001});
++      if(!pass){unresolved.push({kind:'render',reason:'overlay-pass-failed',row});break;}
++      attached.push(pass);overlayRows++;
++      // Render=true in this script means authored pulse/UV motion. Only eight
++      // rows in the supplied 2.4 MB table use it; preserve their formulas.
++      if(row.render===true){
++        const effect=Number(row.effect),speed=Number(row.renSpeed)||0,opacity=Number(row.renOpacity)||0,limit=Number(row.renColor)||1;
++        renderer.addPresentationUpdate?.((worldMs)=>{
++          if(effect===0){
++            const vertex=Math.min(limit,Math.sin(worldMs*0.001*speed)*0.5+0.5+opacity);
++            let c=new THREE.Color(vertex,vertex,vertex);
++            if(row.color===true){
++              if(Number(row.r)>=0)c.setRGB(Number(row.rr)||0,vertex,vertex);
++              if(Number(row.g)>=0)c.setRGB(vertex,Number(row.rg)||0,vertex);
++              if(Number(row.b)>=0)c.setRGB(vertex,vertex,Number(row.rb)||0);
++            }
++            pass.setColor?.(c);
++          } else {
++            let u=0,v=0;const t=worldMs;
++            if(effect===1)v=t/100*speed;
++            else if(effect===2)v=t/100*-speed;
++            else if(effect===3)u=t/100*speed;
++            else if(effect===4)u=t/100*-speed;
++            else if(effect===5){u=Math.floor(((t%(15*40))/40)%4)*speed;v=Math.floor(((t%(15*40))/40)/4)*speed;}
++            else if(effect===6){u=Math.floor(((t%(15*40))/40)%4)*-speed;v=Math.floor(((t%(15*40))/40)/4)*-speed;}
++            pass.setUvOffset?.(u,v);
++          }
++        });
++      }
++    }
++  }
++  // Script-level RenderShadowModel and foot-effect factories need their own PC
++  // geometry/lifecycle owners. Record them rather than substituting fake blobs.
++  if(rule.shadow) unresolved.push({kind:'shadow',reason:'RenderShadowModel-native-projection-pending'});
++  if(Number(rule.footEffectRows)>0) unresolved.push({kind:'foot-effect',reason:'helper-foot-lifecycle-pending',rows:Number(rule.footEffectRows)});
++  const state=Object.freeze({baseRows,overlayRows,attached:Object.freeze(attached),unresolved:Object.freeze(unresolved)});
++  renderer.userData ??={}; renderer.userData.muCharacterHelperPresentation=state;
++  return state;
++}
+diff -ruN '--exclude=R90_FIX95_SOURCE_HASHES.json' /mnt/data/MUWEB_R90_FIX94_LARGE_PORT_WINGS_LUA_TERRAIN_DARKSPIRIT_2026-10-05/graphics/PlayerComposer.js /mnt/data/MUWEB_R90_FIX95_CHARACTERHELPER_TABLE_RENDER_ROUTING_2026-10-05/graphics/PlayerComposer.js
+--- /mnt/data/MUWEB_R90_FIX94_LARGE_PORT_WINGS_LUA_TERRAIN_DARKSPIRIT_2026-10-05/graphics/PlayerComposer.js	2026-10-05 23:32:13.191302976 +0000
++++ /mnt/data/MUWEB_R90_FIX95_CHARACTERHELPER_TABLE_RENDER_ROUTING_2026-10-05/graphics/PlayerComposer.js	2026-10-05 23:53:10.367590739 +0000
+@@ -698,21 +698,22 @@
+             // DARKHORSE_ACTIONS (MoveBug GOBoid.cpp:324-494).
+             if (resolved.helper.kind === 'helper') {
+                 out.helperKind = 'helper';
+-            } else if (resolved.helper.kind === 'custom-preview' && resolved.helper.helper?.modelPath) {
++            } else if (resolved.helper.kind === 'custom-preview' && (resolved.helper.helper?.renderModelPath || resolved.helper.helper?.modelPath)) {
+                 const h = resolved.helper.helper;
+-                out.customHelper = {
+-                    kind: 'custom-helper', itemType: resolved.helper.itemType,
+-                    petModelPath: h.modelPath, objectModelPath: h.objectModelPath || null,
+-                    // CharacterHelper.lua parser already guarantees finite numeric SetHelper fields.
+-                    // Preserve authored zeroes exactly: `||` previously rewrote Size/SizeCharList/
+-                    // SizeMiniature/VelocityMiniature 0 into synthetic 0.7/1 values, which is not a
+-                    // desktop fallback and can change presentation/movement for current-client rows.
+-                    movement: Number(h.movement), height: Number(h.height),
+-                    size: Number(h.size), sizeCharList: Number(h.sizeCharList),
+-                    type: Number(h.type), miniature: Number(h.miniature),
++                const common = {
++                    itemType: resolved.helper.itemType,
++                    petModelPath: h.renderModelPath || h.modelPath, itemModelPath: h.itemModelPath || h.modelPath, objectModelPath: h.objectModelPath || null,
++                    movement: Number(h.movement), height: Number(h.height), size: Number(h.size), sizeCharList: Number(h.sizeCharList),
++                    type: Number(h.type), rawType: Number(h.rawType), miniature: Number(h.miniature),
+                     sizeMiniature: Number(h.sizeMiniature), velocityMiniature: Number(h.velocityMiniature),
+-                    owner: 'CharacterHelper.lua', viaCacheKey: resolved.helper.key,
++                    presentation: resolved.helper.helperPresentation || null, owner: 'CharacterHelper.lua', viaCacheKey: resolved.helper.key,
+                 };
++                // CharacterHelper.lua RenderHelper dispatcher is explicit: raw Type 0=Fly,
++                // 3=Fenrir, 4=Horse. Never route the latter two through HelperCompanion.
++                if (Number(h.rawType) === 0) out.customHelper = { kind:'custom-helper', ...common };
++                else if (Number(h.rawType) === 3) out.rider = { ...common, species:'custom-fenrir', behaviorSpecies:'fenrir' };
++                else if (Number(h.rawType) === 4) out.rider = { ...common, species:'custom-horse', behaviorSpecies:'dark-horse' };
++                else out.missing.push(`custom-helper rawType=${h.rawType} (${resolved.helper.key}): movement owner específico pendente; não roteado como pet voador`);
+             } else if (resolved.helper.kind === 'unicon' || resolved.helper.kind === 'pegasus') {
+                 out.rider = {
+                     species: resolved.helper.kind,
+diff -ruN '--exclude=R90_FIX95_SOURCE_HASHES.json' /mnt/data/MUWEB_R90_FIX94_LARGE_PORT_WINGS_LUA_TERRAIN_DARKSPIRIT_2026-10-05/test-r90-fix94-large-port-gate.mjs /mnt/data/MUWEB_R90_FIX95_CHARACTERHELPER_TABLE_RENDER_ROUTING_2026-10-05/test-r90-fix94-large-port-gate.mjs
+--- /mnt/data/MUWEB_R90_FIX94_LARGE_PORT_WINGS_LUA_TERRAIN_DARKSPIRIT_2026-10-05/test-r90-fix94-large-port-gate.mjs	2026-10-05 23:35:42.891550153 +0000
++++ /mnt/data/MUWEB_R90_FIX95_CHARACTERHELPER_TABLE_RENDER_ROUTING_2026-10-05/test-r90-fix94-large-port-gate.mjs	2026-10-05 23:58:23.856354976 +0000
+@@ -12,5 +12,5 @@
+ const pet=read('./game/PetSystem.js');
+ for(const t of ['_attachLuaPresentation','renderBaseOwned','pcBitmapTexture','dynamic-randtime-not-owned']) assert.ok(pet.includes(t),`DarkSpirit consumer missing ${t}`);
+ const bats=fs.readdirSync(new URL('.',import.meta.url)).filter(x=>x.toLowerCase().endsWith('.bat'));
+-assert.deepEqual(bats.sort(),['DESLIGAR_WEB_R90.bat','INSTALAR_DEPENDENCIAS_R90.bat','LIGAR_WEB_R90_FIX94.bat'].sort());
++const auth=read('./CURRENT_AUTHORITY.txt');const m=/MUWEB_R90_FIX(\d+)_/.exec(auth);assert.ok(m,'current authority revision missing');const launch=`LIGAR_WEB_R90_FIX${m[1]}.bat`;assert.deepEqual(bats.sort(),['DESLIGAR_WEB_R90.bat','INSTALAR_DEPENDENCIAS_R90.bat',launch].sort());
+ console.log('PASS FIX94 large port: wings dual ABI + S6 item FX + PC ATT + DarkSpirit table/presentation');
+diff -ruN '--exclude=R90_FIX95_SOURCE_HASHES.json' /mnt/data/MUWEB_R90_FIX94_LARGE_PORT_WINGS_LUA_TERRAIN_DARKSPIRIT_2026-10-05/test-r90-fix95-characterhelper-model-owner.mjs /mnt/data/MUWEB_R90_FIX95_CHARACTERHELPER_TABLE_RENDER_ROUTING_2026-10-05/test-r90-fix95-characterhelper-model-owner.mjs
+--- /mnt/data/MUWEB_R90_FIX94_LARGE_PORT_WINGS_LUA_TERRAIN_DARKSPIRIT_2026-10-05/test-r90-fix95-characterhelper-model-owner.mjs	1970-01-01 00:00:00.000000000 +0000
++++ /mnt/data/MUWEB_R90_FIX95_CHARACTERHELPER_TABLE_RENDER_ROUTING_2026-10-05/test-r90-fix95-characterhelper-model-owner.mjs	2026-10-05 23:42:10.558843542 +0000
+@@ -0,0 +1,14 @@
++import assert from 'node:assert/strict';
++import {parseCharacterHelperLua} from './data/CharacterHelperLua.js';
++const rows=parseCharacterHelperLua(`
++SetHelper(GET_ITEM(13,80), 0, 2, 20.5, 0.8, 0.9, 1, 0.4, 2.0, "PetWolf", "PetWolfObj")
++SetHelper(GET_ITEM(13,81), 1, 0, 0, 1.1, 1.2, 0, 0.5, 1.0, "MountItem", "MountObject")
++SetHelper(GET_ITEM(13,82), 2, 0, 0, 1.0, 1.0, 0, 0.5, 1.0, "Data\\Item\\ExplicitItem", "Data\\Skill\\ExplicitObject")
++`);
++const h0=rows.get(13*512+80), h1=rows.get(13*512+81), h2=rows.get(13*512+82);
++assert.equal(h0.itemModelPath,'Item/PetWolf.bmd');
++assert.equal(h0.objectModelPath,'Skill/PetWolfObj.bmd');
++assert.equal(h0.renderModelPath,'Item/PetWolf.bmd','Type 0 returns ItemIndex model on PC');
++assert.equal(h1.type,2); assert.equal(h1.renderModelPath,'Skill/MountObject.bmd','Type>0 returns synthetic ModelID/ObjectModel on PC');
++assert.equal(h2.itemModelPath,'Item/ExplicitItem.bmd'); assert.equal(h2.objectModelPath,'Skill/ExplicitObject.bmd');
++console.log('PASS FIX95 CharacterHelper Data/Item vs Data/Skill runtime model ownership');
+diff -ruN '--exclude=R90_FIX95_SOURCE_HASHES.json' /mnt/data/MUWEB_R90_FIX94_LARGE_PORT_WINGS_LUA_TERRAIN_DARKSPIRIT_2026-10-05/test-r90-fix95-characterhelper-table-owner.mjs /mnt/data/MUWEB_R90_FIX95_CHARACTERHELPER_TABLE_RENDER_ROUTING_2026-10-05/test-r90-fix95-characterhelper-table-owner.mjs
+--- /mnt/data/MUWEB_R90_FIX94_LARGE_PORT_WINGS_LUA_TERRAIN_DARKSPIRIT_2026-10-05/test-r90-fix95-characterhelper-table-owner.mjs	1970-01-01 00:00:00.000000000 +0000
++++ /mnt/data/MUWEB_R90_FIX95_CHARACTERHELPER_TABLE_RENDER_ROUTING_2026-10-05/test-r90-fix95-characterhelper-table-owner.mjs	2026-10-05 23:55:16.991477073 +0000
+@@ -0,0 +1,19 @@
++import assert from 'node:assert/strict';
++import {parseCharacterHelperLua,parseCharacterHelperRenderTables} from './data/CharacterHelperLua.js';
++const source=String.raw`
++HELPER_CONFIG = {
++ { ItemIndex=GET_ITEM_MODEL(13,238), Type=4, SeparateModel=1, Movement=0, DefenseSkill=1, Height=0, Size=.92, SizeSelectChar=1.25, ModelDir="Data\\Item\\", Model='icon_horse_heat', ObjectModelDir="Data\\Skill\\", ObjectModel='HorseSkin2', FileType=0, Miniature=1, SizeMiniature=.42, VelocityMiniature=.5 },
++ { ItemIndex=GET_ITEM_MODEL(13,201), Type=0, SeparateModel=1, Movement=2, DefenseSkill=1, Height=1, Size=.45, SizeSelectChar=1.10, ModelDir="Data\\Item\\", Model='flypet', ObjectModelDir="Data\\Item\\", ObjectModel='flypet_obj', FileType=0, Miniature=1, SizeMiniature=.42, VelocityMiniature=.5 },
++}
++RENDER_HELPER[GET_ITEM_MODEL(13,238)] = { Shadow=true, Model={
++ { Actions={-1}, Mesh=0, Glow=2, R=10,G=10,B=10, Shadow=false, Render=false, Effect=-1, FixEffect=true, Value=1, RenOpacity=0, RenSpeed=-2, RenColor=1, Color=true, RR=1,RG=1,RB=1, Timer=100, Texture=-1 },
++ { Actions={-1}, Mesh=0, Glow=70, R=.2,G=.08,B=0, Shadow=false, Render=false, Effect=-1, FixEffect=true, Value=1, RenOpacity=0, RenSpeed=-2, RenColor=1, Color=true, RR=1,RG=1,RB=1, Timer=100, Texture=-1 },
++}, FootEffect={{Enabled=false}} }
++function LoadHelpers() for i=1,#HELPER_CONFIG do local c=HELPER_CONFIG[i] SetHelper(c.ItemIndex,c.Type,c.Movement,c.Height,c.Size,c.SizeSelectChar,c.Miniature,c.SizeMiniature,c.VelocityMiniature,c.Model,c.ObjectModel) end end
++`;
++const helpers=parseCharacterHelperLua(source), render=parseCharacterHelperRenderTables(source);
++assert.equal(helpers.size,2);assert.equal(render.size,1);
++const horse=helpers.get(13*512+238);assert.equal(horse.rawType,4);assert.equal(horse.type,16);assert.equal(horse.itemModelPath,'Item/icon_horse_heat.bmd');assert.equal(horse.objectModelPath,'Skill/HorseSkin2.bmd');assert.equal(horse.renderModelPath,'Skill/HorseSkin2.bmd');
++const pet=helpers.get(13*512+201);assert.equal(pet.rawType,0);assert.equal(pet.renderModelPath,'Item/flypet.bmd');
++const rp=render.get(13*512+238);assert.equal(rp.model.length,2);assert.equal(rp.model[1].glow,70);assert.deepEqual(rp.model[1].actions,[-1]);assert.equal(rp.shadow,true);assert.equal(rp.footEffectRows,1);
++console.log('PASS FIX95 CharacterHelper consolidated HELPER_CONFIG + RENDER_HELPER parser/owner');
+diff -ruN '--exclude=R90_FIX95_SOURCE_HASHES.json' /mnt/data/MUWEB_R90_FIX94_LARGE_PORT_WINGS_LUA_TERRAIN_DARKSPIRIT_2026-10-05/test-r90-fix95-helper-presentation.mjs /mnt/data/MUWEB_R90_FIX95_CHARACTERHELPER_TABLE_RENDER_ROUTING_2026-10-05/test-r90-fix95-helper-presentation.mjs
+--- /mnt/data/MUWEB_R90_FIX94_LARGE_PORT_WINGS_LUA_TERRAIN_DARKSPIRIT_2026-10-05/test-r90-fix95-helper-presentation.mjs	1970-01-01 00:00:00.000000000 +0000
++++ /mnt/data/MUWEB_R90_FIX95_CHARACTERHELPER_TABLE_RENDER_ROUTING_2026-10-05/test-r90-fix95-helper-presentation.mjs	2026-10-05 23:56:39.233580991 +0000
+@@ -0,0 +1,8 @@
++import fs from 'node:fs';import assert from 'node:assert/strict';
++const s=fs.readFileSync(new URL('./graphics/PcCharacterHelperPresentation.js',import.meta.url),'utf8');
++assert.match(s,/flags===2\s*&&\s*textureId===-1/,'plain RENDER_TEXTURE rows must fold into resident base draw');
++assert.match(s,/createOverlayPass\?\.\(flags/,'non-base helper RenderMesh rows must use real overlay pass');
++assert.match(s,/RenderShadowModel-native-projection-pending/,'shadow must stay explicit fail-closed until native projection owner exists');
++assert.match(s,/helper-foot-lifecycle-pending/,'foot lifecycle must not become fake generic FX');
++assert.match(s,/addPresentationUpdate/,'dynamic authored helper rows retain live presentation update path');
++console.log('PASS FIX95 CharacterHelper presentation structural gate: base-fold/overlay/dynamic/fail-closed shadow+foot');
+diff -ruN '--exclude=R90_FIX95_SOURCE_HASHES.json' /mnt/data/MUWEB_R90_FIX94_LARGE_PORT_WINGS_LUA_TERRAIN_DARKSPIRIT_2026-10-05/test-r90-fix95-helper-routing.mjs /mnt/data/MUWEB_R90_FIX95_CHARACTERHELPER_TABLE_RENDER_ROUTING_2026-10-05/test-r90-fix95-helper-routing.mjs
+--- /mnt/data/MUWEB_R90_FIX94_LARGE_PORT_WINGS_LUA_TERRAIN_DARKSPIRIT_2026-10-05/test-r90-fix95-helper-routing.mjs	1970-01-01 00:00:00.000000000 +0000
++++ /mnt/data/MUWEB_R90_FIX95_CHARACTERHELPER_TABLE_RENDER_ROUTING_2026-10-05/test-r90-fix95-helper-routing.mjs	2026-10-05 23:56:17.657938351 +0000
+@@ -0,0 +1,9 @@
++import assert from 'node:assert/strict';
++import {resolveCustomPreviewElements} from './data/CustomPreviewElements.js';
++const mk=(rawType,path='Skill/Test.bmd')=>({rawType,type:rawType===3?8:rawType===4?16:rawType,movement:0,height:0,size:.9,sizeCharList:1,miniature:0,sizeMiniature:.4,velocityMiniature:.5,renderModelPath:path});
++const lookup=(id)=>id===7001?mk(0,'Item/Fly.bmd'):id===7002?mk(3):id===7003?mk(4):id===7004?mk(2):null;
++let r=resolveCustomPreviewElements({element:[7001,7002]},{darkSpiritLookup:()=>null,helperLookup:lookup,helperRenderLookup:()=>({owner:'CharacterHelper.lua',model:[]})});
++assert.equal(r.first.kind,'helper');assert.equal(r.second.kind,'mount');assert.equal(r.second.behaviorSpecies,'fenrir');
++r=resolveCustomPreviewElements({element:[7003,7004]},{darkSpiritLookup:()=>null,helperLookup:lookup,helperRenderLookup:()=>null});
++assert.equal(r.first.kind,'mount');assert.equal(r.first.behaviorSpecies,'dark-horse');assert.equal(r.second.kind,'unresolved-helper');
++console.log('PASS FIX95 CharacterHelper raw type routing: fly/fenrir/horse separated; unsupported type never becomes flying pet');
+diff -ruN '--exclude=R90_FIX95_SOURCE_HASHES.json' /mnt/data/MUWEB_R90_FIX94_LARGE_PORT_WINGS_LUA_TERRAIN_DARKSPIRIT_2026-10-05/tools/start-r90-fix95-safe.cjs /mnt/data/MUWEB_R90_FIX95_CHARACTERHELPER_TABLE_RENDER_ROUTING_2026-10-05/tools/start-r90-fix95-safe.cjs
+--- /mnt/data/MUWEB_R90_FIX94_LARGE_PORT_WINGS_LUA_TERRAIN_DARKSPIRIT_2026-10-05/tools/start-r90-fix95-safe.cjs	1970-01-01 00:00:00.000000000 +0000
++++ /mnt/data/MUWEB_R90_FIX95_CHARACTERHELPER_TABLE_RENDER_ROUTING_2026-10-05/tools/start-r90-fix95-safe.cjs	2026-10-05 23:57:40.824925408 +0000
+@@ -0,0 +1,30 @@
++const fs = require('node:fs');
++const path = require('node:path');
++const crypto = require('node:crypto');
++const root = path.resolve(__dirname, '..');
++const MUTABLE_RUNTIME = new Set(['runtime-config.js']);
++function sha256(p){return crypto.createHash('sha256').update(fs.readFileSync(p)).digest('hex');}
++function verifyBuild(){
++  const manifestPath = path.join(root, 'R90_FIX95_SOURCE_HASHES.json');
++  if(!fs.existsSync(manifestPath)) throw new Error('R90_FIX95_SOURCE_HASHES.json ausente');
++  const m = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
++  let n=0;
++  for(const [rel, expected] of Object.entries(m.files || {})){
++    if(MUTABLE_RUNTIME.has(rel)) continue;
++    const p = path.join(root, rel);
++    if(!fs.existsSync(p)) throw new Error(`FIX95 arquivo ausente: ${rel}`);
++    const actual = sha256(p);
++    if(actual !== expected) throw new Error(`FIX95 arquivo modificado/incompleto: ${rel}`);
++    n++;
++  }
++  console.log(`[R90 FIX95] ${m.build}: ${n} arquivos imutaveis verificados.`);
++  return m;
++}
++module.exports={verifyBuild};
++if(require.main===module){
++  try{
++    verifyBuild();
++    if(process.argv.includes('--verify-only')) process.exit(0);
++    require('./start-r90-safe.cjs').main().catch(e=>{console.error('[R90 FIX95] FALHA:', e.message); process.exitCode=1;});
++  }catch(e){console.error('[R90 FIX95] FALHA:', e.message); process.exitCode=1;}
++}

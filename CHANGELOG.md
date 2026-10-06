@@ -4,6 +4,164 @@ Base do projeto: **MU Online Main 5.2 do Dinho**.
 
 ---
 
+## 06/10/2026 12:23 BRT
+
+Atualização da source do Projeto MuWeb.
+
+### Documentação técnica
+
+- Atualizado `docs/ENGINE/00_INDEX.md` — documentação técnica do sistema correspondente.
+- Atualizado `docs/ENGINE/07_SKILLS_EFFECTS.md` — skills, buffs, efeitos ou combate.
+- Atualizado `docs/ENGINE/10_PERFORMANCE.md` — documentação técnica do sistema correspondente.
+- Atualizado `docs/ENGINE/12_REMAINING_PORTS.md` — documentação técnica do sistema correspondente.
+- Atualizado `docs/ENGINE/13_VALIDATION_AND_TESTS.md` — documentação técnica do sistema correspondente.
+- Atualizado `docs/ENGINE/AUTOGEN_MODULE_INDEX.md` — documentação técnica do sistema correspondente.
+- Atualizado `docs/ENGINE/AUTOGEN_TEST_INDEX.md` — documentação técnica do sistema correspondente.
+- Adicionado `docs/ENGINE/16_FIX99_EFFECT_RUNTIME_AUDIT.md` — skills, buffs, efeitos ou combate.
+
+### Engine e runtime
+
+- Atualizado `core/GameApp.js`.
+- Atualizado `runtime-config.js`.
+
+### Ferramentas de desenvolvimento
+
+- Atualizado `tools/generateRealData.mjs` — ferramenta de desenvolvimento ou preparação de recursos.
+- Atualizado `tools/start-r90-safe.cjs` — ferramenta de desenvolvimento ou preparação de recursos.
+
+### Inicialização no Windows
+
+- Atualizado `INICIAR_MUWEB.bat` — inicialização, instalação ou encerramento no Windows.
+- Atualizado `INSTALAR_DEPENDENCIAS.bat` — inicialização, instalação ou encerramento no Windows.
+- Atualizado `PARAR_MUWEB.bat` — inicialização, instalação ou encerramento no Windows.
+
+### Interface e HUD
+
+- Atualizado `ui2/InventoryWindow.js` — itens, inventário, equipamentos ou apresentação associada.
+
+### Lua e dados do cliente
+
+- Atualizado `data/CharacterHelperLua.js` — personagens, monstros, NPCs, pets, helper ou viewport.
+- Atualizado `data/DarkSpiritLua.js` — integração, owner ou consumo de dados Lua.
+- Atualizado `data/ItemEffectsLuaConfig.js` — itens, inventário, equipamentos ou apresentação associada.
+- Atualizado `data/PcCharacterLuaEffects.js` — personagens, monstros, NPCs, pets, helper ou viewport.
+- Atualizado `game/PcMonsterLuaPresentation.js` — personagens, monstros, NPCs, pets, helper ou viewport.
+- Adicionado `ITEMS_LUA_FIX80.md` — itens, inventário, equipamentos ou apresentação associada.
+- Adicionado `MUWEB_R90_FIX61_ITEMS_LUA_LANE.md` — itens, inventário, equipamentos ou apresentação associada.
+- Adicionado `data/PcCustomCapeLua.js` — integração, owner ou consumo de dados Lua.
+
+### Mapas e mundo
+
+- Atualizado `world/AttMapLoader.js` — mapas, terreno, ambiente, objetos ou efeitos do mundo.
+- Atualizado `world/PcIcarusEnvironment.js` — ambiente, renderização ou comportamento de Icarus.
+- Atualizado `world/PcLorenciaEnvironment.js` — ambiente, objetos ou comportamento de Lorencia.
+- Atualizado `world/PcLorenciaFauna.js` — ambiente, objetos ou comportamento de Lorencia.
+- Atualizado `world/PcLorenciaFish.js` — ambiente, objetos ou comportamento de Lorencia.
+- Atualizado `world/PcLorenciaVisuals.js` — ambiente, objetos ou comportamento de Lorencia.
+- Atualizado `world/PcMapParticles.js` — mapas, terreno, ambiente, objetos ou efeitos do mundo.
+- Atualizado `world/PcThunderJoint.js` — mapas, terreno, ambiente, objetos ou efeitos do mundo.
+- Atualizado `world/TerrainObjectWorld.js` — mapas, terreno, ambiente, objetos ou efeitos do mundo.
+- Adicionado `world/PcIcarusBoids.js` — ambiente, renderização ou comportamento de Icarus.
+- Adicionado `world/PcIcarusCloudField.js` — ambiente, renderização ou comportamento de Icarus.
+- Adicionado `world/PcJointPool.js` — mapas, terreno, ambiente, objetos ou efeitos do mundo.
+
+### Outros
+
+- Adicionado `CURRENT_AUTHORITY.txt`.
+- Adicionado `FIX73_BAT_INVENTORY.txt` — itens, inventário, equipamentos ou apresentação associada.
+- Adicionado `FIX74_BAT_INVENTORY.txt` — itens, inventário, equipamentos ou apresentação associada.
+- Adicionado `FIX75_BAT_INVENTORY.txt` — itens, inventário, equipamentos ou apresentação associada.
+- Adicionado `FIX77_BAT_INVENTORY.txt` — itens, inventário, equipamentos ou apresentação associada.
+- Adicionado `FIX79_BAT_INVENTORY.txt` — itens, inventário, equipamentos ou apresentação associada.
+- Adicionado `FIX80_BAT_INVENTORY.txt` — itens, inventário, equipamentos ou apresentação associada.
+- Adicionado `FIX87_BAT_INVENTORY.txt` — itens, inventário, equipamentos ou apresentação associada.
+- Adicionado `FIX88_BAT_INVENTORY.txt` — itens, inventário, equipamentos ou apresentação associada.
+- Adicionado `FIX99_BAT_INVENTORY.txt` — itens, inventário, equipamentos ou apresentação associada.
+- Adicionado `LANE_REPORTS/`.
+- Adicionado `LANE_REPORTS_MAPS_ENGINE_M75.md` — mapas, terreno, ambiente, objetos ou efeitos do mundo.
+- Adicionado `MIGRACAO_CHAT_MUWEB_FIX98_PARA_FIX99_2026-10-06.md`.
+- Adicionado `MUWEB_LANE_MAPS_ENGINE_M61_REPORT.md` — mapas, terreno, ambiente, objetos ou efeitos do mundo.
+- Adicionado `MUWEB_R90_FIX74_FROM_FIX73.patch`.
+- Adicionado `MUWEB_R90_FIX80_FROM_FIX79.patch`.
+- Adicionado `MUWEB_R90_FIX95_FROM_FIX94.patch`.
+- Adicionado `MUWEB_R90_FIX96_FROM_FIX95.patch`.
+- Adicionado `MUWEB_R90_FIX97_FROM_FIX96.patch`.
+- Adicionado `MUWEB_R90_FIX98_FROM_FIX97.patch`.
+- Adicionado `MUWEB_R90_FIX99_FROM_FIX98.patch`.
+- Adicionado `test-maps-engine-m64-att-authority.mjs` — mapas, terreno, ambiente, objetos ou efeitos do mundo.
+- Adicionado `test-maps-engine-m71-icarus-moveobject-scratch.mjs` — ambiente, renderização ou comportamento de Icarus.
+- Adicionado `test-maps-engine-m72-icarus-spear-boids.mjs` — ambiente, renderização ou comportamento de Icarus.
+- Adicionado `test-maps-engine-m74-world-entry-profile.mjs` — mapas, terreno, ambiente, objetos ou efeitos do mundo.
+- Adicionado `test-maps-engine-m75-object-stage-profile.mjs` — mapas, terreno, ambiente, objetos ou efeitos do mundo.
+- Adicionado `tests/fix61-magiclist-count.mjs`.
+- Adicionado `tests/fix64/`.
+- Adicionado `tests/fix65/`.
+- Adicionado `tests/fix66/`.
+- Adicionado `tests/fix75/`.
+- Adicionado `tests/fix76/`.
+- Adicionado `tests/fix78/`.
+- Adicionado `tests/fix90/`.
+- Adicionado `tests/fix91/`.
+- Adicionado `tests/fix92/`.
+- Adicionado `tests/fix93-test-fenrir-foot-thunder.mjs` — mapas, terreno, ambiente, objetos ou efeitos do mundo.
+- Adicionado `tests/fix94-test-att-pc-bits.mjs`.
+- Adicionado `tests/fix94-test-character-item-s6-abi.mjs` — itens, inventário, equipamentos ou apresentação associada.
+- Adicionado `tests/fix94-test-custom-wings-dual-authority.mjs`.
+- Adicionado `tests/fix94-test-darkspirit-table-presentation.mjs`.
+- Adicionado `tests/maps-engine-m73/` — mapas, terreno, ambiente, objetos ou efeitos do mundo.
+
+### Personagens, itens e gameplay
+
+- Atualizado `data/CurrentClientItemOwners.js` — itens, inventário, equipamentos ou apresentação associada.
+- Atualizado `data/CustomPreviewElements.js`.
+- Atualizado `data/ItemModelResolver.js` — itens, inventário, equipamentos ou apresentação associada.
+- Atualizado `game/Movement.js`.
+- Atualizado `game/PCSkillEffectsPackA.js` — skills, buffs, efeitos ou combate.
+- Atualizado `game/PetSystem.js` — personagens, monstros, NPCs, pets, helper ou viewport.
+- Atualizado `game/PlayerViewportManager.js` — personagens, monstros, NPCs, pets, helper ou viewport.
+
+### Rede e protocolo
+
+- Atualizado `protocol/MUOpCodes.js` — rede, protocolo, pacotes ou gateway.
+- Atualizado `protocol/MUPacketRouter.js` — rede, protocolo, pacotes ou gateway.
+- Atualizado `protocol/RealMUProtocol.js` — rede, protocolo, pacotes ou gateway.
+
+### Renderização e efeitos
+
+- Atualizado `assets/MUAssetLoader.js`.
+- Atualizado `assets/MUModelRenderer.js` — modelos, materiais, texturas ou composição visual.
+- Atualizado `assets/MUSoundManager.js`.
+- Atualizado `assets/MUTextureManager.js` — modelos, materiais, texturas ou composição visual.
+- Atualizado `effects2/LevelUpFX.js` — skills, buffs, efeitos ou combate.
+- Atualizado `graphics/CharacterPreview.js` — personagens, monstros, NPCs, pets, helper ou viewport.
+- Atualizado `graphics/Effects.js` — skills, buffs, efeitos ou combate.
+- Atualizado `graphics/GroundItemLayer.js` — itens, inventário, equipamentos ou apresentação associada.
+- Atualizado `graphics/MuTerrain.js` — mapas, terreno, ambiente, objetos ou efeitos do mundo.
+- Atualizado `graphics/PlayerComposer.js` — modelos, materiais, texturas ou composição visual.
+- Atualizado `graphics/Scene.js`.
+- Adicionado `effects2/DisplayEffectFX.js` — skills, buffs, efeitos ou combate.
+- Adicionado `effects2/DisplayPotionFX.js` — skills, buffs, efeitos ou combate.
+- Adicionado `graphics/PcCapeCloth.js`.
+- Adicionado `graphics/PcCharacterHelperPresentation.js` — personagens, monstros, NPCs, pets, helper ou viewport.
+- Adicionado `graphics/PcCustomCapePresentation.js`.
+- Adicionado `graphics/PcGroundItemEffects.js` — itens, inventário, equipamentos ou apresentação associada.
+
+### Skills e combate
+
+- Atualizado `tools/gen-skill-attribute-table.mjs` — skills, buffs, efeitos ou combate.
+- Atualizado `ui2/SkillBar.js` — skills, buffs, efeitos ou combate.
+- Adicionado `LANE_REPORTS_SKILLS_PROTOCOL_FIX80.md` — skills, buffs, efeitos ou combate.
+- Adicionado `MUWEB_LANE_SKILLS_PROTOCOL_FIX61_REPORT.md` — skills, buffs, efeitos ou combate.
+- Adicionado `MUWEB_LANE_SKILLS_PROTOCOL_FIX75_REPORT.md` — skills, buffs, efeitos ou combate.
+
+### Launchers do Windows
+
+- `INICIAR_MUWEB.bat` sincronizado com `LIGAR_WEB_R90_FIX99.bat`.
+- `INSTALAR_DEPENDENCIAS.bat` sincronizado com `INSTALAR_DEPENDENCIAS_R90.bat`.
+- `PARAR_MUWEB.bat` sincronizado com `DESLIGAR_WEB_R90.bat`.
+
+---
+
 ## 05/10/2026 01:35 BRT
 
 Atualização da source do Projeto MuWeb com avanços em runtime, inventário, integração Lua, apresentação de monstros, ambiente de Icarus, renderização do personagem e documentação técnica.

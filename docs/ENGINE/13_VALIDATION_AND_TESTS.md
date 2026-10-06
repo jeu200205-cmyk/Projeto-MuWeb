@@ -8,3 +8,7 @@ FIX19: `node tools/test-fix19-runtime.mjs` retém 535 checks e acrescenta 14 (54
 
 FIX20: `node tools/test-fix20-runtime.mjs` retém os 549 checks Node da FIX19 e acrescenta 18 verificações do owner Fenrir (567 total em 21 suítes). São cobertos marcador não-ausente, quatro cores, publicação transacional e ocultação em `TW_SAFEZONE`. O teste físico Windows/Data real permanece obrigatório; teste automatizado não é declaração de paridade visual completa.
 FIX21: `node tools/test-fix21-runtime.mjs`: 613 checks Node (567 herdados + 46 novos), 22 suítes. `tests/fix21-render.html`: 333 checks WebGL (331 retidos + 2 pixels blend/alpha-test). Validação com fixtures isoladas, não com Data física. Não equivale a portabilidade visual completa.
+## FIX99
+
+No workspace FIX99: **28 gates** passaram — FIX81, FIX83–FIX89, FIX90 (2), FIX91, FIX92, FIX93, FIX94 (5), FIX95 (4), FIX96 (3), FIX97, FIX98 e FIX99. O `node --check` da árvore passou em 476 arquivos JS/MJS/CJS antes da geração final dos metadados de release. Os guards antigos de identidade de revisão que terminavam em FIX98 foram corrigidos para exigir numericamente sua revisão mínima, aceitando FIX99+ sem mascarar regressão para uma revisão anterior. Manifesto final, verify-only e ZIP integrity são executados novamente depois de toda alteração. Isso é validação estática/estrutural, não benchmark físico nem declaração de 100%.
+

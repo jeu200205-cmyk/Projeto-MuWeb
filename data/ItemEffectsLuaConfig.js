@@ -15,9 +15,43 @@ export const ITEM_EFFECTS_PATHS = Object.freeze([
   'Configs/crypt/Configs/ItemEffects.lua',
 ]);
 
-function stripLuaLineComment(line) {
-  const i = String(line ?? '').indexOf('--');
-  return i >= 0 ? String(line).slice(0, i) : String(line ?? '');
+function stripLuaComments(input = '') {
+  const s = String(input ?? ''); let out = '', i = 0, quote = null;
+  while (i < s.length) {
+    const c = s[i], n = s[i + 1];
+    if (quote) {
+      out += c;
+      if (c === '\\' && i + 1 < s.length) out += s[++i];
+      else if (c === quote) quote = null;
+      i++; continue;
+    }
+    if (c === '"' || c === "'") { quote = c; out += c; i++; continue; }
+    if (c === '-' && n === '-') {
+      if (s[i + 2] === '[' && s[i + 3] === '[') {
+        const close = s.indexOf(']]', i + 4); i = close < 0 ? s.length : close + 2;
+      } else { i += 2; while (i < s.length && s[i] !== '\n') i++; }
+      continue;
+    }
+    out += c; i++;
+  }
+  return out;
+}
+
+function callBodies(text, names) {
+  const wanted = new Set(names), out = []; const source = String(text ?? '');
+  const re = /\b(LoadEffect|LoadRunneEffect|LoadCustomLightEffect)\s*\(/g; let m;
+  while ((m = re.exec(source))) {
+    if (!wanted.has(m[1])) continue;
+    let i = re.lastIndex, start = i, depth = 1, quote = null;
+    for (; i < source.length; i++) {
+      const c = source[i];
+      if (quote) { if (c === '\\') i++; else if (c === quote) quote = null; continue; }
+      if (c === '"' || c === "'") { quote = c; continue; }
+      if (c === '(') depth++;
+      else if (c === ')' && --depth === 0) { out.push([m[1], source.slice(start, i)]); re.lastIndex = i + 1; break; }
+    }
+  }
+  return out;
 }
 
 function parseNumberToken(raw) {
@@ -52,12 +86,9 @@ export function parseItemEffectsLua(text) {
   const effects = new Map();
   const runneEffects = new Map();
   const customLights = new Map();
-  const source = String(text ?? '').split(/\r?\n/).map(stripLuaLineComment).join('\n');
-  const callRe = /\b(LoadEffect|LoadRunneEffect|LoadCustomLightEffect)\s*\(([^\n]*)\)/g;
-  let m;
-  while ((m = callRe.exec(source))) {
-    const fn = m[1];
-    const args = splitArgs(m[2]);
+  const source = stripLuaComments(text);
+  for (const [fn, body] of callBodies(source, ['LoadEffect','LoadRunneEffect','LoadCustomLightEffect'])) {
+    const args = splitArgs(body);
     if (fn === 'LoadEffect') {
       if (args.length < 5 || args.length > 8) continue;
       const itemModel = parseItemModelToken(args[0]);
@@ -124,6 +155,19 @@ export function resetItemEffectsLuaConfigCacheForTests() { _cached = null; }
 export function itemTypeToModelType(itemType) {
   return Number.isInteger(itemType) && itemType >= 0 ? ITEM_MODEL_BASE + itemType : null;
 }
+
+export function groundItemEffectRuntimeContract(info) {
+  if (!info) return null;
+  const thunder=(Number(info.effectType)|0)===3;
+  return Object.freeze({
+    owner:'EffectManager.cpp/MoveItems',
+    effectType:Number(info.effectType)|0,
+    cadenceTicks:thunder?6:24, cadenceMs:thunder?240:960,
+    logicalParticlesPerBurst:thunder?1000:2,
+    energyPointsPerBurst:thunder?500:0, glowPointsPerBurst:thunder?500:0,
+  });
+}
+
 
 /** PC ZzzCharacter ResolveRuneAuraDecision order: BodyPart[0..5], Weapon[0..1], Wing, Helper. */
 export function resolveRuneAuraForEquipment(attach, config) {

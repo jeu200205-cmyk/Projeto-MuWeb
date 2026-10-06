@@ -323,7 +323,7 @@ export class EffectManager {
 
 // =====================================================================
 // Skill texture system — texturas REAIS existentes no asset-manifest.json
-// (cliente MuPromax 1.0.2 em http://localhost:9100/, Data/Skill/*)
+// (Data/Skill/* da autoridade selecionada; o launcher FIX99 bloqueia o Data oficial MuPromax 1.0.1)
 // =====================================================================
 
 /** Caminhos exatos validados contra public/asset-manifest.json */

@@ -24,6 +24,8 @@ import { createPcMapBoneVisualOwner, createPcMapDynamicTerrainLightOwner, create
 import {pcIndoorObject,pcIndoorAlphaTarget,pcTerrainTileAt,stepPcIndoorAlpha} from './PcIndoorVisibility.js';
 import { createPcMapParticleOwner, hasPcMapParticleVisual } from './PcMapParticles.js';
 import { createPcIcarusEnvironmentOwner } from './PcIcarusEnvironment.js';
+import { createPcIcarusBoidsOwner } from './PcIcarusBoids.js';
+import { createPcIcarusCloudField } from './PcIcarusCloudField.js';
 import { createPcLorenciaFaunaOwner } from './PcLorenciaFauna.js';
 import { createPcLorenciaEnvironmentOwner } from './PcLorenciaEnvironment.js';
 import { createPcLorenciaFishOwner } from './PcLorenciaFish.js';
@@ -32,6 +34,14 @@ const ENTRY_SIZE = 30;
 const HEADER_SIZE = 4;
 const BASIS = new THREE.Matrix4().makeRotationX(-Math.PI / 2);
 const BASIS_INV = BASIS.clone().invert();
+
+// MAPS_ENGINE M68: model-authority staging has the same device-width problem as
+// placement construction. Keep conservative caps so BMD parse/texture work can
+// overlap on modern CPUs without flooding memory/GPU upload queues.
+export function pcMapModelStageConcurrency(logicalCores = Number(globalThis?.navigator?.hardwareConcurrency) || 4) {
+  const cores = Math.max(1, Number(logicalCores) || 4);
+  return cores >= 12 ? 6 : cores >= 8 ? 5 : 4;
+}
 
 
 const LORENCIA_STATIC_DYNAMIC_LIGHT_SERIALS = new Set([90, 150]);
@@ -61,6 +71,7 @@ function createLorenciaStaticDynamicLightOwner(gameScene, placements) {
 // transport merge path.  Preserve their real BMD meshes/materials/placements via
 // the normal shared-template clone lane; no geometry or replacement asset is added.
 const STRUCTURAL_FULL_FIDELITY_SERIALS = new Set([80, 85]); // Object81 Bridge01, Object86 BridgeStone01
+const LORENCIA_ARCHITECTURE_AUDIT_SERIALS = new Set([65,66,67,68,69,70,71,72,73,74,75,76,77,78,79,80,81,82,83,84,85,86,115,116,117,118,119,120,121,122,123,124,125,126,127,128,129]);
 
 // World75 source-owned one-frame sprite visuals.  GMEmpireGuardian4::
 // RenderObjectVisual calls CreateSprite(BITMAP_LIGHT, ...) every frame for
@@ -1050,6 +1061,8 @@ export class TerrainObjectLayer {
     this._dynamicTerrainLightOwner = null;
     this._mapWorldVisualOwner = null;
     this._icarusEnvironmentOwner = null;
+    this._icarusBoidsOwner = null;
+    this._icarusCloudFieldOwner = null;
     this._lorenciaEnvironmentOwner = null;
     this._lorenciaFishOwner = null;
     this._lorenciaFaunaOwner = null;
@@ -1122,10 +1135,15 @@ export class TerrainObjectLayer {
         throw e;
       }
     };
+    const _profileT0 = performance.now();
+    const _profile = { version: 'M75', world: worldNum|0, phases: {} };
+    let _profileMark = _profileT0;
+    const _markProfile = (name) => { const now=performance.now(); _profile.phases[name]=now-_profileMark; _profileMark=now; };
     assertContinue();
     const fetched = await fetchObjectFile(worldNum);
     assertContinue();
     const parsed = parseTerrainObjects(fetched.bytes);
+    _markProfile('fetchParse');
     console.info(`[WorldObjects] World${worldNum}: ${parsed.count} placement(s) de ${fetched.path}`);
     const histogram = new Map();
     for (const o of parsed.objects) histogram.set(o.serial, (histogram.get(o.serial) || 0) + 1);
@@ -1170,6 +1188,12 @@ export class TerrainObjectLayer {
         if (!this._staged) this._icarusEnvironmentOwner.activate?.();
         console.info('[WorldObjects FIX43] World11 Icarus: terrain mesh suppressed by Scene owner; rain01 + aHeaven environment owner installed (ambient activates only on publication).');
       }
+      this._icarusBoidsOwner = createPcIcarusBoidsOwner(this.gameScene);
+      if (this._icarusBoidsOwner?.group) {
+        this.root.add(this._icarusBoidsOwner.group);
+        if (typeof this._icarusBoidsOwner.group.userData.update === 'function') this._registerUpdateOwner(this._icarusBoidsOwner.group);
+        console.info('[WorldObjects FIX72] World11 Icarus: GOBoid owners installed (3 Monster32 sky dragons; 10 MODEL_SPEARSKILL joint boids active in one retained batch).');
+      }
     }
     const unique = [...new Set(parsed.objects.map((o) => o.serial))];
     // Main 5.2 creates several ObjectN entries only as invisible controllers /
@@ -1177,15 +1201,24 @@ export class TerrainObjectLayer {
     // the giant black/ice/tree slabs visible in the physical screenshots.
     // Keep a renderer only when a ported bone/runtime/particle owner requires
     // the controller skeleton; otherwise the desktop never draws the base BMD.
+    // FIX86: Icarus Object1..6 are source HiddenMesh=-2 cloud controllers.
+    // Their ported particle owner uses only OBJECT world position; keeping one
+    // MUModelRenderer/skeleton per placement was Web-only overhead. Run those
+    // owners standalone and skip the invisible BMD renderer entirely.
+    const sourceHiddenStandaloneParticleSerials = new Set(unique.filter((serial) =>
+      worldNum === 11 && pcMapHideBaseBmd(worldNum, serial) && hasPcMapParticleVisual(worldNum, serial)
+    ));
     const sourceHiddenNoRendererSerials = new Set(unique.filter((serial) =>
       pcMapHideBaseBmd(worldNum, serial) &&
       !(worldNum === 1 && PC_LORENCIA_RUNTIME_VISUAL_SERIALS.includes(serial)) &&
       !hasPcMapBoneVisual(worldNum, serial) &&
       !hasPcMapRuntimePresentation(worldNum, serial) &&
-      !hasPcMapParticleVisual(worldNum, serial)
+      (!hasPcMapParticleVisual(worldNum, serial) || sourceHiddenStandaloneParticleSerials.has(serial))
     ));
     const modelCache = new Map();
-    await mapLimit(unique, 4, async (serial) => {
+    const modelStageConcurrency = pcMapModelStageConcurrency();
+    this.root.userData.muMapModelStageConcurrency = modelStageConcurrency;
+    await mapLimit(unique, modelStageConcurrency, async (serial) => {
       assertContinue();
       await cooperate();
       assertContinue();
@@ -1198,6 +1231,7 @@ export class TerrainObjectLayer {
         modelCache.set(serial, null);
       }
     });
+    _markProfile('modelStage');
 
     // Perf P4 (t-muhg6wvo-t): paridade com o PC — MapManager.cpp carrega cada
     // modelo UMA vez (AccessModel) e cada CreateObject referencia a instância
@@ -1235,6 +1269,15 @@ export class TerrainObjectLayer {
         } catch (_) { /* use exact per-placement fallback if no model bound */ }
         const world75Rule = worldNum === 75 ? pcWorld75ObjectRule(serial) : null;
         if (rendererNeedsPerPlacementAnimation(probe) || world75Rule?.forcePerPlacement || hasPcLoginObjectPresentation(worldNum,serial) || pcIndoorObject(worldNum,serial) ||
+            // MAPS_ENGINE M67: Lorencia Bridge01/BridgeStone01 are structural,
+            // visually sensitive skinned BMDs.  Keeping them as a detached
+            // shallow clone of one frozen template shares skeleton state across
+            // placements and can deform/offset the bridge even though instancing
+            // is disabled below.  Match the PC CreateObject ownership instead:
+            // one renderer/skeleton per structural placement.  No mesh/material
+            // is hidden or replaced; only these two source BMD families bypass
+            // static template sharing.
+            (worldNum === 1 && STRUCTURAL_FULL_FIDELITY_SERIALS.has(serial)) ||
             (worldNum === 1 && PC_LORENCIA_RUNTIME_VISUAL_SERIALS.includes(serial)) ||
             hasPcMapBoneVisual(worldNum, serial) || hasPcMapRuntimePresentation(worldNum, serial) || hasPcMapParticleVisual(worldNum, serial)) {
           animatedSerials.add(serial);
@@ -1294,18 +1337,74 @@ export class TerrainObjectLayer {
     // geometry/material, mas ainda criava ~2985 Object3D/SkinnedMesh e milhares
     // de draw calls. R13 usa 1 InstancedMesh por submesh/material de cada serial
     // ESTÁTICO. AnimatedSerials continuam 1 renderer/placement, sem regressão.
+    _markProfile('templateProbe');
     const placementsBySerial = new Map();
     parsed.objects.forEach((obj, index) => {
       let arr = placementsBySerial.get(obj.serial);
       if (!arr) placementsBySerial.set(obj.serial, arr = []);
       arr.push({ obj, index });
     });
+    // FIX91 / Main 5.2 CreateOperate ownership. These are logical interaction
+    // records, not renderers. In Lorencia the desktop registers exactly
+    // Tree01+6, PoseBox, Furniture01+5 and Furniture01+6 in Operates[].
+    // PoseBox remains HiddenMesh=-2; exposing this registry must never make the
+    // controller BMD visible. TargetX/Y are the exact OBJECT position/TERRAIN_SCALE.
+    if (worldNum === 1) {
+      const operateKinds = new Map([[6,'sit'],[133,'pose'],[145,'sit-facing'],[146,'sit']]);
+      this.root.userData.pcOperatePlacements = parsed.objects.flatMap((obj,index) => {
+        const kind=operateKinds.get(obj.serial|0); if(!kind)return [];
+        const position=muObjectPositionToThree(obj,new THREE.Vector3());
+        const q=muObjectQuaternion(obj,new THREE.Quaternion());
+        const maxHeight=(obj.serial|0)===133?160:80; // CreateObject default; PoseBox overrides Z max.
+        return [Object.freeze({
+          worldNum:1, serial:obj.serial|0, objectNumber:(obj.serial|0)+1, index, kind,
+          targetX:Math.trunc(Number(obj.x)/100), targetY:Math.trunc(Number(obj.y)/100),
+          targetAngle:Number(obj.angleZ)||0, scale:Number(obj.scale)||1,
+          position:Object.freeze({x:position.x,y:position.y,z:position.z}),
+          quaternion:Object.freeze({x:q.x,y:q.y,z:q.z,w:q.w}),
+          // ZzzObject.cpp CreateObject defaults BoundingBoxMin=(-40,-40,0),
+          // BoundingBoxMax=(40,40,80). MODEL_POSE_BOX changes only Max to
+          // (40,40,160). Convert MU Z-up box to Three Y-up, no guessed bounds.
+          localBounds:Object.freeze({min:Object.freeze({x:-40,y:0,z:-40}),max:Object.freeze({x:40,y:maxHeight,z:40})}),
+        })];
+      });
+      this.root.userData.muPcOperateOwner='ZzzObject.cpp::CreateOperate + ZzzInterface.cpp::MOVEMENT_OPERATE';
+    }
     let sourceHiddenPlacements = 0;
     for (const serial of sourceHiddenNoRendererSerials) {
       const n = placementsBySerial.get(serial)?.length || 0;
       sourceHiddenPlacements += n;
       rendered += n; // faithfully handled: PC intentionally renders no base mesh
     }
+    // FIX87: all World11 source-hidden Object1..6 controllers share one logical
+    // field owner.  PC semantics remain per placement, but Web submission is
+    // one instanced cloud field + one shared thunder batch instead of hundreds
+    // of controller groups/materials/update callbacks.
+    let standaloneParticleControllers = 0;
+    if (worldNum === 11 && sourceHiddenStandaloneParticleSerials.size) {
+      const fieldPlacements=[];
+      for (const serial of sourceHiddenStandaloneParticleSerials)
+        for (const {obj} of placementsBySerial.get(serial) || []) fieldPlacements.push({serial,obj});
+      this._icarusCloudFieldOwner = await createPcIcarusCloudField(this.gameScene,fieldPlacements);
+      if (this._icarusCloudFieldOwner?.group) {
+        this.root.add(this._icarusCloudFieldOwner.group);
+        this._registerUpdateOwner(this._icarusCloudFieldOwner.group);
+        standaloneParticleControllers=this._icarusCloudFieldOwner.controllers||fieldPlacements.length;
+      }
+    } else {
+      for (const serial of sourceHiddenStandaloneParticleSerials) {
+        for (const {obj} of placementsBySerial.get(serial) || []) {
+          assertContinue();
+          const owner = await createPcMapParticleOwner(worldNum, serial, null, obj);
+          if (!owner?.group) continue;
+          this.root.add(owner.group);
+          if (typeof owner.group.userData.update === 'function') this._registerUpdateOwner(owner.group);
+          (this._standalonePcMapParticleOwners ??= []).push(owner); standaloneParticleControllers++;
+        }
+      }
+    }
+    if (standaloneParticleControllers)
+      console.info(`[WorldObjects R87] World${worldNum}: source-hidden particle controllers=${standaloneParticleControllers}; mergedField=${this._icarusCloudFieldOwner?1:0}; BMD renderers skipped`);
 
     if (staticInstancingEnabled()) {
       const chunkTiles = staticBatchTiles();
@@ -1461,8 +1560,17 @@ export class TerrainObjectLayer {
         instancedDraws - transportStats.sourceDraws + transportStats.batchedDraws;
     }
 
+    _markProfile('staticBatch');
     // Somente animados + static serials cujo batching falhou/foi desativado.
-    await mapLimit(parsed.objects, 4, async (obj, index) => {
+    // MAPS_ENGINE M66: the old fixed concurrency=4 under-used modern 8/12/16-core
+    // browsers during the remaining per-placement renderer/material setup. Keep
+    // the established 4-worker floor for low-core/mobile devices, but permit at
+    // most 6 workers on >=12 logical cores. This changes only staging throughput:
+    // object count, BMD/material/FX ownership and publication remain identical.
+    const logicalCores = Math.max(1, Number(globalThis?.navigator?.hardwareConcurrency) || 4);
+    const placementBuildConcurrency = logicalCores >= 12 ? 6 : logicalCores >= 8 ? 5 : 4;
+    this.root.userData.muMapPlacementBuildConcurrency = placementBuildConcurrency;
+    await mapLimit(parsed.objects, placementBuildConcurrency, async (obj, index) => {
       assertContinue();
       if (this._disposed || instancedSerials.has(obj.serial) || sourceHiddenNoRendererSerials.has(obj.serial)) return;
       if ((index & 7) === 0) await cooperate();
@@ -1698,6 +1806,7 @@ export class TerrainObjectLayer {
         console.warn(`[WorldObjects] placement ${index} Object${obj.serial + 1}: ${e.message}`);
       }
     });
+    _markProfile('placementBuild');
     this._templateRenderers = [...templates.values()];
     if (shared > 0) {
       const sb = this._lastSpatialBatchStats || { chunkTiles: 0, spatialClusters: 0 };
@@ -1717,6 +1826,25 @@ export class TerrainObjectLayer {
     console.info(`[WorldObjects FIX23] geometry World${worldNum}: builds=${this._loadGeometryStats.builds} reused=${this._loadGeometryStats.reuses}`);
     this._loadBoundStats = { models: localBoundsBySerial.size, reusedPlacements: boundReusePlacements, fallbackPlacements: boundFallbackPlacements };
     console.info(`[WorldObjects FIX21] bounds World${worldNum}: modelSweeps=${localBoundsBySerial.size} transformedPlacements=${boundReusePlacements} fallbackSweeps=${boundFallbackPlacements}; updateOwners=${this._ownedUpdateOwners.size}`);
+    // FIX69 physical Lorencia architecture probe. This is diagnostic only:
+    // no placement/model is hidden or replaced. It lets a physical screenshot/log
+    // identify whether a bad bridge/wall/house came through the exact-renderer,
+    // instanced or clone lane before the next correction is applied.
+    if(worldNum===1){
+      const rows=[];
+      for(const serial of [...LORENCIA_ARCHITECTURE_AUDIT_SERIALS].sort((a,b)=>a-b)){
+        // FIX81: FIX69 used an out-of-scope `slots` identifier here.  The
+        // authoritative placement collection in this phase is `this.instances`;
+        // keep this block diagnostic-only and never let telemetry abort map load.
+        const ss=this.instances.filter(x=>(x.obj?.serial|0)===serial);
+        const authored=parsed.objects.filter(x=>(x.serial|0)===serial).length;
+        if(!authored)continue;
+        rows.push(Object.freeze({serial,object:serial+1,authored,renderer:ss.filter(x=>!!x.renderer).length,instanced:instancedSerials.has(serial),structuralExact:STRUCTURAL_FULL_FIDELITY_SERIALS.has(serial)}));
+      }
+      this.root.userData.muLorenciaArchitectureProfile=Object.freeze(rows);
+      this.gameScene.scene.userData.muLorenciaArchitectureProfile=this.root.userData.muLorenciaArchitectureProfile;
+    }
+
     // FIX42 physical map audit: one stable line per ObjectXX in Lorencia/Icarus.
     // This distinguishes "model absent" from "source-hidden controller" and
     // "owner installed but visually wrong", which the old aggregate PASS could not.
@@ -1738,9 +1866,18 @@ export class TerrainObjectLayer {
         console.info(`[WorldObjects AUDIT FIX42] W${worldNum} Object${serial+1} placements=${rec.placements} model=${rec.model} path=${path} hidden=${rec.sourceHidden?1:0} missing=${rec.missing} owners=renderer:${counts.renderer},lorencia:${counts.lorenciaVisual},lorenciaBone:${counts.lorenciaBone},mapBone:${counts.mapBone},particle:${counts.mapParticle},runtime:${counts.runtime}`);
       }
     }
+    _markProfile('finalize');
+    _profile.totalMs = performance.now() - _profileT0;
+    _profile.placements = parsed.count|0; _profile.rendered = rendered|0; _profile.missing = missing|0;
+    _profile.modelStageConcurrency = modelStageConcurrency; _profile.placementBuildConcurrency = placementBuildConcurrency;
+    const frozenProfile = Object.freeze({ ..._profile, phases: Object.freeze({ ..._profile.phases }) });
+    this.root.userData.muMapObjectStageProfile = frozenProfile;
+    this.gameScene.scene.userData.muMapObjectStageProfile = frozenProfile;
+    globalThis.__MUWEB_MAP_OBJECT_STAGE_PROFILE__ = frozenProfile;
+    console.info(`[PERF M75] World${worldNum} object-stage total=${Math.round(frozenProfile.totalMs)}ms | ` + Object.entries(frozenProfile.phases).map(([k,v])=>`${k}=${Math.round(v)}`).join(' | '));
     console.info(`[WorldObjects] World${worldNum}: rendered=${rendered} missing=${missing}` +
       (missingSerials.length ? ` missingModels=${missingSerials.join(',')}` : ''));
-    return { ...parsed, rendered, missing, histogram: Object.fromEntries(histogram), missingSerials, serialAudit };
+    return { ...parsed, rendered, missing, histogram: Object.fromEntries(histogram), missingSerials, serialAudit, stageProfile: frozenProfile };
   }
 
   updateVisibility(camera) {
@@ -1845,6 +1982,22 @@ export class TerrainObjectLayer {
       if (ii >= 0) this.gameScene.objects.splice(ii, 1);
       try { this.root.remove(this._icarusEnvironmentOwner.group); this._icarusEnvironmentOwner.dispose?.(); } catch (_) { /* best effort */ }
       this._icarusEnvironmentOwner = null;
+    }
+    for (const owner of this._standalonePcMapParticleOwners || []) {
+      try { if (owner?.group) this.root.remove(owner.group); owner?.dispose?.(); } catch (_) { /* best effort */ }
+    }
+    this._standalonePcMapParticleOwners = [];
+    if (this._icarusCloudFieldOwner?.group) {
+      const ci = this.gameScene.objects.indexOf(this._icarusCloudFieldOwner.group);
+      if (ci >= 0) this.gameScene.objects.splice(ci,1);
+      try { this.root.remove(this._icarusCloudFieldOwner.group); this._icarusCloudFieldOwner.dispose?.(); } catch (_) {}
+      this._icarusCloudFieldOwner = null;
+    }
+    if (this._icarusBoidsOwner?.group) {
+      const ib = this.gameScene.objects.indexOf(this._icarusBoidsOwner.group);
+      if (ib >= 0) this.gameScene.objects.splice(ib, 1);
+      try { this.root.remove(this._icarusBoidsOwner.group); this._icarusBoidsOwner.dispose?.(); } catch (_) { /* best effort */ }
+      this._icarusBoidsOwner = null;
     }
     if (this._mapWorldVisualOwner?.group) {
       const wi = this.gameScene.objects.indexOf(this._mapWorldVisualOwner.group);

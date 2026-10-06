@@ -251,6 +251,10 @@ export class InventoryWindow extends MUWindow {
         // is now the persistent PC picked-item lifetime.
         this.dragItem = null;
         this._dragGeneration = 0;
+        // FIX84: the picked-item owner reuses the already-rendered slot canvas.
+        // This avoids a synchronous WebGL->2D readback on every click and keeps
+        // the exact PC preview scale/padding while the item follows the cursor.
+        this._pickedCanvasState = null;
         this.dragGhost = document.createElement('div');
         this.dragGhost.dataset.muPcOwner = 'CNewUIInventoryCtrl::RenderItem3DDrag';
         this.dragGhost.style.cssText = `
@@ -344,14 +348,45 @@ export class InventoryWindow extends MUWindow {
             this.dragGhost.style.width = `${ghostW}px`;
             this.dragGhost.style.height = `${ghostH}px`;
             this.dragGhost.textContent = '';
-            this._itemIO()
-                .then((io) => io && renderIcon3D(io, Number(item.itemType ?? item.type), Number.isInteger(item.rawLevel) ? item.rawLevel : ((item.level || 0) << 3), {w:ghostW,h:ghostH}, item))
-                .then((cv) => {
-                    if (cv && !this._destroyed && dragGeneration === this._dragGeneration && this.dragItem?.item === item) {
-                        cv.style.width = `${ghostW}px`; cv.style.height = `${ghostH}px`;
-                        this.dragGhost.textContent = ''; this.dragGhost.appendChild(cv);
-                    }
-                });
+            // FIX84: never copy a WebGL icon into a 2D canvas on the pickup click.
+            // drawImage(WebGLCanvas) forces a GPU readback/stall and FIX83 also
+            // squeezed the padded RenderItem3D viewport into the item footprint,
+            // making the picked item visibly tiny.  The PC picked-item owner is a
+            // presentation transfer: move the ready canvas itself to the cursor,
+            // preserving its exact CSS width/height/left/top and restore it when
+            // the picked item is released/cancelled.
+            this._restorePickedCanvas();
+            const sourceCanvas = cell.querySelector?.('canvas');
+            let transferred = false;
+            if (sourceCanvas?.width && sourceCanvas?.height && sourceCanvas.parentNode) {
+                this._pickedCanvasState = {
+                    canvas: sourceCanvas, parent: sourceCanvas.parentNode,
+                    next: sourceCanvas.nextSibling, cssText: sourceCanvas.style.cssText,
+                };
+                this.dragGhost.appendChild(sourceCanvas);
+                transferred = true;
+            }
+            // Cold icons are uncommon after inventory prewarm.  If no ready canvas
+            // exists, render at the same padded viewport law used by the slot; do
+            // NOT resize the returned canvas down to the footprint.
+            if (!transferred) {
+                // FIX87: a genuinely cold icon must never compile/fetch on the pickup
+                // event turn. Let the click publish immediately, then fill the exact
+                // 3D picked item in an idle slice. Cached icons still return instantly.
+                const deferCold = (fn) => {
+                    if (typeof requestIdleCallback === 'function') requestIdleCallback(fn,{timeout:80});
+                    else setTimeout(fn,0);
+                };
+                deferCold(() => this._itemIO()
+                    .then((io) => io && renderIcon3D(io, Number(item.itemType ?? item.type), Number.isInteger(item.rawLevel) ? item.rawLevel : ((item.level || 0) << 3), {w:ghostW,h:ghostH}, {...item, iconPadding:32}))
+                    .then((cv) => {
+                        if (cv && !this._destroyed && dragGeneration === this._dragGeneration && this.dragItem?.item === item) {
+                            const pad=Number(cv.dataset.muIconPadding)||0;
+                            cv.style.cssText = `position:absolute;left:${-pad}px;top:${-pad}px;width:${cv.width}px;height:${cv.height}px;max-width:none;max-height:none;pointer-events:none;image-rendering:auto;`;
+                            this.dragGhost.textContent = ''; this.dragGhost.appendChild(cv);
+                        }
+                    }));
+            }
             this._positionDragGhost(e);
             this._updateDragFootprint(e);
             this.dragGhost.style.display = 'block';
@@ -382,8 +417,12 @@ export class InventoryWindow extends MUWindow {
             if (!item || !this.tooltip) { this._hideItemTooltip(); return; }
             this._showItemTooltip(item, ref, cell);
         };
+        // FIX87: tooltip anchor is slot-authored, not pointer-authored. Rebuilding
+        // RenderItemInfo on every mousemove recreated the entire tooltip DOM and
+        // re-ran Ancient/Harmony/Socket/Set evaluation dozens of times per second.
+        // Build once when the pointer enters (or inventory refreshes); movement
+        // inside the same slot cannot change the PC tooltip.
         cell.addEventListener('mouseenter', showTip);
-        cell.addEventListener('mousemove', showTip);
         cell.addEventListener('mouseleave', () => this._hideItemTooltip());
         cell.dataset.ref = ref.kind === 'grid' ? `g${ref.index}` : `e${ref.key}`;
         return cell;
@@ -830,6 +869,19 @@ export class InventoryWindow extends MUWindow {
         }
     }
 
+    _restorePickedCanvas() {
+        const st=this._pickedCanvasState;
+        this._pickedCanvasState=null;
+        if(!st?.canvas)return;
+        try {
+            st.canvas.style.cssText=st.cssText||'';
+            if(st.parent?.isConnected){
+                if(st.next && st.next.parentNode===st.parent) st.parent.insertBefore(st.canvas,st.next);
+                else st.parent.appendChild(st.canvas);
+            } else { st.canvas.remove?.(); }
+        } catch (_) { try { st.canvas.remove?.(); } catch (_) {} }
+    }
+
     _beginPickedVisual(from, cell) {
         this._restoreDragCells();
         this._dragCellStyles=[];
@@ -867,6 +919,7 @@ export class InventoryWindow extends MUWindow {
         this.dragItem = null;
         ++this._dragGeneration;
         this.dragGhost.style.display = 'none';
+        this._restorePickedCanvas();
         this.dragGhost.textContent = '';
         if (!this.visible || this._destroyed) return;
 
@@ -1262,6 +1315,7 @@ export class InventoryWindow extends MUWindow {
         this._clearDragFootprint();
         this.dragItem = null;
         ++this._dragGeneration;
+        this._restorePickedCanvas();
         if (this.dragGhost) {
             this.dragGhost.style.display = 'none';
             this.dragGhost.textContent = '';

@@ -1,0 +1,664 @@
+diff -ruN '--exclude=R90_FIX79_SOURCE_HASHES.json' /mnt/data/fix80_base/MUWEB_R90_FIX79_PROTOCOL_WIRE_INTEGRATED_2026-10-05/CURRENT_AUTHORITY.txt /mnt/data/MUWEB_R90_FIX80_CAPE_SPRITE_ENGINE_PROFILE_2026-10-05/CURRENT_AUTHORITY.txt
+--- /mnt/data/fix80_base/MUWEB_R90_FIX79_PROTOCOL_WIRE_INTEGRATED_2026-10-05/CURRENT_AUTHORITY.txt	2026-10-05 18:46:11.000000000 +0000
++++ /mnt/data/MUWEB_R90_FIX80_CAPE_SPRITE_ENGINE_PROFILE_2026-10-05/CURRENT_AUTHORITY.txt	2026-10-05 19:40:20.214483216 +0000
+@@ -1,4 +1,4 @@
+-MUWEB central authority: MUWEB_R90_FIX78_CAPE_GPU_RENDERBODY_MESH_2026-10-05_FULL.zip
+-Parent: MUWEB_R90_FIX77_ITEM_LUA_FX_CACHE_2026-10-05_FULL.zip
+-Integrated: direct RenderCapeModel GPU/BMD/Object closure + SKILLS_PROTOCOL FIX78 0x29 ReceiveHelperItem.
+-Packaging: exactly 3 BATs; FIX78 launcher; verify-only PASS required.
++MUWEB central authority: MUWEB_R90_FIX80_CAPE_SPRITE_ENGINE_PROFILE_2026-10-05_FULL.zip
++Parent: MUWEB_R90_FIX79_PROTOCOL_WIRE_INTEGRATED_2026-10-05_FULL.zip
++Integrated: ITEMS_LUA FIX80 + direct BMD CreateSprite consumer; MAPS_ENGINE M75 object-stage profile; SKILLS_PROTOCOL FIX80 F3:E0 exact 84/144B.
++Packaging: exactly 3 BATs; FIX80 verify-only required.
+diff -ruN '--exclude=R90_FIX79_SOURCE_HASHES.json' /mnt/data/fix80_base/MUWEB_R90_FIX79_PROTOCOL_WIRE_INTEGRATED_2026-10-05/FIX80_BAT_INVENTORY.txt /mnt/data/MUWEB_R90_FIX80_CAPE_SPRITE_ENGINE_PROFILE_2026-10-05/FIX80_BAT_INVENTORY.txt
+--- /mnt/data/fix80_base/MUWEB_R90_FIX79_PROTOCOL_WIRE_INTEGRATED_2026-10-05/FIX80_BAT_INVENTORY.txt	1970-01-01 00:00:00.000000000 +0000
++++ /mnt/data/MUWEB_R90_FIX80_CAPE_SPRITE_ENGINE_PROFILE_2026-10-05/FIX80_BAT_INVENTORY.txt	2026-10-05 19:37:34.440928320 +0000
+@@ -0,0 +1,3 @@
++DESLIGAR_WEB_R90.bat
++INSTALAR_DEPENDENCIAS_R90.bat
++LIGAR_WEB_R90_FIX80.bat
+diff -ruN '--exclude=R90_FIX79_SOURCE_HASHES.json' /mnt/data/fix80_base/MUWEB_R90_FIX79_PROTOCOL_WIRE_INTEGRATED_2026-10-05/ITEMS_LUA_FIX80.md /mnt/data/MUWEB_R90_FIX80_CAPE_SPRITE_ENGINE_PROFILE_2026-10-05/ITEMS_LUA_FIX80.md
+--- /mnt/data/fix80_base/MUWEB_R90_FIX79_PROTOCOL_WIRE_INTEGRATED_2026-10-05/ITEMS_LUA_FIX80.md	1970-01-01 00:00:00.000000000 +0000
++++ /mnt/data/MUWEB_R90_FIX80_CAPE_SPRITE_ENGINE_PROFILE_2026-10-05/ITEMS_LUA_FIX80.md	2026-10-05 19:08:18.000000000 +0000
+@@ -0,0 +1,28 @@
++# MUWEB ITEMS/LUA FIX80 SAFE lane
++
++Parent exato: `MUWEB_R90_FIX79_PROTOCOL_WIRE_INTEGRATED_2026-10-05_FULL.zip` (central; SHA-256 `bcaae3278e3249e81d227e2dffda2184e2349d0ffba0437ef12ccff66cc287ef`).
++
++## Escopo / evidência
++FIX79 preserva FIX78 RenderCapeModel RenderBody/RenderMesh, mas declara BMD CreateSprite/CreateParticle/CreateEffect/TransformPosition e worldTime/GetDoubleRender abertos. FIX78 já captura esses callbacks do CharacterCreateCape.lua. Esta lane não inventa assinatura/bitmap/FX sem a autoridade Main 5.2/Lua real disponível no pacote.
++
++## Correção
++`graphics/PcCustomCapePresentation.js`: callbacks autorais ainda sem consumer exato agora bloqueiam atomicamente o takeover GPU do BMD rígido. Antes, `complete` ignorava `effects`, podia esconder o BMD stock e descartar silenciosamente CreateSprite/CreateParticle/CreateEffect/CreateJoint. Meta-calls BMD (SetLight/setMesh/TransformPosition etc.) continuam permitidas; callback visual não consumido torna o programa incompleto/fail-closed e aparece em telemetria `unresolvedEffects`.
++
++## Cobertura antes/depois
++Antes: RenderBody/RenderMesh podiam assumir ownership mesmo com FX autoral não materializado. Depois: takeover somente se ambos white/lit não têm callback visual pendente. Isso evita regressão visual enquanto a tranche de FX exata é fechada.
++
++## Arquivos alterados
++- graphics/PcCustomCapePresentation.js
++- test-r90-fix80-cape-fx-atomic.mjs
++- ITEMS_LUA_FIX80.md
++
++## Gates
++- node --check PcCustomCapePresentation.js: PASS
++- FIX80 cape FX atomic fail-closed: PASS
++- FIX78 custom cape GPU source contracts: PASS
++- FIX77 CharacterEffectItens/CharacterSetEffect cache: PASS
++
++## Limitações / próximos
++Ainda abertos: consumer exato BMD CreateSprite/CreateParticle/CreateEffect/TransformPosition; runner persistente worldTime/GetDoubleRender; assets físicos BMD/texturas wings/capes/helpers/pets/mounts; CharacterHelper presentation; names/tooltips; profiling equip rebuild. Nenhum desses foi marcado como fechado.
++
++SAFE LANE / NOT CENTRAL PROMOTION.
+diff -ruN '--exclude=R90_FIX79_SOURCE_HASHES.json' /mnt/data/fix80_base/MUWEB_R90_FIX79_PROTOCOL_WIRE_INTEGRATED_2026-10-05/LANE_REPORTS_MAPS_ENGINE_M75.md /mnt/data/MUWEB_R90_FIX80_CAPE_SPRITE_ENGINE_PROFILE_2026-10-05/LANE_REPORTS_MAPS_ENGINE_M75.md
+--- /mnt/data/fix80_base/MUWEB_R90_FIX79_PROTOCOL_WIRE_INTEGRATED_2026-10-05/LANE_REPORTS_MAPS_ENGINE_M75.md	1970-01-01 00:00:00.000000000 +0000
++++ /mnt/data/MUWEB_R90_FIX80_CAPE_SPRITE_ENGINE_PROFILE_2026-10-05/LANE_REPORTS_MAPS_ENGINE_M75.md	2026-10-05 19:35:25.361496672 +0000
+@@ -0,0 +1,22 @@
++# MUWEB MAPS_ENGINE M75 SAFE — FROM FIX79
++
++Parent exact: MUWEB_R90_FIX79_PROTOCOL_WIRE_INTEGRATED_2026-10-05_FULL.zip
++Parent SHA-256: bcaae3278e3249e81d227e2dffda2184e2349d0ffba0437ef12ccff66cc287ef
++Scope: maps/world/engine/performance only. No central promotion.
++
++## Change
++Adds structured object-staging telemetry to TerrainObjectWorld without changing rendering semantics. World1/World11 physical runs can now read `scene.userData.muMapObjectStageProfile` or `globalThis.__MUWEB_MAP_OBJECT_STAGE_PROFILE__` and separate: fetchParse, modelStage, templateProbe, staticBatch, placementBuild, finalize. Snapshot also records totalMs, placements/rendered/missing and the existing M68/M66 concurrency values.
++
++No mesh, BMD, material, placement, terrain, particle, joint, effect, quality, staging concurrency or budget was changed. M74 outer profile and FIX76 PcJointPool remain untouched.
++
++## Why
++M74 identifies outer world-entry cost but could not distinguish BMD stage vs static batching vs per-placement fallback. This closes that measurement gap before changing performance-sensitive owners, preventing speculative quality reductions.
++
++## Gates
++- node --check world/TerrainObjectWorld.js: PASS
++- test-maps-engine-m75-object-stage-profile.mjs: PASS
++- test-maps-engine-m74-world-entry-profile.mjs: PASS
++- package unzip -t: PASS
++
++## Limitation / handoff
++No physical browser capture was available inside this run, so no fabricated World1/World11 before/after FPS claim is made. Next physical capture should collect M74 + M75 snapshots on Lorencia and Icarus, then optimize the dominant measured phase while preserving all authored content.
+diff -ruN '--exclude=R90_FIX79_SOURCE_HASHES.json' /mnt/data/fix80_base/MUWEB_R90_FIX79_PROTOCOL_WIRE_INTEGRATED_2026-10-05/LANE_REPORTS_SKILLS_PROTOCOL_FIX80.md /mnt/data/MUWEB_R90_FIX80_CAPE_SPRITE_ENGINE_PROFILE_2026-10-05/LANE_REPORTS_SKILLS_PROTOCOL_FIX80.md
+--- /mnt/data/fix80_base/MUWEB_R90_FIX79_PROTOCOL_WIRE_INTEGRATED_2026-10-05/LANE_REPORTS_SKILLS_PROTOCOL_FIX80.md	1970-01-01 00:00:00.000000000 +0000
++++ /mnt/data/MUWEB_R90_FIX80_CAPE_SPRITE_ENGINE_PROFILE_2026-10-05/LANE_REPORTS_SKILLS_PROTOCOL_FIX80.md	2026-10-05 19:39:33.742700027 +0000
+@@ -0,0 +1,48 @@
++# MUWEB SKILLS_PROTOCOL FIX80 SAFE — FROM FIX79
++
++Parent exact: `MUWEB_R90_FIX79_PROTOCOL_WIRE_INTEGRATED_2026-10-05_FULL.zip`
++Parent SHA-256: `bcaae3278e3249e81d227e2dffda2184e2349d0ffba0437ef12ccff66cc287ef`
++Scope: skills/gameplay/monsters/bosses/protocol/viewport only. No central promotion.
++
++## Other lanes checked before edit
++- ITEMS_LUA FIX80 FROM FIX79 exists; untouched.
++- MAPS_ENGINE M75 FROM FIX79 exists; untouched.
++
++## Change
++F3:E0 `ReceiveNewCharacterInfo` now accepts only the two physical bodies already proven by the same-lineage PC/mobile parity owner: 84-byte base or 144-byte body with the complete `GAMESERVER_EXTRA==0` View* block. Previously `>=84` was accepted, so 85..143 or >144 could publish a partial/mixed authoritative snapshot. Those variants now fail closed before `onNewCharacterInfo`.
++
++No opcode, model, bitmap, joint, particle, bone, color, lifetime or timing was invented.
++
++## Coverage matrix
++| Area | State after this SAFE lane |
++|---|---|
++| F3:E0 NewCharacterInfo wire | CLOSED: exact 84/144B + atomic reject |
++| F3:04 Revival | preserved |
++| F3:06 AddPoint | preserved exact 16/56B |
++| F3:51/F3:52 master | preserved |
++| 0x19/1A/1E/1B ReceiveMagic transport | preserved |
++| CustomMonsterEffect Rand gate | preserved |
++| F3:24 | open; physical MAX_ID_SIZE/padding not proven here |
++| F3:25 visual FX | open/no-op evidence; no invented FX |
++| ReceiveMagic residual visual graphs | open unless exact PC graph is available |
++| monster/boss attack FX | open unless exact stages/bones/lifetimes are available |
++
++## Evidence / ownership
++Existing FIX79 source comment for PcParseNewCharacterInfo records an 84B base and a 144B `GAMESERVER_EXTRA==0` extension. This tranche only closes the parser around those already-evidenced bodies; field offsets and consumer ownership are unchanged.
++
++## Changed files
++- `protocol/MUPacketRouter.js`
++- `test-r90-fix80-f3e0-exact-contract.mjs`
++
++## Tests
++- `node --check protocol/MUPacketRouter.js` — PASS
++- `test-r90-fix80-f3e0-exact-contract.mjs` — PASS (84/144 accepted; 0/1/83/85/100/143/145/168 rejected atomically)
++- FIX68 F3:06 regression — PASS
++- FIX69 F3:04 regression — PASS
++- FIX71 F3:51 regression — PASS
++- FIX73 F3:52 regression — PASS
++- FIX63 CustomMonsterEffect Rand regression — PASS
++- FIX79 0x2C and 0x48 regressions — PASS
++
++## Limitation / next tranche
++Do not infer F3:24 padding or F3:25 visual behavior. Next safe target is another exact lifecycle struct, or a ReceiveMagic/monster-boss owner only when PC Main 5.2 evidence closes every required stage/bone/lifetime/timing.
+diff -ruN '--exclude=R90_FIX79_SOURCE_HASHES.json' /mnt/data/fix80_base/MUWEB_R90_FIX79_PROTOCOL_WIRE_INTEGRATED_2026-10-05/LIGAR_WEB_R90_FIX79.bat /mnt/data/MUWEB_R90_FIX80_CAPE_SPRITE_ENGINE_PROFILE_2026-10-05/LIGAR_WEB_R90_FIX79.bat
+--- /mnt/data/fix80_base/MUWEB_R90_FIX79_PROTOCOL_WIRE_INTEGRATED_2026-10-05/LIGAR_WEB_R90_FIX79.bat	2026-10-05 19:00:10.000000000 +0000
++++ /mnt/data/MUWEB_R90_FIX80_CAPE_SPRITE_ENGINE_PROFILE_2026-10-05/LIGAR_WEB_R90_FIX79.bat	1970-01-01 00:00:00.000000000 +0000
+@@ -1,17 +0,0 @@
+-@echo off
+-setlocal EnableExtensions
+-cd /d "%~dp0"
+-title MUWEB R90 FIX79 - Protocol Wire Fidelity
+-
+-echo ================================================================
+-echo  MUWEB R90 FIX79 - PROTOCOL WIRE FIDELITY
+-echo ================================================================
+-where node.exe >nul 2>&1 || (echo [ERRO] Node.js nao encontrado no PATH.& pause & exit /b 1)
+-if not exist "node_modules\three\build\three.module.js" (
+-  echo [R90] Dependencias ausentes. Instalando pelo package-lock.json...
+-  call "%~dp0INSTALAR_DEPENDENCIAS_R90.bat"
+-  if errorlevel 1 (echo [ERRO] Falha ao instalar dependencias.& pause & exit /b 1)
+-)
+-node.exe "%~dp0tools\start-r90-fix79-safe.cjs"
+-if errorlevel 1 pause
+-endlocal
+diff -ruN '--exclude=R90_FIX79_SOURCE_HASHES.json' /mnt/data/fix80_base/MUWEB_R90_FIX79_PROTOCOL_WIRE_INTEGRATED_2026-10-05/LIGAR_WEB_R90_FIX80.bat /mnt/data/MUWEB_R90_FIX80_CAPE_SPRITE_ENGINE_PROFILE_2026-10-05/LIGAR_WEB_R90_FIX80.bat
+--- /mnt/data/fix80_base/MUWEB_R90_FIX79_PROTOCOL_WIRE_INTEGRATED_2026-10-05/LIGAR_WEB_R90_FIX80.bat	1970-01-01 00:00:00.000000000 +0000
++++ /mnt/data/MUWEB_R90_FIX80_CAPE_SPRITE_ENGINE_PROFILE_2026-10-05/LIGAR_WEB_R90_FIX80.bat	2026-10-05 19:37:19.710366922 +0000
+@@ -0,0 +1,12 @@
++@echo off
++setlocal
++cd /d "%~dp0"
++title MUWEB R90 FIX80 - Cape Sprite + Engine Profile
++where node.exe >nul 2>nul || (echo Node.js nao encontrado.& pause & exit /b 1)
++if not exist "node_modules\three" (
++  echo Dependencias ausentes. Instalando pelo lockfile...
++  call npm.cmd ci --ignore-scripts --no-audit --no-fund || (echo Falha no npm ci.& pause & exit /b 1)
++)
++node.exe "%~dp0tools\start-r90-fix80-safe.cjs"
++if errorlevel 1 pause
++endlocal
+diff -ruN '--exclude=R90_FIX79_SOURCE_HASHES.json' /mnt/data/fix80_base/MUWEB_R90_FIX79_PROTOCOL_WIRE_INTEGRATED_2026-10-05/MUWEB_R90_FIX80_FROM_FIX79.patch /mnt/data/MUWEB_R90_FIX80_CAPE_SPRITE_ENGINE_PROFILE_2026-10-05/MUWEB_R90_FIX80_FROM_FIX79.patch
+--- /mnt/data/fix80_base/MUWEB_R90_FIX79_PROTOCOL_WIRE_INTEGRATED_2026-10-05/MUWEB_R90_FIX80_FROM_FIX79.patch	1970-01-01 00:00:00.000000000 +0000
++++ /mnt/data/MUWEB_R90_FIX80_CAPE_SPRITE_ENGINE_PROFILE_2026-10-05/MUWEB_R90_FIX80_FROM_FIX79.patch	2026-10-05 19:40:20.217814808 +0000
+@@ -0,0 +1,166 @@
++diff -ruN '--exclude=R90_FIX79_SOURCE_HASHES.json' /mnt/data/fix80_base/MUWEB_R90_FIX79_PROTOCOL_WIRE_INTEGRATED_2026-10-05/CURRENT_AUTHORITY.txt /mnt/data/MUWEB_R90_FIX80_CAPE_SPRITE_ENGINE_PROFILE_2026-10-05/CURRENT_AUTHORITY.txt
++--- /mnt/data/fix80_base/MUWEB_R90_FIX79_PROTOCOL_WIRE_INTEGRATED_2026-10-05/CURRENT_AUTHORITY.txt	2026-10-05 18:46:11.000000000 +0000
+++++ /mnt/data/MUWEB_R90_FIX80_CAPE_SPRITE_ENGINE_PROFILE_2026-10-05/CURRENT_AUTHORITY.txt	2026-10-05 19:40:20.214483216 +0000
++@@ -1,4 +1,4 @@
++-MUWEB central authority: MUWEB_R90_FIX78_CAPE_GPU_RENDERBODY_MESH_2026-10-05_FULL.zip
++-Parent: MUWEB_R90_FIX77_ITEM_LUA_FX_CACHE_2026-10-05_FULL.zip
++-Integrated: direct RenderCapeModel GPU/BMD/Object closure + SKILLS_PROTOCOL FIX78 0x29 ReceiveHelperItem.
++-Packaging: exactly 3 BATs; FIX78 launcher; verify-only PASS required.
+++MUWEB central authority: MUWEB_R90_FIX80_CAPE_SPRITE_ENGINE_PROFILE_2026-10-05_FULL.zip
+++Parent: MUWEB_R90_FIX79_PROTOCOL_WIRE_INTEGRATED_2026-10-05_FULL.zip
+++Integrated: ITEMS_LUA FIX80 + direct BMD CreateSprite consumer; MAPS_ENGINE M75 object-stage profile; SKILLS_PROTOCOL FIX80 F3:E0 exact 84/144B.
+++Packaging: exactly 3 BATs; FIX80 verify-only required.
++diff -ruN '--exclude=R90_FIX79_SOURCE_HASHES.json' /mnt/data/fix80_base/MUWEB_R90_FIX79_PROTOCOL_WIRE_INTEGRATED_2026-10-05/FIX80_BAT_INVENTORY.txt /mnt/data/MUWEB_R90_FIX80_CAPE_SPRITE_ENGINE_PROFILE_2026-10-05/FIX80_BAT_INVENTORY.txt
++--- /mnt/data/fix80_base/MUWEB_R90_FIX79_PROTOCOL_WIRE_INTEGRATED_2026-10-05/FIX80_BAT_INVENTORY.txt	1970-01-01 00:00:00.000000000 +0000
+++++ /mnt/data/MUWEB_R90_FIX80_CAPE_SPRITE_ENGINE_PROFILE_2026-10-05/FIX80_BAT_INVENTORY.txt	2026-10-05 19:37:34.440928320 +0000
++@@ -0,0 +1,3 @@
+++DESLIGAR_WEB_R90.bat
+++INSTALAR_DEPENDENCIAS_R90.bat
+++LIGAR_WEB_R90_FIX80.bat
++diff -ruN '--exclude=R90_FIX79_SOURCE_HASHES.json' /mnt/data/fix80_base/MUWEB_R90_FIX79_PROTOCOL_WIRE_INTEGRATED_2026-10-05/ITEMS_LUA_FIX80.md /mnt/data/MUWEB_R90_FIX80_CAPE_SPRITE_ENGINE_PROFILE_2026-10-05/ITEMS_LUA_FIX80.md
++--- /mnt/data/fix80_base/MUWEB_R90_FIX79_PROTOCOL_WIRE_INTEGRATED_2026-10-05/ITEMS_LUA_FIX80.md	1970-01-01 00:00:00.000000000 +0000
+++++ /mnt/data/MUWEB_R90_FIX80_CAPE_SPRITE_ENGINE_PROFILE_2026-10-05/ITEMS_LUA_FIX80.md	2026-10-05 19:08:18.000000000 +0000
++@@ -0,0 +1,28 @@
+++# MUWEB ITEMS/LUA FIX80 SAFE lane
+++
+++Parent exato: `MUWEB_R90_FIX79_PROTOCOL_WIRE_INTEGRATED_2026-10-05_FULL.zip` (central; SHA-256 `bcaae3278e3249e81d227e2dffda2184e2349d0ffba0437ef12ccff66cc287ef`).
+++
+++## Escopo / evidência
+++FIX79 preserva FIX78 RenderCapeModel RenderBody/RenderMesh, mas declara BMD CreateSprite/CreateParticle/CreateEffect/TransformPosition e worldTime/GetDoubleRender abertos. FIX78 já captura esses callbacks do CharacterCreateCape.lua. Esta lane não inventa assinatura/bitmap/FX sem a autoridade Main 5.2/Lua real disponível no pacote.
+++
+++## Correção
+++`graphics/PcCustomCapePresentation.js`: callbacks autorais ainda sem consumer exato agora bloqueiam atomicamente o takeover GPU do BMD rígido. Antes, `complete` ignorava `effects`, podia esconder o BMD stock e descartar silenciosamente CreateSprite/CreateParticle/CreateEffect/CreateJoint. Meta-calls BMD (SetLight/setMesh/TransformPosition etc.) continuam permitidas; callback visual não consumido torna o programa incompleto/fail-closed e aparece em telemetria `unresolvedEffects`.
+++
+++## Cobertura antes/depois
+++Antes: RenderBody/RenderMesh podiam assumir ownership mesmo com FX autoral não materializado. Depois: takeover somente se ambos white/lit não têm callback visual pendente. Isso evita regressão visual enquanto a tranche de FX exata é fechada.
+++
+++## Arquivos alterados
+++- graphics/PcCustomCapePresentation.js
+++- test-r90-fix80-cape-fx-atomic.mjs
+++- ITEMS_LUA_FIX80.md
+++
+++## Gates
+++- node --check PcCustomCapePresentation.js: PASS
+++- FIX80 cape FX atomic fail-closed: PASS
+++- FIX78 custom cape GPU source contracts: PASS
+++- FIX77 CharacterEffectItens/CharacterSetEffect cache: PASS
+++
+++## Limitações / próximos
+++Ainda abertos: consumer exato BMD CreateSprite/CreateParticle/CreateEffect/TransformPosition; runner persistente worldTime/GetDoubleRender; assets físicos BMD/texturas wings/capes/helpers/pets/mounts; CharacterHelper presentation; names/tooltips; profiling equip rebuild. Nenhum desses foi marcado como fechado.
+++
+++SAFE LANE / NOT CENTRAL PROMOTION.
++diff -ruN '--exclude=R90_FIX79_SOURCE_HASHES.json' /mnt/data/fix80_base/MUWEB_R90_FIX79_PROTOCOL_WIRE_INTEGRATED_2026-10-05/LANE_REPORTS_MAPS_ENGINE_M75.md /mnt/data/MUWEB_R90_FIX80_CAPE_SPRITE_ENGINE_PROFILE_2026-10-05/LANE_REPORTS_MAPS_ENGINE_M75.md
++--- /mnt/data/fix80_base/MUWEB_R90_FIX79_PROTOCOL_WIRE_INTEGRATED_2026-10-05/LANE_REPORTS_MAPS_ENGINE_M75.md	1970-01-01 00:00:00.000000000 +0000
+++++ /mnt/data/MUWEB_R90_FIX80_CAPE_SPRITE_ENGINE_PROFILE_2026-10-05/LANE_REPORTS_MAPS_ENGINE_M75.md	2026-10-05 19:35:25.361496672 +0000
++@@ -0,0 +1,22 @@
+++# MUWEB MAPS_ENGINE M75 SAFE — FROM FIX79
+++
+++Parent exact: MUWEB_R90_FIX79_PROTOCOL_WIRE_INTEGRATED_2026-10-05_FULL.zip
+++Parent SHA-256: bcaae3278e3249e81d227e2dffda2184e2349d0ffba0437ef12ccff66cc287ef
+++Scope: maps/world/engine/performance only. No central promotion.
+++
+++## Change
+++Adds structured object-staging telemetry to TerrainObjectWorld without changing rendering semantics. World1/World11 physical runs can now read `scene.userData.muMapObjectStageProfile` or `globalThis.__MUWEB_MAP_OBJECT_STAGE_PROFILE__` and separate: fetchParse, modelStage, templateProbe, staticBatch, placementBuild, finalize. Snapshot also records totalMs, placements/rendered/missing and the existing M68/M66 concurrency values.
+++
+++No mesh, BMD, material, placement, terrain, particle, joint, effect, quality, staging concurrency or budget was changed. M74 outer profile and FIX76 PcJointPool remain untouched.
+++
+++## Why
+++M74 identifies outer world-entry cost but could not distinguish BMD stage vs static batching vs per-placement fallback. This closes that measurement gap before changing performance-sensitive owners, preventing speculative quality reductions.
+++
+++## Gates
+++- node --check world/TerrainObjectWorld.js: PASS
+++- test-maps-engine-m75-object-stage-profile.mjs: PASS
+++- test-maps-engine-m74-world-entry-profile.mjs: PASS
+++- package unzip -t: PASS
+++
+++## Limitation / handoff
+++No physical browser capture was available inside this run, so no fabricated World1/World11 before/after FPS claim is made. Next physical capture should collect M74 + M75 snapshots on Lorencia and Icarus, then optimize the dominant measured phase while preserving all authored content.
++diff -ruN '--exclude=R90_FIX79_SOURCE_HASHES.json' /mnt/data/fix80_base/MUWEB_R90_FIX79_PROTOCOL_WIRE_INTEGRATED_2026-10-05/LANE_REPORTS_SKILLS_PROTOCOL_FIX80.md /mnt/data/MUWEB_R90_FIX80_CAPE_SPRITE_ENGINE_PROFILE_2026-10-05/LANE_REPORTS_SKILLS_PROTOCOL_FIX80.md
++--- /mnt/data/fix80_base/MUWEB_R90_FIX79_PROTOCOL_WIRE_INTEGRATED_2026-10-05/LANE_REPORTS_SKILLS_PROTOCOL_FIX80.md	1970-01-01 00:00:00.000000000 +0000
+++++ /mnt/data/MUWEB_R90_FIX80_CAPE_SPRITE_ENGINE_PROFILE_2026-10-05/LANE_REPORTS_SKILLS_PROTOCOL_FIX80.md	2026-10-05 19:39:33.742700027 +0000
++@@ -0,0 +1,48 @@
+++# MUWEB SKILLS_PROTOCOL FIX80 SAFE — FROM FIX79
+++
+++Parent exact: `MUWEB_R90_FIX79_PROTOCOL_WIRE_INTEGRATED_2026-10-05_FULL.zip`
+++Parent SHA-256: `bcaae3278e3249e81d227e2dffda2184e2349d0ffba0437ef12ccff66cc287ef`
+++Scope: skills/gameplay/monsters/bosses/protocol/viewport only. No central promotion.
+++
+++## Other lanes checked before edit
+++- ITEMS_LUA FIX80 FROM FIX79 exists; untouched.
+++- MAPS_ENGINE M75 FROM FIX79 exists; untouched.
+++
+++## Change
+++F3:E0 `ReceiveNewCharacterInfo` now accepts only the two physical bodies already proven by the same-lineage PC/mobile parity owner: 84-byte base or 144-byte body with the complete `GAMESERVER_EXTRA==0` View* block. Previously `>=84` was accepted, so 85..143 or >144 could publish a partial/mixed authoritative snapshot. Those variants now fail closed before `onNewCharacterInfo`.
+++
+++No opcode, model, bitmap, joint, particle, bone, color, lifetime or timing was invented.
+++
+++## Coverage matrix
+++| Area | State after this SAFE lane |
+++|---|---|
+++| F3:E0 NewCharacterInfo wire | CLOSED: exact 84/144B + atomic reject |
+++| F3:04 Revival | preserved |
+++| F3:06 AddPoint | preserved exact 16/56B |
+++| F3:51/F3:52 master | preserved |
+++| 0x19/1A/1E/1B ReceiveMagic transport | preserved |
+++| CustomMonsterEffect Rand gate | preserved |
+++| F3:24 | open; physical MAX_ID_SIZE/padding not proven here |
+++| F3:25 visual FX | open/no-op evidence; no invented FX |
+++| ReceiveMagic residual visual graphs | open unless exact PC graph is available |
+++| monster/boss attack FX | open unless exact stages/bones/lifetimes are available |
+++
+++## Evidence / ownership
+++Existing FIX79 source comment for PcParseNewCharacterInfo records an 84B base and a 144B `GAMESERVER_EXTRA==0` extension. This tranche only closes the parser around those already-evidenced bodies; field offsets and consumer ownership are unchanged.
+++
+++## Changed files
+++- `protocol/MUPacketRouter.js`
+++- `test-r90-fix80-f3e0-exact-contract.mjs`
+++
+++## Tests
+++- `node --check protocol/MUPacketRouter.js` — PASS
+++- `test-r90-fix80-f3e0-exact-contract.mjs` — PASS (84/144 accepted; 0/1/83/85/100/143/145/168 rejected atomically)
+++- FIX68 F3:06 regression — PASS
+++- FIX69 F3:04 regression — PASS
+++- FIX71 F3:51 regression — PASS
+++- FIX73 F3:52 regression — PASS
+++- FIX63 CustomMonsterEffect Rand regression — PASS
+++- FIX79 0x2C and 0x48 regressions — PASS
+++
+++## Limitation / next tranche
+++Do not infer F3:24 padding or F3:25 visual behavior. Next safe target is another exact lifecycle struct, or a ReceiveMagic/monster-boss owner only when PC Main 5.2 evidence closes every required stage/bone/lifetime/timing.
++diff -ruN '--exclude=R90_FIX79_SOURCE_HASHES.json' /mnt/data/fix80_base/MUWEB_R90_FIX79_PROTOCOL_WIRE_INTEGRATED_2026-10-05/LIGAR_WEB_R90_FIX79.bat /mnt/data/MUWEB_R90_FIX80_CAPE_SPRITE_ENGINE_PROFILE_2026-10-05/LIGAR_WEB_R90_FIX79.bat
++--- /mnt/data/fix80_base/MUWEB_R90_FIX79_PROTOCOL_WIRE_INTEGRATED_2026-10-05/LIGAR_WEB_R90_FIX79.bat	2026-10-05 19:00:10.000000000 +0000
+++++ /mnt/data/MUWEB_R90_FIX80_CAPE_SPRITE_ENGINE_PROFILE_2026-10-05/LIGAR_WEB_R90_FIX79.bat	1970-01-01 00:00:00.000000000 +0000
++@@ -1,17 +0,0 @@
++-@echo off
++-setlocal EnableExtensions
++-cd /d "%~dp0"
++-title MUWEB R90 FIX79 - Protocol Wire Fidelity
++-
++-echo ================================================================
++-echo  MUWEB R90 FIX79 - PROTOCOL WIRE FIDELITY
++-echo ================================================================
++-where node.exe >nul 2>&1 || (echo [ERRO] Node.js nao encontrado no PATH.& pause & exit /b 1)
++-if not exist "node_modules\three\build\three.module.js" (
++-  echo [R90] Dependencias ausentes. Instalando pelo package-lock.json...
++-  call "%~dp0INSTALAR_DEPENDENCIAS_R90.bat"
++-  if errorlevel 1 (echo [ERRO] Falha ao instalar dependencias.& pause & exit /b 1)
++-)
++-node.exe "%~dp0tools\start-r90-fix79-safe.cjs"
++-if errorlevel 1 pause
++-endlocal
++diff -ruN '--exclude=R90_FIX79_SOURCE_HASHES.json' /mnt/data/fix80_base/MUWEB_R90_FIX79_PROTOCOL_WIRE_INTEGRATED_2026-10-05/LIGAR_WEB_R90_FIX80.bat /mnt/data/MUWEB_R90_FIX80_CAPE_SPRITE_ENGINE_PROFILE_2026-10-05/LIGAR_WEB_R90_FIX80.bat
++--- /mnt/data/fix80_base/MUWEB_R90_FIX79_PROTOCOL_WIRE_INTEGRATED_2026-10-05/LIGAR_WEB_R90_FIX80.bat	1970-01-01 00:00:00.000000000 +0000
+++++ /mnt/data/MUWEB_R90_FIX80_CAPE_SPRITE_ENGINE_PROFILE_2026-10-05/LIGAR_WEB_R90_FIX80.bat	2026-10-05 19:37:19.710366922 +0000
++@@ -0,0 +1,12 @@
+++@echo off
+++setlocal
+++cd /d "%~dp0"
+++title MUWEB R90 FIX80 - Cape Sprite + Engine Profile
+++where node.exe >nul 2>nul || (echo Node.js nao encontrado.& pause & exit /b 1)
+++if not exist "node_modules\three" (
+++  echo Dependencias ausentes. Instalando pelo lockfile...
+++  call npm.cmd ci --ignore-scripts --no-audit --no-fund || (echo Falha no npm ci.& pause & exit /b 1)
+++)
+++node.exe "%~dp0tools\start-r90-fix80-safe.cjs"
+++if errorlevel 1 pause
+++endlocal
+diff -ruN '--exclude=R90_FIX79_SOURCE_HASHES.json' /mnt/data/fix80_base/MUWEB_R90_FIX79_PROTOCOL_WIRE_INTEGRATED_2026-10-05/MUWEB_R90_FIX80_PORTABILITY.md /mnt/data/MUWEB_R90_FIX80_CAPE_SPRITE_ENGINE_PROFILE_2026-10-05/MUWEB_R90_FIX80_PORTABILITY.md
+--- /mnt/data/fix80_base/MUWEB_R90_FIX79_PROTOCOL_WIRE_INTEGRATED_2026-10-05/MUWEB_R90_FIX80_PORTABILITY.md	1970-01-01 00:00:00.000000000 +0000
++++ /mnt/data/MUWEB_R90_FIX80_CAPE_SPRITE_ENGINE_PROFILE_2026-10-05/MUWEB_R90_FIX80_PORTABILITY.md	2026-10-05 19:39:34.455656898 +0000
+@@ -0,0 +1,23 @@
++# MUWEB R90 FIX80 — CustomCape CreateSprite + object-stage profile
++
++Parent exato: `MUWEB_R90_FIX79_PROTOCOL_WIRE_INTEGRATED_2026-10-05_FULL.zip`.
++
++## Integração
++- ITEMS/LUA FIX80 SAFE: callbacks visuais ainda sem consumer exato bloqueiam atomicamente o takeover da capa; não se perde CreateParticle/CreateEffect/CreateJoint.
++- `RenderCapeModel` `BMD:CreateSprite(Bitmap,Link,Scale,R,G,B,ObjectStruct)` agora possui consumer exato: bitmap por `pcBitmapTexture`, bone real, scale e light RGB via `createBoneSprite`. A assinatura e TransformPosition/CreateSprite são cruzadas com LuaBMD/LuaEffects da autoridade Main 5.2.
++- `CreateParticle/CreateEffect/CreateJoint` continuam fail-closed até consumer source-proven próprio.
++- MAPS_ENGINE M75 integrado: profile estruturado de object staging (`fetchParse`, `modelStage`, `templateProbe`, `staticBatch`, `placementBuild`, `finalize`) sem alterar visual, concorrência ou budgets.
++- SKILLS_PROTOCOL FIX80 integrado: F3:E0 `ReceiveNewCharacterInfo` aceita somente os dois bodies físicos comprovados, 84B base ou 144B com bloco View completo; 85..143 e >144 falham antes de publicar estado.
++- `MUWEB_SOURCE_REVISION` corrigida para FIX80.
++
++## Performance
++- Nenhum efeito/modelo foi removido. O profile M75 permite medir onde Lorencia/Icarus gastam tempo no staging antes de qualquer otimização.
++- O sprite de cape é persistente/ancorado ao bone no renderer e não aloca uma sprite nova por frame.
++
++## Ainda aberto
++- RenderCapeModel CreateParticle/CreateEffect/CreateJoint e runner dinâmico `worldTime/GetDoubleRender`.
++- Validação física de todos BMD/texturas de wings/capes/helpers/pets/mounts e CharacterHelper branches restantes.
++- Lorencia/Icarus material/placement/terrain e profiling físico FPS/transições.
++- Equip rebuild GPU/BMD allocations e frame pacing físico.
++
++Sem placeholder, sem asset vizinho inventado e sem claim de 100%.
+diff -ruN '--exclude=R90_FIX79_SOURCE_HASHES.json' /mnt/data/fix80_base/MUWEB_R90_FIX79_PROTOCOL_WIRE_INTEGRATED_2026-10-05/core/GameApp.js /mnt/data/MUWEB_R90_FIX80_CAPE_SPRITE_ENGINE_PROFILE_2026-10-05/core/GameApp.js
+--- /mnt/data/fix80_base/MUWEB_R90_FIX79_PROTOCOL_WIRE_INTEGRATED_2026-10-05/core/GameApp.js	2026-10-05 18:44:12.000000000 +0000
++++ /mnt/data/MUWEB_R90_FIX80_CAPE_SPRITE_ENGINE_PROFILE_2026-10-05/core/GameApp.js	2026-10-05 19:37:19.551657009 +0000
+@@ -116,7 +116,7 @@
+ export const MUWEB_R90_FIX15_REVISION = 'MUWEB_R90_FIX15_BMD_INFLIGHT_MAP_CANCEL_2026-10-03_A';
+ export const MUWEB_R90_FIX46_REVISION = 'MUWEB_R90_FIX46_DARKSPIRIT_MONSTER_LUA_CONTRACTS_2026-10-04_A';
+ export const MUWEB_R90_FIX47_REVISION = 'MUWEB_R90_FIX47_CHARACTER_LUA_MONSTER_PRESENTATION_2026-10-04_A';
+-export const MUWEB_SOURCE_REVISION = 'MUWEB_R90_FIX78_CAPE_GPU_RENDERBODY_MESH_2026-10-05';
++export const MUWEB_SOURCE_REVISION = 'MUWEB_R90_FIX80_CAPE_SPRITE_ENGINE_PROFILE_2026-10-05';
+ export const MUWEB_PREVIOUS_SOURCE_REVISION = 'MUWEB_R78_ITEMVIEW_WORLDENTRY_ANIMATION_CHARSELECT_RECOVERY_2026-09-30_A';
+ export const MUWEB_R77_BASE_REVISION = 'MUWEB_R77_CANONICAL_WORLD_ROUTING_CUSTOMMOVE_PREFETCH_UTF8_2026-09-30_A';
+ 
+diff -ruN '--exclude=R90_FIX79_SOURCE_HASHES.json' /mnt/data/fix80_base/MUWEB_R90_FIX79_PROTOCOL_WIRE_INTEGRATED_2026-10-05/graphics/PcCustomCapePresentation.js /mnt/data/MUWEB_R90_FIX80_CAPE_SPRITE_ENGINE_PROFILE_2026-10-05/graphics/PcCustomCapePresentation.js
+--- /mnt/data/fix80_base/MUWEB_R90_FIX79_PROTOCOL_WIRE_INTEGRATED_2026-10-05/graphics/PcCustomCapePresentation.js	2026-10-05 18:40:12.000000000 +0000
++++ /mnt/data/MUWEB_R90_FIX80_CAPE_SPRITE_ENGINE_PROFILE_2026-10-05/graphics/PcCustomCapePresentation.js	2026-10-05 19:35:26.127068864 +0000
+@@ -14,6 +14,12 @@
+ 
+ const DYNAMIC_KINDS = new Set(['world-time-read','double-render-read']);
+ const DRAW_KINDS = new Set(['render-body','render-mesh']);
++const SPRITE_KIND = 'bmd-create-sprite';
++// FIX80: callbacks captured by the real CharacterCreateCape.lua are semantic owners,
++// not optional decoration. Until a callback has an exact Main 5.2 consumer it must
++// block rigid-BMD takeover; otherwise FIX78 could hide the stock cape while silently
++// dropping its authored sprite/particle/effect/joint branch.
++const META_KINDS = new Set(['set-light','set-mesh','gl-color-body','transform-position','transform-position2','object-set-time']);
+ 
+ function finite(v, fallback=0){ const n=Number(v); return Number.isFinite(n)?n:fallback; }
+ function int(v, fallback=0){ const n=Number(v); return Number.isFinite(n)?Math.trunc(n):fallback; }
+@@ -37,9 +43,11 @@
+   const calls=Array.isArray(program)?program:[];
+   const dynamic=calls.some(c=>DYNAMIC_KINDS.has(c?.kind));
+   const drawCalls=calls.filter(c=>DRAW_KINDS.has(c?.kind));
+-  const effects=calls.filter(c=>!DRAW_KINDS.has(c?.kind) && !['set-light','set-mesh','gl-color-body','transform-position','transform-position2','object-set-time'].includes(c?.kind));
+-  const handles=[]; const pendingBitmaps=[]; let skipped=0;
+-  if (dynamic || !drawCalls.length) return {label,complete:false,dynamic,handles,pendingBitmaps,effects,draws:drawCalls.length,skipped};
++  const effects=calls.filter(c=>!DRAW_KINDS.has(c?.kind) && !META_KINDS.has(c?.kind));
++  const spriteCalls=effects.filter(c=>c?.kind===SPRITE_KIND);
++  const unresolvedEffects=effects.filter(c=>c?.kind && c.kind!==SPRITE_KIND);
++  const handles=[]; const spriteHandles=[]; const pendingBitmaps=[]; let skipped=0;
++  if (dynamic || (!drawCalls.length && !spriteCalls.length)) return {label,complete:false,dynamic,handles,spriteHandles,pendingBitmaps,effects,unresolvedEffects:unresolvedEffects.length,draws:drawCalls.length,sprites:spriteCalls.length,skipped};
+ 
+   let order=(renderer._overlayMeshes?.length||0)+1;
+   for (const call of drawCalls) {
+@@ -77,13 +85,34 @@
+       handles.push({pass,call,source,blendMesh,blendLight});
+     }
+   }
+-  const complete=skipped===0 && handles.length>0;
+-  return {label,complete,dynamic,handles,pendingBitmaps:[...new Set(pendingBitmaps)],effects,draws:drawCalls.length,skipped};
++  // LuaBMD.h::CreateSprites(Bitmap,Link,Scale,R,G,B,ObjectStruct) resolves the
++  // authored bone position and calls CreateSprite(Bitmap,Position,Scale,Light,Object,0,0).
++  // createBoneSprite is the Web owner for the same bone/bitmap/scale/light contract.
++  for (const call of spriteCalls) {
++    const a=call.args||[];
++    const bitmap=int(a[0],-1), bone=int(a[1],-1), scale=finite(a[2],0);
++    const r=finite(a[3],0), g=finite(a[4],0), b=finite(a[5],0);
++    if (bitmap < 0 || bone < 0 || scale < 0) { skipped++; continue; }
++    const map=await pcBitmapTexture(bitmap).catch(()=>null);
++    if (!map?.isTexture) { pendingBitmaps.push(bitmap); skipped++; continue; }
++    const owner=renderer.createBoneSprite?.({boneIndex:bone,map,scale,color:new THREE.Color(r,g,b)});
++    if (!owner?.sprite) { skipped++; continue; }
++    owner.sprite.visible=false;
++    owner.muCapeLuaCall=call;
++    spriteHandles.push(owner);
++  }
++  // Atomic parity: do not claim the Lua program when any authored FX callback would
++  // be discarded. CreateSprite is now exact; particle/effect/joint remain blockers.
++  const represented=(handles.length+spriteHandles.length)>0;
++  const complete=skipped===0 && represented && unresolvedEffects.length===0;
++  return {label,complete,dynamic,handles,spriteHandles,pendingBitmaps:[...new Set(pendingBitmaps)],effects,unresolvedEffects:unresolvedEffects.length,draws:drawCalls.length,sprites:spriteCalls.length,skipped};
+ }
+ 
+ function setProgramVisible(program, visible){
+   for (const h of program?.handles||[]) for (const mesh of h.pass?.meshes||[]) mesh.visible=Boolean(visible);
++  for (const owner of program?.spriteHandles||[]) if (owner?.sprite) owner.sprite.visible=Boolean(visible);
+ }
++
+ function recolorProgram(renderer, program){
+   for (const h of program?.handles||[]) {
+     const scale=blendScaleFor(h.call,h.source,h.blendMesh,h.blendLight);
+@@ -99,8 +128,8 @@
+   renderer.userData ??= {};
+   renderer.userData.muCustomCapeGpu={
+     complete,
+-    white:{draws:white.draws,skipped:white.skipped,dynamic:white.dynamic,pendingBitmaps:white.pendingBitmaps,effects:white.effects.length},
+-    lit:{draws:lit.draws,skipped:lit.skipped,dynamic:lit.dynamic,pendingBitmaps:lit.pendingBitmaps,effects:lit.effects.length},
++    white:{draws:white.draws,sprites:white.sprites||0,skipped:white.skipped,dynamic:white.dynamic,pendingBitmaps:white.pendingBitmaps,effects:white.effects.length,unresolvedEffects:white.unresolvedEffects||0},
++    lit:{draws:lit.draws,sprites:lit.sprites||0,skipped:lit.skipped,dynamic:lit.dynamic,pendingBitmaps:lit.pendingBitmaps,effects:lit.effects.length,unresolvedEffects:lit.unresolvedEffects||0},
+   };
+   if (!complete) {
+     setProgramVisible(white,false);setProgramVisible(lit,false);
+diff -ruN '--exclude=R90_FIX79_SOURCE_HASHES.json' /mnt/data/fix80_base/MUWEB_R90_FIX79_PROTOCOL_WIRE_INTEGRATED_2026-10-05/protocol/MUPacketRouter.js /mnt/data/MUWEB_R90_FIX80_CAPE_SPRITE_ENGINE_PROFILE_2026-10-05/protocol/MUPacketRouter.js
+--- /mnt/data/fix80_base/MUWEB_R90_FIX79_PROTOCOL_WIRE_INTEGRATED_2026-10-05/protocol/MUPacketRouter.js	2026-10-05 18:59:57.000000000 +0000
++++ /mnt/data/MUWEB_R90_FIX80_CAPE_SPRITE_ENGINE_PROFILE_2026-10-05/protocol/MUPacketRouter.js	2026-10-05 19:39:33.734779386 +0000
+@@ -755,6 +755,14 @@
+                 // DWORD begins at +4. Base view is 84B; GAMESERVER_EXTRA==0
+                 // appends the authoritative full-width View* block through 144B.
+                 if (!need(84, 'newCharacterInfo')) return 'payload_short';
++                // Same-lineage PcParseNewCharacterInfo exposes exactly two proven
++                // physical bodies: 84B base and 144B with the GAMESERVER_EXTRA==0
++                // View* block. Reject intermediate/oversized variants atomically;
++                // otherwise a truncated extra block could publish a mixed snapshot.
++                if (payload.length !== 84 && payload.length !== 144) {
++                    log(`[MU] F3:E0 NewCharacterInfo tamanho inválido ${payload.length} (esperado 84 ou 144) — descartado`, 'warn');
++                    return 'payload_short';
++                }
+                 const dv = new DataView(payload.buffer, payload.byteOffset, payload.byteLength);
+                 const u32 = (o) => dv.getUint32(o, true);
+                 const msg = {
+diff -ruN '--exclude=R90_FIX79_SOURCE_HASHES.json' /mnt/data/fix80_base/MUWEB_R90_FIX79_PROTOCOL_WIRE_INTEGRATED_2026-10-05/test-maps-engine-m75-object-stage-profile.mjs /mnt/data/MUWEB_R90_FIX80_CAPE_SPRITE_ENGINE_PROFILE_2026-10-05/test-maps-engine-m75-object-stage-profile.mjs
+--- /mnt/data/fix80_base/MUWEB_R90_FIX79_PROTOCOL_WIRE_INTEGRATED_2026-10-05/test-maps-engine-m75-object-stage-profile.mjs	1970-01-01 00:00:00.000000000 +0000
++++ /mnt/data/MUWEB_R90_FIX80_CAPE_SPRITE_ENGINE_PROFILE_2026-10-05/test-maps-engine-m75-object-stage-profile.mjs	2026-10-05 19:35:25.359732233 +0000
+@@ -0,0 +1,6 @@
++import fs from 'node:fs'; import assert from 'node:assert/strict';
++const s=fs.readFileSync(new URL('./world/TerrainObjectWorld.js', import.meta.url),'utf8');
++for(const x of ["version: 'M75'","fetchParse","modelStage","templateProbe","staticBatch","placementBuild","finalize","muMapObjectStageProfile","__MUWEB_MAP_OBJECT_STAGE_PROFILE__","stageProfile: frozenProfile"]){assert.ok(s.includes(x),`missing ${x}`)}
++assert.ok(s.includes('modelStageConcurrency = pcMapModelStageConcurrency()'));
++assert.ok(s.includes('placementBuildConcurrency = logicalCores >= 12 ? 6 : logicalCores >= 8 ? 5 : 4'));
++console.log('PASS M75 structured map object-stage profile');
+diff -ruN '--exclude=R90_FIX79_SOURCE_HASHES.json' /mnt/data/fix80_base/MUWEB_R90_FIX79_PROTOCOL_WIRE_INTEGRATED_2026-10-05/test-r90-fix70-icarus-lorencia-map-parity.mjs /mnt/data/MUWEB_R90_FIX80_CAPE_SPRITE_ENGINE_PROFILE_2026-10-05/test-r90-fix70-icarus-lorencia-map-parity.mjs
+--- /mnt/data/fix80_base/MUWEB_R90_FIX79_PROTOCOL_WIRE_INTEGRATED_2026-10-05/test-r90-fix70-icarus-lorencia-map-parity.mjs	2026-10-05 16:28:41.000000000 +0000
++++ /mnt/data/MUWEB_R90_FIX80_CAPE_SPRITE_ENGINE_PROFILE_2026-10-05/test-r90-fix70-icarus-lorencia-map-parity.mjs	2026-10-05 19:38:25.660025787 +0000
+@@ -20,5 +20,5 @@
+ assert.ok(objects.includes('LORENCIA_ARCHITECTURE_AUDIT_SERIALS'), 'Lorencia architecture audit missing');
+ assert.ok(objects.includes('STRUCTURAL_FULL_FIDELITY_SERIALS = new Set([80, 85])'), 'Bridge/BridgeStone exact path regressed');
+ assert.ok(objects.includes('muLorenciaArchitectureProfile'), 'Lorencia architecture profile publication missing');
+-assert.ok(/MUWEB_R90_FIX7[2-9]_/.test(app), 'source revision stale');
++assert.ok(/MUWEB_R90_FIX(?:7[2-9]|8[0-9])_/.test(app), 'source revision stale');
+ console.log('PASS FIX70 Icarus ambient BITMAP_LIGHT + map-entry profile + Lorencia architecture diagnostics');
+diff -ruN '--exclude=R90_FIX79_SOURCE_HASHES.json' /mnt/data/fix80_base/MUWEB_R90_FIX79_PROTOCOL_WIRE_INTEGRATED_2026-10-05/test-r90-fix80-cape-fx-atomic.mjs /mnt/data/MUWEB_R90_FIX80_CAPE_SPRITE_ENGINE_PROFILE_2026-10-05/test-r90-fix80-cape-fx-atomic.mjs
+--- /mnt/data/fix80_base/MUWEB_R90_FIX79_PROTOCOL_WIRE_INTEGRATED_2026-10-05/test-r90-fix80-cape-fx-atomic.mjs	1970-01-01 00:00:00.000000000 +0000
++++ /mnt/data/MUWEB_R90_FIX80_CAPE_SPRITE_ENGINE_PROFILE_2026-10-05/test-r90-fix80-cape-fx-atomic.mjs	2026-10-05 19:36:33.626761239 +0000
+@@ -0,0 +1,10 @@
++import assert from 'node:assert/strict';
++import fs from 'node:fs';
++const p=fs.readFileSync(new URL('./graphics/PcCustomCapePresentation.js',import.meta.url),'utf8');
++assert.match(p,/unresolvedEffects=effects\.filter/);
++assert.match(p,/const represented=\(handles\.length\+spriteHandles\.length\)>0/);
++assert.match(p,/complete=skipped===0 && represented && unresolvedEffects\.length===0/);
++assert.match(p,/unresolvedEffects:white\.unresolvedEffects/);
++assert.match(p,/unresolvedEffects:lit\.unresolvedEffects/);
++assert.match(p,/META_KINDS = new Set\(\['set-light','set-mesh','gl-color-body','transform-position','transform-position2','object-set-time'\]\)/);
++console.log('PASS FIX80 CustomCape authored FX blocks incomplete GPU takeover atomically');
+diff -ruN '--exclude=R90_FIX79_SOURCE_HASHES.json' /mnt/data/fix80_base/MUWEB_R90_FIX79_PROTOCOL_WIRE_INTEGRATED_2026-10-05/test-r90-fix80-cape-sprite-owner.mjs /mnt/data/MUWEB_R90_FIX80_CAPE_SPRITE_ENGINE_PROFILE_2026-10-05/test-r90-fix80-cape-sprite-owner.mjs
+--- /mnt/data/fix80_base/MUWEB_R90_FIX79_PROTOCOL_WIRE_INTEGRATED_2026-10-05/test-r90-fix80-cape-sprite-owner.mjs	1970-01-01 00:00:00.000000000 +0000
++++ /mnt/data/MUWEB_R90_FIX80_CAPE_SPRITE_ENGINE_PROFILE_2026-10-05/test-r90-fix80-cape-sprite-owner.mjs	2026-10-05 19:36:12.292867821 +0000
+@@ -0,0 +1,23 @@
++import assert from 'node:assert/strict';
++import fs from 'node:fs';
++import {executeRenderCapeModelForTests} from './data/PcCustomCapeLua.js';
++
++const lua=`
++function RenderCapeModel(BMDStruct,ObjectStruct,ItemIndex,RenderCharacter)
++  local b=BMD(BMDStruct)
++  b:CreateSprite(321, 7, 1.25, 0.2, 0.3, 0.4, ObjectStruct)
++end
++`;
++const calls=executeRenderCapeModelForTests(lua,{itemIndex:123,renderCharacter:true});
++const s=calls.find(c=>c.kind==='bmd-create-sprite');
++assert.ok(s,'BMD:CreateSprite must be captured');
++assert.deepEqual(s.args.slice(0,6),[321,7,1.25,0.2,0.3,0.4]);
++const src=fs.readFileSync(new URL('./graphics/PcCustomCapePresentation.js',import.meta.url),'utf8');
++for(const needle of [
++  "const SPRITE_KIND = 'bmd-create-sprite'",
++  'renderer.createBoneSprite?.({boneIndex:bone,map,scale,color:new THREE.Color(r,g,b)})',
++  "c.kind!==SPRITE_KIND",
++  'spriteHandles.push(owner)',
++]) assert.ok(src.includes(needle),`missing consumer contract: ${needle}`);
++assert.ok(src.includes('particle/effect/joint remain blockers'),'unresolved cape FX must remain fail-closed');
++console.log('PASS FIX80 CustomCape BMD CreateSprite exact bitmap/bone/scale/light owner');
+diff -ruN '--exclude=R90_FIX79_SOURCE_HASHES.json' /mnt/data/fix80_base/MUWEB_R90_FIX79_PROTOCOL_WIRE_INTEGRATED_2026-10-05/tests/test-r90-fix80-f3e0-exact-contract.mjs /mnt/data/MUWEB_R90_FIX80_CAPE_SPRITE_ENGINE_PROFILE_2026-10-05/tests/test-r90-fix80-f3e0-exact-contract.mjs
+--- /mnt/data/fix80_base/MUWEB_R90_FIX79_PROTOCOL_WIRE_INTEGRATED_2026-10-05/tests/test-r90-fix80-f3e0-exact-contract.mjs	1970-01-01 00:00:00.000000000 +0000
++++ /mnt/data/MUWEB_R90_FIX80_CAPE_SPRITE_ENGINE_PROFILE_2026-10-05/tests/test-r90-fix80-f3e0-exact-contract.mjs	2026-10-05 19:39:50.723423218 +0000
+@@ -0,0 +1,22 @@
++import assert from 'node:assert/strict';
++import { routeMUPacket } from '../protocol/MUPacketRouter.js';
++
++function packet(body) { return { headcode:0xF3, subcode:0xE0, payload:body, opcodeName:'CHARACTER' }; }
++function put32(a,o,v){ a[o]=v&255; a[o+1]=(v>>>8)&255; a[o+2]=(v>>>16)&255; a[o+3]=(v>>>24)&255; }
++function valid(n){
++  const a=new Uint8Array(n); a[0]=0x34; a[1]=0x12;
++  for(let o=4;o<=80;o+=4) put32(a,o,(0x10000000+o)>>>0);
++  if(n===144){ for(let o=84;o<=140;o+=4) put32(a,o,(0x20000000+o)>>>0); }
++  return a;
++}
++for (const n of [84,144]) {
++  let got=null; const r=routeMUPacket(packet(valid(n)),{onNewCharacterInfo:m=>got=m});
++  assert.equal(r,'new_character_info'); assert.ok(got); assert.equal(got.level,0x1234);
++  assert.equal(got.resetValid,n===144);
++  if(n===144) assert.equal(got.reset,0x20000000+84);
++}
++for (const n of [0,1,83,85,100,143,145,168]) {
++  let called=0; const r=routeMUPacket(packet(new Uint8Array(n)),{onNewCharacterInfo:()=>called++});
++  assert.equal(r,'payload_short',`length ${n}`); assert.equal(called,0,`atomic ${n}`);
++}
++console.log('PASS FIX80 F3:E0 exact 84/144-byte authoritative contract');
+diff -ruN '--exclude=R90_FIX79_SOURCE_HASHES.json' /mnt/data/fix80_base/MUWEB_R90_FIX79_PROTOCOL_WIRE_INTEGRATED_2026-10-05/tools/start-r90-fix80-safe.cjs /mnt/data/MUWEB_R90_FIX80_CAPE_SPRITE_ENGINE_PROFILE_2026-10-05/tools/start-r90-fix80-safe.cjs
+--- /mnt/data/fix80_base/MUWEB_R90_FIX79_PROTOCOL_WIRE_INTEGRATED_2026-10-05/tools/start-r90-fix80-safe.cjs	1970-01-01 00:00:00.000000000 +0000
++++ /mnt/data/MUWEB_R90_FIX80_CAPE_SPRITE_ENGINE_PROFILE_2026-10-05/tools/start-r90-fix80-safe.cjs	2026-10-05 19:37:19.715837769 +0000
+@@ -0,0 +1,30 @@
++const fs = require('node:fs');
++const path = require('node:path');
++const crypto = require('node:crypto');
++const root = path.resolve(__dirname, '..');
++const MUTABLE_RUNTIME = new Set(['runtime-config.js']);
++function sha256(p){return crypto.createHash('sha256').update(fs.readFileSync(p)).digest('hex');}
++function verifyBuild(){
++  const manifestPath = path.join(root, 'R90_FIX80_SOURCE_HASHES.json');
++  if(!fs.existsSync(manifestPath)) throw new Error('R90_FIX80_SOURCE_HASHES.json ausente');
++  const m = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
++  let n=0;
++  for(const [rel, expected] of Object.entries(m.files || {})){
++    if(MUTABLE_RUNTIME.has(rel)) continue;
++    const p = path.join(root, rel);
++    if(!fs.existsSync(p)) throw new Error(`FIX80 arquivo ausente: ${rel}`);
++    const actual = sha256(p);
++    if(actual !== expected) throw new Error(`FIX80 arquivo modificado/incompleto: ${rel}`);
++    n++;
++  }
++  console.log(`[R90 FIX80] ${m.build}: ${n} arquivos imutaveis verificados.`);
++  return m;
++}
++module.exports={verifyBuild};
++if(require.main===module){
++  try{
++    verifyBuild();
++    if(process.argv.includes('--verify-only')) process.exit(0);
++    require('./start-r90-safe.cjs').main().catch(e=>{console.error('[R90 FIX80] FALHA:', e.message); process.exitCode=1;});
++  }catch(e){console.error('[R90 FIX80] FALHA:', e.message); process.exitCode=1;}
++}
+diff -ruN '--exclude=R90_FIX79_SOURCE_HASHES.json' /mnt/data/fix80_base/MUWEB_R90_FIX79_PROTOCOL_WIRE_INTEGRATED_2026-10-05/world/TerrainObjectWorld.js /mnt/data/MUWEB_R90_FIX80_CAPE_SPRITE_ENGINE_PROFILE_2026-10-05/world/TerrainObjectWorld.js
+--- /mnt/data/fix80_base/MUWEB_R90_FIX79_PROTOCOL_WIRE_INTEGRATED_2026-10-05/world/TerrainObjectWorld.js	2026-10-05 15:21:33.000000000 +0000
++++ /mnt/data/MUWEB_R90_FIX80_CAPE_SPRITE_ENGINE_PROFILE_2026-10-05/world/TerrainObjectWorld.js	2026-10-05 19:35:25.356678717 +0000
+@@ -1133,10 +1133,15 @@
+         throw e;
+       }
+     };
++    const _profileT0 = performance.now();
++    const _profile = { version: 'M75', world: worldNum|0, phases: {} };
++    let _profileMark = _profileT0;
++    const _markProfile = (name) => { const now=performance.now(); _profile.phases[name]=now-_profileMark; _profileMark=now; };
+     assertContinue();
+     const fetched = await fetchObjectFile(worldNum);
+     assertContinue();
+     const parsed = parseTerrainObjects(fetched.bytes);
++    _markProfile('fetchParse');
+     console.info(`[WorldObjects] World${worldNum}: ${parsed.count} placement(s) de ${fetched.path}`);
+     const histogram = new Map();
+     for (const o of parsed.objects) histogram.set(o.serial, (histogram.get(o.serial) || 0) + 1);
+@@ -1217,6 +1222,7 @@
+         modelCache.set(serial, null);
+       }
+     });
++    _markProfile('modelStage');
+ 
+     // Perf P4 (t-muhg6wvo-t): paridade com o PC — MapManager.cpp carrega cada
+     // modelo UMA vez (AccessModel) e cada CreateObject referencia a instância
+@@ -1322,6 +1328,7 @@
+     // geometry/material, mas ainda criava ~2985 Object3D/SkinnedMesh e milhares
+     // de draw calls. R13 usa 1 InstancedMesh por submesh/material de cada serial
+     // ESTÁTICO. AnimatedSerials continuam 1 renderer/placement, sem regressão.
++    _markProfile('templateProbe');
+     const placementsBySerial = new Map();
+     parsed.objects.forEach((obj, index) => {
+       let arr = placementsBySerial.get(obj.serial);
+@@ -1489,6 +1496,7 @@
+         instancedDraws - transportStats.sourceDraws + transportStats.batchedDraws;
+     }
+ 
++    _markProfile('staticBatch');
+     // Somente animados + static serials cujo batching falhou/foi desativado.
+     // MAPS_ENGINE M66: the old fixed concurrency=4 under-used modern 8/12/16-core
+     // browsers during the remaining per-placement renderer/material setup. Keep
+@@ -1734,6 +1742,7 @@
+         console.warn(`[WorldObjects] placement ${index} Object${obj.serial + 1}: ${e.message}`);
+       }
+     });
++    _markProfile('placementBuild');
+     this._templateRenderers = [...templates.values()];
+     if (shared > 0) {
+       const sb = this._lastSpatialBatchStats || { chunkTiles: 0, spatialClusters: 0 };
+@@ -1790,9 +1799,18 @@
+         console.info(`[WorldObjects AUDIT FIX42] W${worldNum} Object${serial+1} placements=${rec.placements} model=${rec.model} path=${path} hidden=${rec.sourceHidden?1:0} missing=${rec.missing} owners=renderer:${counts.renderer},lorencia:${counts.lorenciaVisual},lorenciaBone:${counts.lorenciaBone},mapBone:${counts.mapBone},particle:${counts.mapParticle},runtime:${counts.runtime}`);
+       }
+     }
++    _markProfile('finalize');
++    _profile.totalMs = performance.now() - _profileT0;
++    _profile.placements = parsed.count|0; _profile.rendered = rendered|0; _profile.missing = missing|0;
++    _profile.modelStageConcurrency = modelStageConcurrency; _profile.placementBuildConcurrency = placementBuildConcurrency;
++    const frozenProfile = Object.freeze({ ..._profile, phases: Object.freeze({ ..._profile.phases }) });
++    this.root.userData.muMapObjectStageProfile = frozenProfile;
++    this.gameScene.scene.userData.muMapObjectStageProfile = frozenProfile;
++    globalThis.__MUWEB_MAP_OBJECT_STAGE_PROFILE__ = frozenProfile;
++    console.info(`[PERF M75] World${worldNum} object-stage total=${Math.round(frozenProfile.totalMs)}ms | ` + Object.entries(frozenProfile.phases).map(([k,v])=>`${k}=${Math.round(v)}`).join(' | '));
+     console.info(`[WorldObjects] World${worldNum}: rendered=${rendered} missing=${missing}` +
+       (missingSerials.length ? ` missingModels=${missingSerials.join(',')}` : ''));
+-    return { ...parsed, rendered, missing, histogram: Object.fromEntries(histogram), missingSerials, serialAudit };
++    return { ...parsed, rendered, missing, histogram: Object.fromEntries(histogram), missingSerials, serialAudit, stageProfile: frozenProfile };
+   }
+ 
+   updateVisibility(camera) {

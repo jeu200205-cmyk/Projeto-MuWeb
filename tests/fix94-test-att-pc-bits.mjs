@@ -1,0 +1,10 @@
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+const s=fs.readFileSync(new URL('../world/AttMapLoader.js',import.meta.url),'utf8');
+for(const x of ['SAFEZONE:      0x01','CHARACTER:     0x02','NOMOVE:        0x04','NOGROUND:      0x08','WATER:         0x10','ACTION:        0x20','HEIGHT:        0x40','CAMERA_UP:     0x80']) assert.ok(s.includes(x),`missing ${x}`);
+assert.ok(s.includes('NOATTACKZONE:  0x01'),'legacy safezone alias must retain PC value');
+assert.ok(s.includes('const block = ATT_FLAG.NOMOVE | ATT_FLAG.NOGROUND | (blockWater ? ATT_FLAG.WATER : 0)'));
+assert.ok(s.includes('detectZones(att, flags = ATT_FLAG.SAFEZONE)'));
+assert.ok(s.includes('& ATT_FLAG.SAFEZONE) !== 0'));
+assert.ok(!s.includes('NOGROUND:      0x02'),'old shifted TW_NOGROUND must be gone');
+console.log('PASS FIX94 Main 5.2 terrain ATT bit contract + safezone/path semantics');

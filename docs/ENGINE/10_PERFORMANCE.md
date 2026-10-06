@@ -43,3 +43,7 @@ FIX10 compartilha o orçamento cooperativo entre workers de carga ativa (sliceMs
 
 FIX19: culling de grama por regiões32x32 em vez de um mesh abrangendo todo mapa. Todos os quads permanecem residentes; sem ganho FPS físico declarado.
 FIX21: bounds iniciais por serial/por carga de Data, transformados conservadoramente por placement. Evita repetir o sweep de vértices skinned por cópia. Deduplicação/publicação/retirada de callbacks usam conjuntos e passes lineares; preserva ordem e identidade do array global. Nenhum modelo ou efeito é removido. Redução do tempo físico total ainda não medida.
+## FIX99 — pools retidos de partículas de mapa
+
+`PcLorenciaVisuals` e `PcMapParticles` deixam de criar/descartar `SpriteMaterial` e `Sprite` a cada emissão/morte nas famílias cobertas. O active-particle budget continua contando apenas partículas vivas; objetos reciclados ficam inativos. Tarkan deixa de usar `.map()`/arrays novos no update de partículas. O objetivo é reduzir GC/driver churn e spikes p95/p99 sem reduzir densidade, lifetime, bitmap ou spawn gate. Ganho físico ainda precisa ser medido no navegador/GPU do usuário.
+

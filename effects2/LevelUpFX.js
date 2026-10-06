@@ -72,7 +72,7 @@ export function playLevelUp(charMesh, scene, _camera, opts = {}) {
     //   + NO final: CreateEffect(MODEL_CHANGE_UP_EFF + CYLINDER) quando o 45 morre
     if (opts.masterLevel) return playMasterLevelUp(charMesh, scene, opts);
 
-    const sound = opts.sound || (typeof window !== 'undefined' && window.Sound) || null;
+    const sound = opts.silent === true ? null : (opts.sound || (typeof window !== 'undefined' && window.Sound) || null);
     const heroLight = opts.heroLight || [1, 1, 1]; // o->Light do herói (PC: VectorCopy do target)
     const t0 = performance.now();
 
@@ -262,7 +262,7 @@ const MASTER_TRAIL_LIGHT = [0.5, 0.5, 1.0]; // L5680
 const F_SPEED = [0.048, 0.0613, 0.1113]; // L5602
 
 function playMasterLevelUp(charMesh, scene, opts = {}) {
-    const sound = opts.sound || (typeof window !== 'undefined' && window.Sound) || null;
+    const sound = opts.silent === true ? null : (opts.sound || (typeof window !== 'undefined' && window.Sound) || null);
     const origin = charMesh.position.clone();
     const t0 = performance.now();
 

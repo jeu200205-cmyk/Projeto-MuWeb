@@ -623,6 +623,34 @@ class RealMUProtocol {
     await this.sendPacket(this.createTalkPacket(npcKey));
   }
 
+  // Main 5.2 wsclientinline.h SendRequestAction macro:
+  //   C1 05 18 [Angle] [Action]
+  // PREQUEST_ACTION includes two target-key bytes in the struct declaration,
+  // but the macro itself serializes only Angle+Action; preserve the actual wire.
+  createActionPacket(action, angle) {
+    const a=Number(action), d=Number(angle);
+    if (!Number.isInteger(a) || a < 0 || a > 0xFF) throw new RangeError(`action invalida: ${action}`);
+    if (!Number.isInteger(d) || d < 0 || d > 7) throw new RangeError(`action angle invalido: ${angle}`);
+    return this._buildC1NoSub(0x18, Uint8Array.from([d & 0xFF, a & 0xFF]));
+  }
+
+  async requestAction(action, angle) {
+    const classic=this.createActionPacket(action, angle);
+    if (this.serverType === 'android') {
+      // Retained Main/mobile authority: Android_SendClassicStreamPacket wraps
+      // the exact classic CStreamPacketEngine bytes in ProtocolHead::BOTH_MESSAGE(11).
+      // Current Web Android lane is the legacy/plain classic transport (no SPE1
+      // capability state is negotiated here), so preserve those bytes verbatim.
+      const pkt=new Uint8Array(6+classic.length); const dv=new DataView(pkt.buffer);
+      dv.setUint16(0,RealMUProtocol.BOTH_HEAD.BOTH_MESSAGE,true);
+      dv.setUint32(2,classic.length,true); pkt.set(classic,6);
+      await this.sendPacket(pkt);
+      return true;
+    }
+    await this.sendPacket(classic);
+    return true;
+  }
+
 
   createBuyPacket(index) {
     if (!Number.isInteger(index) || index < 0 || index > 0xFF) throw new RangeError(`shop index invalido: ${index}`);

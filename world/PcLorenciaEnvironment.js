@@ -74,7 +74,7 @@ export function createPcLorenciaEnvironmentOwner(gameScene){
   });
   const publish=()=>{if(!mesh)return;const h=heroMu(gameScene),cam=cameraMu(gameScene);if(!h)return;for(let i=0;i<MAX_LEAVES;i++){const p=leaves[i];if(!p.live)spawn(p,h,cam);mesh.setMatrixAt(i,instanceMatrix(p));}mesh.instanceMatrix.needsUpdate=true;};
   const tick=()=>{const h=heroMu(gameScene),cam=cameraMu(gameScene);if(!h)return;for(const p of leaves){if(!p.live){spawn(p,h,cam);continue;}step(p);if(!p.live)spawn(p,h,cam);}publish();};
-  group.userData.update=(dt)=>{if(disposed)return;const d=Math.max(0,Number(dt)||0);acc+=d;let guard=0;while(acc+1e-9>=TICK&&guard++<8){acc-=TICK;tick();}group.userData.muPcLiveLeaves=leaves.reduce((n,p)=>n+(p.live?1:0),0);};
+  group.userData.update=(dt)=>{if(disposed)return;const d=Math.max(0,Number(dt)||0);acc+=d;let guard=0;while(acc+1e-9>=TICK&&guard++<8){acc-=TICK;tick();}if(acc+1e-9>=TICK){const dropped=Math.floor(acc/TICK);acc-=dropped*TICK;group.userData.muPcDroppedBacklogTicks=(group.userData.muPcDroppedBacklogTicks||0)+dropped;}group.userData.muPcLiveLeaves=leaves.reduce((n,p)=>n+(p.live?1:0),0);};
   return {group,dispose(){if(disposed)return;disposed=true;mesh?.parent?.remove(mesh);geometry?.dispose?.();material?.dispose?.();group.clear();}};
 }
 

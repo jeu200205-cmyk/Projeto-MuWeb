@@ -82,6 +82,7 @@ export class PCSkillEffectsPackA {
     if (typeof Sound.loadWav === 'function') {
       const exactWavs = [
         ['pc-vitality','eSwellLife.wav'], ['pc-blow232','BLOW_OF_DESTRUCTION.wav'],
+        ['pc-skill-defense','sKnightDefense.wav'],
         ['pc-sword1','sKnightSkill1.wav'], ['pc-sword2','sKnightSkill2.wav'],
         ['pc-sword3','sKnightSkill3.wav'], ['pc-sword4','sKnightSkill4.wav'],
         ['pc-combo','eCombo.wav'],
@@ -94,6 +95,14 @@ export class PCSkillEffectsPackA {
   _playExact(id) {
     try { if (Sound.buffers?.has?.(id)) return Sound.play(id); } catch (_) {}
     return null;
+  }
+
+  /** Main 5.2 WSclient.cpp exact Heal/Attack/Defense family audio owner. */
+  playPcElfSupportReceiveSound(sourceMonsterIndex = -1) {
+    // PC guard: if (sc->MonsterIndex != 77) PlayBuffer(SOUND_SKILL_DEFENSE).
+    // Players/non-monsters use the same sound; only MonsterIndex 77 suppresses it.
+    if (Number(sourceMonsterIndex) === 77) return null;
+    return this._playExact('pc-skill-defense');
   }
 
   /** WSclient.cpp::ReceiveMagic exact Sword1..5 audio owner. */

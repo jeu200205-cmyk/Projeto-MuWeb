@@ -263,6 +263,12 @@ export const Movement = {
 
         const control = mesh.userData && mesh.userData.animationControl;
         if (!control || typeof control.play !== 'function') return;
+        // FIX92 Main 5.2 MOVEMENT_OPERATE: Sit/Pose is a persistent local SetAction,
+        // not an idle locomotion clip. Preserve it until the player actually moves.
+        if (Number.isInteger(char._pcOperateAction)) {
+            if (!moving) return;
+            char._pcOperateAction = null;
+        }
         const name = moving ? (animSpeed > 7 ? 'run' : 'walk') : 'idle';
         // Chame todo frame: buildAnimationControl é idempotente no clip, mas
         // precisa reavaliar SafeZone/equipamento mesmo quando o estado lógico

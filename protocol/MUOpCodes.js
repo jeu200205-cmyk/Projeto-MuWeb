@@ -60,7 +60,7 @@ export const MAIN_OPCODE = {
   MANA: 0x27,              // MP update
   DELETE_INVENTORY: 0x28,  // Delete item from inventory
   HELPER_ITEM: 0x29,       // Helper item (auto-pot, etc.)
-  USE_STATE_ITEM: 0x2C,    // Use state item (scroll, potion)
+  USE_STATE_ITEM: 0x2C,    // SendUseStateItem / ReceiveUseStatFruit (direction-specific)
 
   // NPC Interaction
   TALK: 0x30,              // Talk to NPC

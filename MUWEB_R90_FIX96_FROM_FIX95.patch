@@ -1,0 +1,331 @@
+diff -ruN '--exclude=node_modules' '--exclude=R90_FIX96_SOURCE_HASHES.json' '--exclude=MUWEB_R90_FIX96_FROM_FIX95.patch' /mnt/data/MUWEB_R90_FIX95_CHARACTERHELPER_TABLE_RENDER_ROUTING_2026-10-05/CURRENT_AUTHORITY.txt /mnt/data/MUWEB_R90_FIX96_HELPER_EFFECTS_DINORANT_BOOT_2026-10-05/CURRENT_AUTHORITY.txt
+--- /mnt/data/MUWEB_R90_FIX95_CHARACTERHELPER_TABLE_RENDER_ROUTING_2026-10-05/CURRENT_AUTHORITY.txt	2026-10-05 23:57:40.314141697 +0000
++++ /mnt/data/MUWEB_R90_FIX96_HELPER_EFFECTS_DINORANT_BOOT_2026-10-05/CURRENT_AUTHORITY.txt	2026-10-06 00:22:46.155465693 +0000
+@@ -1,28 +1,24 @@
+-MUWEB central authority: MUWEB_R90_FIX95_CHARACTERHELPER_TABLE_RENDER_ROUTING_2026-10-05_FULL.zip
+-Parent: MUWEB_R90_FIX94_LARGE_PORT_WINGS_LUA_TERRAIN_DARKSPIRIT_2026-10-05_FULL.zip
++MUWEB central authority: MUWEB_R90_FIX96_HELPER_EFFECTS_DINORANT_BOOT_2026-10-05_FULL.zip
++Parent: MUWEB_R90_FIX95_CHARACTERHELPER_TABLE_RENDER_ROUTING_2026-10-05_FULL.zip
+ Status: DEVELOPMENT / NOT PROMOTED
+ 
+-Integrated: every FIX81-FIX94 closure plus FIX95 CharacterHelper table/render/routing tranche.
+-
+-FIX95 closes/advances:
+-- CharacterHelper.lua consolidated HELPER_CONFIG table is parsed directly; it no longer requires literal SetHelper(...) rows.
+-- Real supplied CharacterHelper.lua audit: 204 helper rows recovered. Raw Type census: Type0=83, Type2=3, Type3=55, Type4=61, Type5=2.
+-- Exact model ownership is retained: item Model follows its authored Data\\Item path; Type>0 runtime creature uses ObjectModel from its authored Data\\Skill path. Explicit ModelDir/ObjectModelDir are honored.
+-- Real supplied RENDER_HELPER audit: 155 ItemID owners, 1,208 model passes, 561 non-base passes, 143 Shadow owners and 155 FootEffect owners.
+-- 647 plain RENDER_TEXTURE/default-texture passes fold into the already-resident BMD mesh instead of duplicating draws; 561 non-base RenderMesh passes use the MU fixed-function overlay owner.
+-- The eight dynamic render rows keep their WorldTime/GetDoubleRender-style color/UV update lane. Unknown textures/timers stay fail-closed.
+-- CharacterHelper raw category routing is no longer collapsed to a flying HelperCompanion: raw Type0 -> helper/fly; raw Type3 -> custom Fenrir behavior; raw Type4 -> custom Horse/DarkHorse behavior.
+-- Raw Type2 (3 rows) and Type5 (2 rows) remain explicit fail-closed movement debt rather than being rendered as the wrong category.
+-- Custom helper/rider routing is propagated through hero equipment, Character Select, F3:72 Element[], and remote viewport actors. Remote stock/custom riders now materialize a MountCompanion lane as well.
+-- CharacterHelper presentation is propagated with the model owner so custom mounts/pets keep their authored mesh passes in hero/select/viewport paths.
++FIX96 closes/advances:
++- Boot crash from MUSoundManager: RemoteAssets is the exported singleton, not a constructor. MUSoundManager now imports RemoteAssets and uses it directly.
++- Hidden second boot crash fixed in the same module: MUSoundManager uses THREE.Vector3 and now imports three explicitly.
++- MUTextureManager had the same stale `new RemoteAssets()` bug and now uses the singleton as well.
++- CharacterHelper RENDER_HELPER field parser now distinguishes Effect from FootEffect by exact field boundary.
++- Named Effect/Miniature tables are resolved when authored as references instead of inline tables.
++- Audit against supplied 2.4 MB CharacterHelper.lua: 204 helper rows, 155 render owners, 1,208 model passes, 4,717 Effect rows, 2,901 Miniature rows and 155 FootEffect owners recognized.
++- Deterministic helper EffectType 0/1 rows (RandTime=100, non-Black) now use exact bone->bitmap Sprite/Particle owners. Dynamic RandTime, Black semantics and EffectType 2 remain fail-closed by contract.
++- Raw Type2 custom helpers are now routed through the Dinorant/Pegasus ride family proven by PC CheckHelperType mask 4 instead of remaining hidden or becoming flying pets.
++- Type3 Fenrir and Type4 Horse routing from FIX95 is preserved for hero, Character Select, F3:72 and remote viewport actors.
+ 
+ Not falsely claimed complete:
+-- CharacterHelper RenderShadowModel planar/native projection remains unresolved; no fake circle/plane shadow was added.
+-- CharacterHelper FootEffect/CreateEffectsInHorse/Fenrir lifecycle remains open per family; stock Fenrir's existing proven Foot Thunder owner is preserved.
+-- Raw Type2 Dinorant and Type5 Dragon movement/action owners still need source-exact lanes.
+-- Generic CharacterSetEffect CreateSkill second CreateEffect child remains unresolved where EffectID lifecycle is not proven.
+-- CustomCape global CreateEffect/CreateJoint/RenderShadowModel remain open until a source-exact consumer exists.
+-- Lorencia/Icarus/map visual parity and physical FPS still require live validation and remaining source owners.
++- Type5 Dragon movement/action law remains separate and fail-closed until its native owner is proven.
++- Helper RenderShadowModel remains open; no fake planar blob was added.
++- FootEffect and EffectType 2/CreateEffect remain open per native lifecycle, except previously proven stock Fenrir Foot Thunder.
++- CharacterSetEffect CreateSkill second CreateEffect child and generic CustomCape CreateEffect/CreateJoint/Shadow remain open by family.
++- Lorencia/Icarus physical visual/FPS validation still requires runtime logs/screenshots.
+ 
+ Data authority remains exclusively:
+ C:\clientepromax\Nova pasta\MuPromax 1.0.1\Data
+diff -ruN '--exclude=node_modules' '--exclude=R90_FIX96_SOURCE_HASHES.json' '--exclude=MUWEB_R90_FIX96_FROM_FIX95.patch' /mnt/data/MUWEB_R90_FIX95_CHARACTERHELPER_TABLE_RENDER_ROUTING_2026-10-05/LIGAR_WEB_R90_FIX95.bat /mnt/data/MUWEB_R90_FIX96_HELPER_EFFECTS_DINORANT_BOOT_2026-10-05/LIGAR_WEB_R90_FIX95.bat
+--- /mnt/data/MUWEB_R90_FIX95_CHARACTERHELPER_TABLE_RENDER_ROUTING_2026-10-05/LIGAR_WEB_R90_FIX95.bat	2026-10-05 23:57:40.975131041 +0000
++++ /mnt/data/MUWEB_R90_FIX96_HELPER_EFFECTS_DINORANT_BOOT_2026-10-05/LIGAR_WEB_R90_FIX95.bat	1970-01-01 00:00:00.000000000 +0000
+@@ -1,11 +0,0 @@
+-@echo off
+-setlocal
+-cd /d "%~dp0"
+-where node >nul 2>nul || (echo [R90 FIX95] Node.js nao encontrado.& pause & exit /b 1)
+-if not exist node_modules\three (
+-  echo Dependencias ausentes. Instalando pelo lockfile...
+-  call npm ci --omit=dev || (echo [R90 FIX95] Falha ao instalar dependencias.& pause & exit /b 1)
+-)
+-node tools\start-r90-fix95-safe.cjs
+-if errorlevel 1 pause
+-endlocal
+diff -ruN '--exclude=node_modules' '--exclude=R90_FIX96_SOURCE_HASHES.json' '--exclude=MUWEB_R90_FIX96_FROM_FIX95.patch' /mnt/data/MUWEB_R90_FIX95_CHARACTERHELPER_TABLE_RENDER_ROUTING_2026-10-05/LIGAR_WEB_R90_FIX96.bat /mnt/data/MUWEB_R90_FIX96_HELPER_EFFECTS_DINORANT_BOOT_2026-10-05/LIGAR_WEB_R90_FIX96.bat
+--- /mnt/data/MUWEB_R90_FIX95_CHARACTERHELPER_TABLE_RENDER_ROUTING_2026-10-05/LIGAR_WEB_R90_FIX96.bat	1970-01-01 00:00:00.000000000 +0000
++++ /mnt/data/MUWEB_R90_FIX96_HELPER_EFFECTS_DINORANT_BOOT_2026-10-05/LIGAR_WEB_R90_FIX96.bat	2026-10-06 00:22:46.629173134 +0000
+@@ -0,0 +1,11 @@
++@echo off
++setlocal
++cd /d "%~dp0"
++where node >nul 2>nul || (echo [R90 FIX96] Node.js nao encontrado.& pause & exit /b 1)
++if not exist node_modules\three (
++  echo Dependencias ausentes. Instalando pelo lockfile...
++  call npm ci --omit=dev || (echo [R90 FIX96] Falha ao instalar dependencias.& pause & exit /b 1)
++)
++node tools\start-r90-fix96-safe.cjs
++if errorlevel 1 pause
++endlocal
+diff -ruN '--exclude=node_modules' '--exclude=R90_FIX96_SOURCE_HASHES.json' '--exclude=MUWEB_R90_FIX96_FROM_FIX95.patch' /mnt/data/MUWEB_R90_FIX95_CHARACTERHELPER_TABLE_RENDER_ROUTING_2026-10-05/MUWEB_R90_FIX96_PORTABILITY.md /mnt/data/MUWEB_R90_FIX96_HELPER_EFFECTS_DINORANT_BOOT_2026-10-05/MUWEB_R90_FIX96_PORTABILITY.md
+--- /mnt/data/MUWEB_R90_FIX95_CHARACTERHELPER_TABLE_RENDER_ROUTING_2026-10-05/MUWEB_R90_FIX96_PORTABILITY.md	1970-01-01 00:00:00.000000000 +0000
++++ /mnt/data/MUWEB_R90_FIX96_HELPER_EFFECTS_DINORANT_BOOT_2026-10-05/MUWEB_R90_FIX96_PORTABILITY.md	2026-10-06 00:22:46.156344903 +0000
+@@ -0,0 +1,23 @@
++# MUWEB R90 FIX96 — Helper Effects / Dinorant / Boot Recovery
++
++Parent: FIX95 CharacterHelper Table/Render/Routing.
++
++## Boot recovery
++`RemoteAssets` is exported by `data/RemoteAssets.js` as a singleton `new RemoteAssetSystem()`. `MUSoundManager` referenced it without an import and attempted `new RemoteAssets()`. FIX96 imports the singleton, uses it directly, and also imports `three` because the sound manager constructs `THREE.Vector3` during module initialization. `MUTextureManager` had the same stale constructor pattern and was fixed before it could become the next boot crash.
++
++## CharacterHelper Effect family
++The supplied CharacterHelper.lua uses `FootEffect`, `Effect`, and `Miniature` next to each other. The prior field scanner could match the suffix `Effect` inside `FootEffect`; FIX96 requires an exact Lua field boundary. Named tables referenced as `Effect = someTable` / `Miniature = someTable` are also resolved when statically authored.
++
++Physical audit of the supplied script after the fix: 204 HELPER_CONFIG rows, 155 RENDER_HELPER owners, 1,208 model passes, 4,717 Effect rows, 2,901 Miniature rows, 155 FootEffect owners.
++
++For `EffectType=0/1`, `RandTime=100`, `Black=false`, the PC contract is direct: TransformPosition(bone,offset) followed by CreateSprite or CreateParticle. FIX96 binds those rows to `createBoneSprite` / pooled `createBoneParticle` using the authored bitmap, bone, XYZ offset, scale, RGB and EffectLevel/subtype. Dynamic random emission, Black sprite semantics and EffectType=2 remain explicit debt instead of approximation.
++
++## Type2 Dinorant
++PC HelperSystem maps authored raw Type2 to mask 4, and ZzzCharacter uses that mask in the same ride/action family as `MODEL_HELPER+3`. FIX96 therefore routes raw Type2 to the existing Pegasus/Dinorant movement owner. Type5 is intentionally not coerced into another family.
++
++## Validation intent
++- no `new RemoteAssets()` remains in MUSoundManager/MUTextureManager;
++- parser gate proves `Effect` cannot alias `FootEffect`;
++- named Effect tables resolve;
++- Type2 takes Dinorant ride route;
++- Sprite/Particle helper effects are explicit consumers, while unsupported lifecycles remain fail-closed.
+diff -ruN '--exclude=node_modules' '--exclude=R90_FIX96_SOURCE_HASHES.json' '--exclude=MUWEB_R90_FIX96_FROM_FIX95.patch' /mnt/data/MUWEB_R90_FIX95_CHARACTERHELPER_TABLE_RENDER_ROUTING_2026-10-05/assets/MUSoundManager.js /mnt/data/MUWEB_R90_FIX96_HELPER_EFFECTS_DINORANT_BOOT_2026-10-05/assets/MUSoundManager.js
+--- /mnt/data/MUWEB_R90_FIX95_CHARACTERHELPER_TABLE_RENDER_ROUTING_2026-10-05/assets/MUSoundManager.js	2026-10-03 17:39:14.000000000 +0000
++++ /mnt/data/MUWEB_R90_FIX96_HELPER_EFFECTS_DINORANT_BOOT_2026-10-05/assets/MUSoundManager.js	2026-10-06 00:18:19.360920945 +0000
+@@ -13,6 +13,9 @@
+  *  - Missing authored sounds fail closed (no procedural production substitute)
+  */
+ 
++import * as THREE from 'three';
++import { RemoteAssets } from '../data/RemoteAssets.js';
++
+ // ============================================================
+ // Configuration
+ // ============================================================
+@@ -658,7 +661,7 @@
+ export class MUSoundManager {
+     constructor(options = {}) {
+         this.baseUrl = options.baseUrl || (typeof window !== 'undefined' && window.__MU_ASSET_BASE__) || 'http://localhost:9100/';
+-        this.remoteAssets = new RemoteAssets();
++        this.remoteAssets = RemoteAssets;
+         this.remoteAssets.configure(this.baseUrl);
+         
+         // Audio Context
+diff -ruN '--exclude=node_modules' '--exclude=R90_FIX96_SOURCE_HASHES.json' '--exclude=MUWEB_R90_FIX96_FROM_FIX95.patch' /mnt/data/MUWEB_R90_FIX95_CHARACTERHELPER_TABLE_RENDER_ROUTING_2026-10-05/assets/MUTextureManager.js /mnt/data/MUWEB_R90_FIX96_HELPER_EFFECTS_DINORANT_BOOT_2026-10-05/assets/MUTextureManager.js
+--- /mnt/data/MUWEB_R90_FIX95_CHARACTERHELPER_TABLE_RENDER_ROUTING_2026-10-05/assets/MUTextureManager.js	2026-10-04 16:19:28.000000000 +0000
++++ /mnt/data/MUWEB_R90_FIX96_HELPER_EFFECTS_DINORANT_BOOT_2026-10-05/assets/MUTextureManager.js	2026-10-06 00:18:01.764591808 +0000
+@@ -419,7 +419,7 @@
+ export class MUTextureManager {
+     constructor(options = {}) {
+         this.baseUrl = options.baseUrl || (typeof window !== 'undefined' && window.__MU_ASSET_BASE__) || 'http://localhost:9100/';
+-        this.remoteAssets = new RemoteAssets();
++        this.remoteAssets = RemoteAssets;
+         this.remoteAssets.configure(this.baseUrl);
+         
+         // Caches
+diff -ruN '--exclude=node_modules' '--exclude=R90_FIX96_SOURCE_HASHES.json' '--exclude=MUWEB_R90_FIX96_FROM_FIX95.patch' /mnt/data/MUWEB_R90_FIX95_CHARACTERHELPER_TABLE_RENDER_ROUTING_2026-10-05/core/GameApp.js /mnt/data/MUWEB_R90_FIX96_HELPER_EFFECTS_DINORANT_BOOT_2026-10-05/core/GameApp.js
+--- /mnt/data/MUWEB_R90_FIX95_CHARACTERHELPER_TABLE_RENDER_ROUTING_2026-10-05/core/GameApp.js	2026-10-05 23:09:59.000000000 +0000
++++ /mnt/data/MUWEB_R90_FIX96_HELPER_EFFECTS_DINORANT_BOOT_2026-10-05/core/GameApp.js	2026-10-06 00:24:00.048881188 +0000
+@@ -120,7 +120,7 @@
+ export const MUWEB_R90_FIX15_REVISION = 'MUWEB_R90_FIX15_BMD_INFLIGHT_MAP_CANCEL_2026-10-03_A';
+ export const MUWEB_R90_FIX46_REVISION = 'MUWEB_R90_FIX46_DARKSPIRIT_MONSTER_LUA_CONTRACTS_2026-10-04_A';
+ export const MUWEB_R90_FIX47_REVISION = 'MUWEB_R90_FIX47_CHARACTER_LUA_MONSTER_PRESENTATION_2026-10-04_A';
+-export const MUWEB_SOURCE_REVISION = 'MUWEB_R90_FIX92_OPERATE_HEALING_RUNTIME_2026-10-05';
++export const MUWEB_SOURCE_REVISION = 'MUWEB_R90_FIX96_HELPER_EFFECTS_DINORANT_BOOT_2026-10-05';
+ export const MUWEB_PREVIOUS_SOURCE_REVISION = 'MUWEB_R78_ITEMVIEW_WORLDENTRY_ANIMATION_CHARSELECT_RECOVERY_2026-09-30_A';
+ export const MUWEB_R77_BASE_REVISION = 'MUWEB_R77_CANONICAL_WORLD_ROUTING_CUSTOMMOVE_PREFETCH_UTF8_2026-09-30_A';
+ 
+diff -ruN '--exclude=node_modules' '--exclude=R90_FIX96_SOURCE_HASHES.json' '--exclude=MUWEB_R90_FIX96_FROM_FIX95.patch' /mnt/data/MUWEB_R90_FIX95_CHARACTERHELPER_TABLE_RENDER_ROUTING_2026-10-05/data/CharacterHelperLua.js /mnt/data/MUWEB_R90_FIX96_HELPER_EFFECTS_DINORANT_BOOT_2026-10-05/data/CharacterHelperLua.js
+--- /mnt/data/MUWEB_R90_FIX95_CHARACTERHELPER_TABLE_RENDER_ROUTING_2026-10-05/data/CharacterHelperLua.js	2026-10-05 23:49:57.639757065 +0000
++++ /mnt/data/MUWEB_R90_FIX96_HELPER_EFFECTS_DINORANT_BOOT_2026-10-05/data/CharacterHelperLua.js	2026-10-06 00:19:30.400859372 +0000
+@@ -54,7 +54,7 @@
+ function parseActions(v){const m=/^\{([\s\S]*)\}$/.exec(String(v??'').trim());if(!m)return Object.freeze([]);const a=m[1].split(',').map(x=>num(x.trim())).filter(Number.isFinite);return Object.freeze(a);}
+ function rowActions(row){const m=/\bActions\s*=\s*\{([^}]*)\}/i.exec(row);return m?parseActions(`{${m[1]}}`):Object.freeze([]);}
+ function parseRecordTables(body){const out=[];let i=0;while(i<body.length){const p=body.indexOf('{',i);if(p<0)break;const e=findMatchingBrace(body,p);if(e<0)break;const row=body.slice(p+1,e);out.push(row);i=e+1;}return out;}
+-function namedTableBody(block,key){const re=new RegExp(`${key}\\s*=\\s*\\{`,'i');const m=re.exec(block);if(!m)return null;const p=m.index+m[0].lastIndexOf('{');const e=findMatchingBrace(block,p);return e>=0?block.slice(p+1,e):null;}
++function namedTableBody(block,key){const re=new RegExp(String.raw`(?:^|[,\n\r])\s*${key}\s*=\s*\{`,'i');const m=re.exec(block);if(!m)return null;const p=m.index+m[0].lastIndexOf('{');const e=findMatchingBrace(block,p);return e>=0?block.slice(p+1,e):null;}
+ function parseRenderRow(row){
+   const actions=rowActions(row); const n=(k,d=null)=>{const v=num(tableField(row,k));return v==null?d:v;};
+   const b=(k,d=false)=>{const v=boolVal(tableField(row,k));return v==null?d:v;};
+@@ -66,13 +66,22 @@
+   const effectType=n('EffectType'),effectIndex=n('EffectIndex'),bone=n('Bone');if(effectType==null||effectIndex==null||bone==null)return null;
+   return Object.freeze({actions,effectType,effectIndex,effectLevel:n('EffectLevel',0),bone,size:n('Size',1),r:n('R',1),g:n('G',1),b:n('B',1),posX:n('PosX',0),posY:n('PosY',0),posZ:n('PosZ',0),black:b('Black'),randTime:n('RandTime',100)});
+ }
++function parseNamedEffectTables(text){
++  const out=new Map();const re=/(?:^|[\n\r])\s*(?:local\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*\{/g;let m;
++  while((m=re.exec(text))){const name=m[1],start=m.index+m[0].lastIndexOf('{'),end=findMatchingBrace(text,start);if(end<0)break;const body=text.slice(start+1,end);const rows=parseRecordTables(body).map(parseEffectRow).filter(Boolean);if(rows.length)out.set(name,Object.freeze(rows));re.lastIndex=end+1;}
++  return out;
++}
++function resolveEffectRows(block,key,named){
++  const body=namedTableBody(block,key);if(body!=null)return Object.freeze(parseRecordTables(body).map(parseEffectRow).filter(Boolean));
++  const ref=String(tableField(block,key)||'').trim();return named.get(ref)||Object.freeze([]);
++}
+ export function parseCharacterHelperRenderTables(input){
+-  const text=stripComments(input),out=new Map();const re=/RENDER_HELPER\s*\[\s*GET_ITEM(?:_MODEL)?\s*\(\s*(\d+)\s*,\s*(\d+)\s*\)\s*\]\s*=\s*\{/gi;let m;
++  const text=stripComments(input),out=new Map(),namedEffects=parseNamedEffectTables(text);const re=/RENDER_HELPER\s*\[\s*GET_ITEM(?:_MODEL)?\s*\(\s*(\d+)\s*,\s*(\d+)\s*\)\s*\]\s*=\s*\{/gi;let m;
+   while((m=re.exec(text))){const start=m.index+m[0].lastIndexOf('{'),end=findMatchingBrace(text,start);if(end<0)break;const block=text.slice(start+1,end);const itemIndex=Number(m[1])*512+Number(m[2]);
+-    const modelBody=namedTableBody(block,'Model');const effectBody=namedTableBody(block,'Effect');const miniatureBody=namedTableBody(block,'Miniature');const footBody=namedTableBody(block,'FootEffect');
++    const modelBody=namedTableBody(block,'Model');const footBody=namedTableBody(block,'FootEffect');
+     const model=Object.freeze((modelBody?parseRecordTables(modelBody):[]).map(parseRenderRow).filter(Boolean));
+-    const effects=Object.freeze((effectBody?parseRecordTables(effectBody):[]).map(parseEffectRow).filter(Boolean));
+-    const miniature=Object.freeze((miniatureBody?parseRecordTables(miniatureBody):[]).map(parseEffectRow).filter(Boolean));
++    const effects=resolveEffectRows(block,'Effect',namedEffects);
++    const miniature=resolveEffectRows(block,'Miniature',namedEffects);
+     out.set(itemIndex,Object.freeze({itemIndex,shadow:boolVal(tableField(block,'Shadow'))===true,model,effects,miniature,footEffectRows:footBody?parseRecordTables(footBody).length:0,owner:'CharacterHelper.lua'}));
+     re.lastIndex=end+1;
+   }
+diff -ruN '--exclude=node_modules' '--exclude=R90_FIX96_SOURCE_HASHES.json' '--exclude=MUWEB_R90_FIX96_FROM_FIX95.patch' /mnt/data/MUWEB_R90_FIX95_CHARACTERHELPER_TABLE_RENDER_ROUTING_2026-10-05/graphics/PcCharacterHelperPresentation.js /mnt/data/MUWEB_R90_FIX96_HELPER_EFFECTS_DINORANT_BOOT_2026-10-05/graphics/PcCharacterHelperPresentation.js
+--- /mnt/data/MUWEB_R90_FIX95_CHARACTERHELPER_TABLE_RENDER_ROUTING_2026-10-05/graphics/PcCharacterHelperPresentation.js	2026-10-05 23:49:20.810193362 +0000
++++ /mnt/data/MUWEB_R90_FIX96_HELPER_EFFECTS_DINORANT_BOOT_2026-10-05/graphics/PcCharacterHelperPresentation.js	2026-10-06 00:21:14.307591601 +0000
+@@ -65,11 +65,36 @@
+       }
+     }
+   }
++  // CharacterHelper.lua::RenderHelper Effect table. The script first calls
++  // TransformPosition(Bone, PosX,PosY,PosZ), then CreateSprite/CreateParticle.
++  // This is the same bone->bitmap bridge already owned by MUModelRenderer.
++  let effectRows=0,effectAttached=0;
++  for (const fx of (Array.isArray(rule.effects)?rule.effects:[])) {
++    effectRows++;
++    if (Number(fx.randTime)!==100) { unresolved.push({kind:'effect',reason:'dynamic-randtime',row:fx}); continue; }
++    if (Array.isArray(fx.actions)&&fx.actions.length&&!fx.actions.includes(-1)) { unresolved.push({kind:'effect',reason:'action-gated',row:fx}); continue; }
++    if (fx.black===true) { unresolved.push({kind:'effect',reason:'black-sprite-semantics-pending',row:fx}); continue; }
++    const type=Number(fx.effectType);
++    if (type!==0 && type!==1) { unresolved.push({kind:'effect',reason:'CreateEffect-native-lifecycle-pending',row:fx}); continue; }
++    const map=await pcBitmapTexture(Number(fx.effectIndex)).catch(()=>null);
++    if (!map?.isTexture) { unresolved.push({kind:'effect',reason:'bitmap-id-unresolved',row:fx}); continue; }
++    const common={
++      boneIndex:Number(fx.bone), map,
++      offset:new THREE.Vector3(Number(fx.posX)||0,Number(fx.posY)||0,Number(fx.posZ)||0),
++      scale:Number(fx.size)||0,
++      color:new THREE.Color(Number(fx.r)||0,Number(fx.g)||0,Number(fx.b)||0),
++    };
++    const owner=type===0
++      ? renderer.createBoneSprite?.(common)
++      : renderer.createBoneParticle?.({...common,subtype:Number(fx.effectLevel)||0,emitMs:40,poolSize:5});
++    if(!owner){unresolved.push({kind:'effect',reason:'bone-or-bitmap-invalid',row:fx});continue;}
++    attached.push(owner); effectAttached++;
++  }
+   // Script-level RenderShadowModel and foot-effect factories need their own PC
+   // geometry/lifecycle owners. Record them rather than substituting fake blobs.
+   if(rule.shadow) unresolved.push({kind:'shadow',reason:'RenderShadowModel-native-projection-pending'});
+   if(Number(rule.footEffectRows)>0) unresolved.push({kind:'foot-effect',reason:'helper-foot-lifecycle-pending',rows:Number(rule.footEffectRows)});
+-  const state=Object.freeze({baseRows,overlayRows,attached:Object.freeze(attached),unresolved:Object.freeze(unresolved)});
++  const state=Object.freeze({baseRows,overlayRows,effectRows,effectAttached,attached:Object.freeze(attached),unresolved:Object.freeze(unresolved)});
+   renderer.userData ??={}; renderer.userData.muCharacterHelperPresentation=state;
+   return state;
+ }
+diff -ruN '--exclude=node_modules' '--exclude=R90_FIX96_SOURCE_HASHES.json' '--exclude=MUWEB_R90_FIX96_FROM_FIX95.patch' /mnt/data/MUWEB_R90_FIX95_CHARACTERHELPER_TABLE_RENDER_ROUTING_2026-10-05/graphics/PlayerComposer.js /mnt/data/MUWEB_R90_FIX96_HELPER_EFFECTS_DINORANT_BOOT_2026-10-05/graphics/PlayerComposer.js
+--- /mnt/data/MUWEB_R90_FIX95_CHARACTERHELPER_TABLE_RENDER_ROUTING_2026-10-05/graphics/PlayerComposer.js	2026-10-05 23:53:10.367590739 +0000
++++ /mnt/data/MUWEB_R90_FIX96_HELPER_EFFECTS_DINORANT_BOOT_2026-10-05/graphics/PlayerComposer.js	2026-10-06 00:16:21.548689873 +0000
+@@ -709,8 +709,9 @@
+                     presentation: resolved.helper.helperPresentation || null, owner: 'CharacterHelper.lua', viaCacheKey: resolved.helper.key,
+                 };
+                 // CharacterHelper.lua RenderHelper dispatcher is explicit: raw Type 0=Fly,
+-                // 3=Fenrir, 4=Horse. Never route the latter two through HelperCompanion.
++                // 2=Dinorant(mask4), 3=Fenrir(mask8), 4=Horse(mask16). Never route mounts through HelperCompanion.
+                 if (Number(h.rawType) === 0) out.customHelper = { kind:'custom-helper', ...common };
++                else if (Number(h.rawType) === 2) out.rider = { ...common, species:'custom-dinorant', behaviorSpecies:'pegasus' };
+                 else if (Number(h.rawType) === 3) out.rider = { ...common, species:'custom-fenrir', behaviorSpecies:'fenrir' };
+                 else if (Number(h.rawType) === 4) out.rider = { ...common, species:'custom-horse', behaviorSpecies:'dark-horse' };
+                 else out.missing.push(`custom-helper rawType=${h.rawType} (${resolved.helper.key}): movement owner específico pendente; não roteado como pet voador`);
+diff -ruN '--exclude=node_modules' '--exclude=R90_FIX96_SOURCE_HASHES.json' '--exclude=MUWEB_R90_FIX96_FROM_FIX95.patch' /mnt/data/MUWEB_R90_FIX95_CHARACTERHELPER_TABLE_RENDER_ROUTING_2026-10-05/test-r90-fix96-boot-remoteassets.mjs /mnt/data/MUWEB_R90_FIX96_HELPER_EFFECTS_DINORANT_BOOT_2026-10-05/test-r90-fix96-boot-remoteassets.mjs
+--- /mnt/data/MUWEB_R90_FIX95_CHARACTERHELPER_TABLE_RENDER_ROUTING_2026-10-05/test-r90-fix96-boot-remoteassets.mjs	1970-01-01 00:00:00.000000000 +0000
++++ /mnt/data/MUWEB_R90_FIX96_HELPER_EFFECTS_DINORANT_BOOT_2026-10-05/test-r90-fix96-boot-remoteassets.mjs	2026-10-06 00:22:12.794307625 +0000
+@@ -0,0 +1,10 @@
++import fs from 'node:fs';import assert from 'node:assert/strict';
++const sound=fs.readFileSync(new URL('./assets/MUSoundManager.js',import.meta.url),'utf8');
++const tex=fs.readFileSync(new URL('./assets/MUTextureManager.js',import.meta.url),'utf8');
++assert.match(sound,/import \* as THREE from 'three';/);
++assert.match(sound,/import \{ RemoteAssets \} from '\.\.\/data\/RemoteAssets\.js';/);
++assert.match(sound,/this\.remoteAssets = RemoteAssets;/);
++assert.doesNotMatch(sound,/new RemoteAssets\s*\(/);
++assert.match(tex,/this\.remoteAssets = RemoteAssets;/);
++assert.doesNotMatch(tex,/new RemoteAssets\s*\(/);
++console.log('PASS FIX96 boot: RemoteAssets singleton + THREE import');
+diff -ruN '--exclude=node_modules' '--exclude=R90_FIX96_SOURCE_HASHES.json' '--exclude=MUWEB_R90_FIX96_FROM_FIX95.patch' /mnt/data/MUWEB_R90_FIX95_CHARACTERHELPER_TABLE_RENDER_ROUTING_2026-10-05/test-r90-fix96-helper-effects-parser.mjs /mnt/data/MUWEB_R90_FIX96_HELPER_EFFECTS_DINORANT_BOOT_2026-10-05/test-r90-fix96-helper-effects-parser.mjs
+--- /mnt/data/MUWEB_R90_FIX95_CHARACTERHELPER_TABLE_RENDER_ROUTING_2026-10-05/test-r90-fix96-helper-effects-parser.mjs	1970-01-01 00:00:00.000000000 +0000
++++ /mnt/data/MUWEB_R90_FIX96_HELPER_EFFECTS_DINORANT_BOOT_2026-10-05/test-r90-fix96-helper-effects-parser.mjs	2026-10-06 00:22:12.795153836 +0000
+@@ -0,0 +1,23 @@
++import assert from 'node:assert/strict';
++import {parseCharacterHelperRenderTables} from './data/CharacterHelperLua.js';
++const lua=`
++local namedFx={
++ {Actions={-1},EffectType=0,EffectIndex=32002,EffectLevel=0,Bone=4,Size=0.8,R=1,G=.2,B=.1,PosX=1,PosY=2,PosZ=3,Black=false,RandTime=100},
++}
++RENDER_HELPER[GET_ITEM_MODEL(13,400)]={
++ Shadow=true,
++ Model={{Actions={-1},Mesh=0,Glow=2,R=1,G=1,B=1,Shadow=false,Render=false,Effect=-1,FixEffect=false,Value=1,RenOpacity=0,RenSpeed=0,RenColor=1,Color=false,RR=1,RG=1,RB=1,Timer=100,Texture=-1}},
++ FootEffect={{Enabled=true,Actions={-1},EffectType=2,EffectID=388,EffectLevel=0,Size=.1,R=1,G=.8,B=.1,FrontLeft=28,FrontRight=22,BackLeft=44,BackRight=36}},
++ Effect={{Actions={-1},EffectType=1,EffectIndex=32054,EffectLevel=5,Bone=7,Size=.7,R=.3,G=.3,B=.3,PosX=4,PosY=5,PosZ=6,Black=false,RandTime=100}},
++ Miniature=namedFx,
++}
++RENDER_HELPER[GET_ITEM_MODEL(13,401)]={Shadow=false,Model={},FootEffect={},Effect=namedFx,Miniature={}}
++`;
++const r=parseCharacterHelperRenderTables(lua);
++assert.equal(r.get(13*512+400).footEffectRows,1);
++assert.equal(r.get(13*512+400).effects.length,1,'Effect must not alias FootEffect');
++assert.equal(r.get(13*512+400).effects[0].effectIndex,32054);
++assert.equal(r.get(13*512+400).miniature.length,1);
++assert.equal(r.get(13*512+401).effects.length,1,'named Effect table must resolve');
++assert.equal(r.get(13*512+401).effects[0].effectIndex,32002);
++console.log('PASS FIX96 CharacterHelper Effect boundary + named table owner');
+diff -ruN '--exclude=node_modules' '--exclude=R90_FIX96_SOURCE_HASHES.json' '--exclude=MUWEB_R90_FIX96_FROM_FIX95.patch' /mnt/data/MUWEB_R90_FIX95_CHARACTERHELPER_TABLE_RENDER_ROUTING_2026-10-05/test-r90-fix96-helper-effects-routing.mjs /mnt/data/MUWEB_R90_FIX96_HELPER_EFFECTS_DINORANT_BOOT_2026-10-05/test-r90-fix96-helper-effects-routing.mjs
+--- /mnt/data/MUWEB_R90_FIX95_CHARACTERHELPER_TABLE_RENDER_ROUTING_2026-10-05/test-r90-fix96-helper-effects-routing.mjs	1970-01-01 00:00:00.000000000 +0000
++++ /mnt/data/MUWEB_R90_FIX96_HELPER_EFFECTS_DINORANT_BOOT_2026-10-05/test-r90-fix96-helper-effects-routing.mjs	2026-10-06 00:22:12.795992471 +0000
+@@ -0,0 +1,6 @@
++import fs from 'node:fs';import assert from 'node:assert/strict';
++const c=fs.readFileSync(new URL('./graphics/PlayerComposer.js',import.meta.url),'utf8');
++const p=fs.readFileSync(new URL('./graphics/PcCharacterHelperPresentation.js',import.meta.url),'utf8');
++for(const token of ["Number(h.rawType) === 2","species:'custom-dinorant'","behaviorSpecies:'pegasus'"]) assert.ok(c.includes(token),`missing ${token}`);
++for(const token of ['rule.effects','dynamic-randtime','black-sprite-semantics-pending','CreateEffect-native-lifecycle-pending','renderer.createBoneSprite?.(common)','renderer.createBoneParticle?.({...common']) assert.ok(p.includes(token),`missing ${token}`);
++console.log('PASS FIX96 Dinorant route + deterministic helper Sprite/Particle consumer');
+diff -ruN '--exclude=node_modules' '--exclude=R90_FIX96_SOURCE_HASHES.json' '--exclude=MUWEB_R90_FIX96_FROM_FIX95.patch' /mnt/data/MUWEB_R90_FIX95_CHARACTERHELPER_TABLE_RENDER_ROUTING_2026-10-05/tools/start-r90-fix96-safe.cjs /mnt/data/MUWEB_R90_FIX96_HELPER_EFFECTS_DINORANT_BOOT_2026-10-05/tools/start-r90-fix96-safe.cjs
+--- /mnt/data/MUWEB_R90_FIX95_CHARACTERHELPER_TABLE_RENDER_ROUTING_2026-10-05/tools/start-r90-fix96-safe.cjs	1970-01-01 00:00:00.000000000 +0000
++++ /mnt/data/MUWEB_R90_FIX96_HELPER_EFFECTS_DINORANT_BOOT_2026-10-05/tools/start-r90-fix96-safe.cjs	2026-10-06 00:22:46.629001916 +0000
+@@ -0,0 +1,30 @@
++const fs = require('node:fs');
++const path = require('node:path');
++const crypto = require('node:crypto');
++const root = path.resolve(__dirname, '..');
++const MUTABLE_RUNTIME = new Set(['runtime-config.js']);
++function sha256(p){return crypto.createHash('sha256').update(fs.readFileSync(p)).digest('hex');}
++function verifyBuild(){
++  const manifestPath = path.join(root, 'R90_FIX96_SOURCE_HASHES.json');
++  if(!fs.existsSync(manifestPath)) throw new Error('R90_FIX96_SOURCE_HASHES.json ausente');
++  const m = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
++  let n=0;
++  for(const [rel, expected] of Object.entries(m.files || {})){
++    if(MUTABLE_RUNTIME.has(rel)) continue;
++    const p = path.join(root, rel);
++    if(!fs.existsSync(p)) throw new Error(`FIX96 arquivo ausente: ${rel}`);
++    const actual = sha256(p);
++    if(actual !== expected) throw new Error(`FIX96 arquivo modificado/incompleto: ${rel}`);
++    n++;
++  }
++  console.log(`[R90 FIX96] ${m.build}: ${n} arquivos imutaveis verificados.`);
++  return m;
++}
++module.exports={verifyBuild};
++if(require.main===module){
++  try{
++    verifyBuild();
++    if(process.argv.includes('--verify-only')) process.exit(0);
++    require('./start-r90-safe.cjs').main().catch(e=>{console.error('[R90 FIX96] FALHA:', e.message); process.exitCode=1;});
++  }catch(e){console.error('[R90 FIX96] FALHA:', e.message); process.exitCode=1;}
++}

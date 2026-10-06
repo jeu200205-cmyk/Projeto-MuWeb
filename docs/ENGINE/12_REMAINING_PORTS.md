@@ -1,3 +1,9 @@
+# Atualização FIX99 — 06/10/2026
+
+Fechado estruturalmente nesta revisão: `ItemEffects.lua::LoadEffect` agora possui consumer no owner correto de itens dropados (`MoveItems`), incluindo 24-tick CreateShiny e 6-tick CreateThunderBolt com 500 energy + 500 glow lógicos por burst. Lorencia e as famílias existentes em `PcMapParticles` passaram a reciclar sprites/materiais e arrays de hot-loop sem reduzir FX.
+
+Continuam P0/P1 e **não podem ser chamados de completos**: generic `CreateEffect` child de CharacterSet/CreateSkill, CustomCape CreateEffect/CreateJoint/RenderShadowModel, CharacterHelper Timer/RandTime/action/Black/CreateEffect/foot/shadow, Evil-Spirit `BITMAP_JOINT_SPIRIT` custom-light, e paridade física de materiais/objetos/HiddenMesh/BlendMesh dos mapas.
+
 # 12 — Backlog do que falta portar/fechar
 
 ## P0 — problemas físicos atuais

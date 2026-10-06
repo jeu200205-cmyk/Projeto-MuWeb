@@ -64,3 +64,6 @@ A suíte atual é `tools/test-fix18-runtime.mjs`; a entrada cumulativa de navega
 FIX19: test-r90-fix19-indoor-click-grass.mjs e tests/fix19-render.html/mjs. Runner completo tools/test-fix19-runtime.mjs.
 
 FIX20: test-r90-fix20-fenrir-owner.mjs. Runner completo tools/test-fix20-runtime.mjs (549 checks retidos + 18 novos = 567).
+
+FIX99:
+- `test-r90-fix99-effect-runtime-map-pool-gate.mjs`
