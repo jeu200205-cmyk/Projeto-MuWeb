@@ -1,5 +1,0 @@
-MUWEB R90 FIX99 — root BAT inventory
-Expected exactly 3 BATs:
-1. LIGAR_WEB_R90_FIX99.bat
-2. DESLIGAR_WEB_R90.bat
-3. INSTALAR_DEPENDENCIAS_R90.bat
