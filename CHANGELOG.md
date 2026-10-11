@@ -4,6 +4,23 @@ Base do projeto: **MU Online Main 5.2 do Dinho**.
 
 ---
 
+## 11/10/2026 — Limpeza da publicação e organização (R90 FIX154)
+
+### Resumo
+- Organização do repositório público: **49 artefatos históricos ou temporários removidos da árvore ativa**, sem alterar os módulos operacionais da engine.
+- Removidas capturas/análises M antigas, manifestos de integração anteriores, arquivos duplicados de `changed_files/`, cópias `TerrainObjectWorld.mNN.js`, um backup `.orig` e fixtures de depuração.
+- Atualizados o README de apresentação e o resumo da versão publicada, que estavam inconsistentes com o FIX154.
+- Corrigida a referência do iniciador público ao instalador `INSTALAR_DEPENDENCIAS.bat`.
+- Adicionadas regras de ignorar artefatos locais e históricos não necessários.
+
+### Validação e limites
+- A source funcional e os módulos de runtime não foram apagados por esta limpeza.
+- **Sem alegação de homologação física** de modelos, terrenos, FPS ou GameServer nesta manutenção.
+- Versão integral anterior preservada na branch `backup/pre-limpeza-publicador-v11-20261011` e no histórico Git.
+
+
+---
+
 ## 11/10/2026 17:26 BRT
 
 Atualização do Projeto MuWeb.

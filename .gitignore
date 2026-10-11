@@ -1,0 +1,27 @@
+# Arquivos locais / temporários
+node_modules/
+.env
+.env.*
+*.log
+*.tmp
+*.bak
+*.orig
+*.patch
+.DS_Store
+Thumbs.db
+*.zip
+
+# Relatórios e capturas históricas, não código ativo
+/ANALYZE_M*_WORLD*.mjs
+/CAPTURE_M*_WORLD*.js
+/CAPTURE_M*_README.md
+/M*_MANIFEST.json
+/M*_REPRODUCE.md
+/MUWEB_FIX*_INTEGRATION_*
+/LEIA_PRIMEIRO_FIX*.txt
+/TerrainObjectWorld.m*.js
+/changed_files/
+/test-fixtures/
+/tools/CAPTURE_M*
+/LANE_REPORTS/
+/tools/history/

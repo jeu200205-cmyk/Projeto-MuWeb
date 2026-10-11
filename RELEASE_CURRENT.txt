@@ -1,7 +1,11 @@
-MUWEB FIX154 (candidato) — source atual e scripts de inicializacao
-LIGAR_WEB_R90_FIX154.bat = entrypoint atual (nao e o FIX145).
-LIGAR_WEB_R90_FIX145.bat = ponte para o FIX154, mantido por compatibilidade.
-AUDITAR_MODELOS_FIX154.bat = censo de BMD fisico da pasta Data oficial.
-A pasta C:\clientepromax\Nova pasta\MuPromax 1.0.1\Data continua obrigatoria e nao e substituida por dados de teste.
-O log de origem rodava FIX153 mesmo com .bat rotulado FIX145.
-Validacao WebGL+GameServer real continua pendente; modelos custom completos exigem BMD e owners reais.
+MUWEB R90 FIX154 — candidato de desenvolvimento
+
+Publicação pública: source Web parcial do MU Online Main 5.2.
+Entrada: INICIAR_MUWEB.bat
+Dependências: INSTALAR_DEPENDENCIAS.bat
+Encerramento: PARAR_MUWEB.bat
+Verificação: tools/verify-fix154-runtime.mjs
+Runtime: tools/serve.mjs
+Data requerida no estado atual: C:\clientepromax\Nova pasta\MuPromax 1.0.1\Data
+GameServer e Data não estão incluídos neste repositório.
+Validação física WebGL/GameServer e portabilidade completa ainda pendentes.

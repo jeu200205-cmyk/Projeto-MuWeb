@@ -17,7 +17,7 @@ if not exist "C:\clientepromax\Nova pasta\MuPromax 1.0.1\Data\." (
 where node.exe >nul 2>&1 || (echo [ERRO] Node.js nao encontrado no PATH.& pause & exit /b 1)
 if not exist "node_modules\three\build\three.module.js" (
   echo [R90] Dependencias ausentes. Instalando pelo package-lock.json...
-  call "%~dp0INSTALAR_DEPENDENCIAS_R90.bat"
+  call "%~dp0INSTALAR_DEPENDENCIAS.bat"
   if errorlevel 1 (echo [ERRO] Falha ao instalar dependencias.& pause & exit /b 1)
 )
 echo [FIX154] Iniciando runtime atual (serve.mjs), Data oficial preservado.
