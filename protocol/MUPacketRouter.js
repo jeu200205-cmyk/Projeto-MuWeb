@@ -644,44 +644,6 @@ export function routeMUPacket(packet, ctx = {}) {
                 if (ctx.onSoccerScore) ctx.onSoccerScore(msg);
                 return 'soccer_score';
             }
-            if (subcode === 0x24) {
-                // F3:24 ReceiveWTMatchResult / PMSG_MATCH_RESULT (Main 5.2).
-                // MAX_ID_SIZE is 10. With the default MSVC struct alignment the
-                // body after the already-consumed subcode is exactly 26 bytes:
-                // [Type][Name1 x10][pad][Score1 LE16][Name2 x10][Score2 LE16].
-                // Desktop only publishes Type 0..2; all other types are ignored.
-                if (!payload || payload.length !== 26) {
-                    log(`[MU] F3:24 WTMatchResult tamanho inválido ${payload?.length ?? 0}/26 — descartado`, 'warn');
-                    return 'payload_short';
-                }
-                const type = payload[0];
-                if (type > 2) return 'wt_match_result_ignored_type';
-                const decodeName10 = (off) => {
-                    let end = off;
-                    while (end < off + 10 && payload[end] !== 0) end++;
-                    return String.fromCharCode(...payload.subarray(off, end));
-                };
-                const msg = Object.freeze({
-                    type,
-                    team1: decodeName10(1),
-                    score1: payload[12] | (payload[13] << 8),
-                    team2: decodeName10(14),
-                    score2: payload[24] | (payload[25] << 8),
-                });
-                if (ctx.onWTMatchResult) ctx.onWTMatchResult(msg);
-                return 'wt_match_result';
-            }
-            if (subcode === 0x25) {
-                // F3:25 ReceiveWTBattleSoccerGoalIn / PMSG_SOCCER_GOALIN.
-                // Exact body is [x][y]. The supplied Main 5.2 handler body is
-                // completely commented out, so accepting the frame has no visual
-                // or gameplay side effect. Preserve that no-op instead of inventing FX.
-                if (!payload || payload.length !== 2) {
-                    log(`[MU] F3:25 WTBattleSoccerGoalIn tamanho inválido ${payload?.length ?? 0}/2 — descartado`, 'warn');
-                    return 'payload_short';
-                }
-                return 'wt_soccer_goal_noop';
-            }
             if (subcode === 0x22) {
                 // F3:22 ReceiveWTTimeLeft / PMSG_MATCH_TIMEVIEW (Main 5.2).
                 // Default MSVC layout: PBMSG_HEADER[3], subCode, Type, one

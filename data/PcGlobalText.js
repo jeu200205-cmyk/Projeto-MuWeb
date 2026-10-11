@@ -67,7 +67,13 @@ export function pcSprintf(format, ...args) {
       s = String(m[3] === 'u' ? (Math.trunc(n) >>> 0) : Math.trunc(n));
     }
     const width = m[2] ? Number(m[2]) : 0;
-    if (width > 0 && s.length < width) s = s.padStart(width, m[1] === '0' ? '0' : ' ');
+    if (width > 0 && s.length < width) {
+      // Native sprintf puts the minus sign before zero padding (%03d => -03).
+      // The '0' flag is ignored for %s; names/descriptions use spaces.
+      const zeroPad = m[1] === '0' && m[3] !== 's';
+      if (zeroPad && s.startsWith('-')) s = '-' + s.slice(1).padStart(width - 1, '0');
+      else s = s.padStart(width, zeroPad ? '0' : ' ');
+    }
     out += s;
   }
   const tail = format.slice(last);

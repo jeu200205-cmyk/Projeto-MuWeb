@@ -3,10 +3,10 @@ setlocal DisableDelayedExpansion
 pushd "%~dp0" >nul 2>&1
 if errorlevel 1 goto :fail_root
 
-title MUWEB R90 FIX91 - Instalar dependencias
+title MUWEB R90 - Instalar dependencias
 
 echo ================================================================
-echo  MUWEB R90 FIX91 - INSTALADOR DE DEPENDENCIAS NODE
+echo  MUWEB R90 - INSTALADOR DE DEPENDENCIAS NODE
 echo  three 0.160.0 + ws 8.21.3 via package-lock.json
 echo ================================================================
 
@@ -22,7 +22,7 @@ if errorlevel 1 goto :fail_npm_ci
 if not exist "node_modules\three\build\three.module.js" goto :fail_three
 if not exist "node_modules\ws\index.js" goto :fail_ws
 
-echo [OK] Dependencias FIX91 prontas.
+echo [OK] Dependencias R90 prontas.
 popd
 endlocal
 exit /b 0

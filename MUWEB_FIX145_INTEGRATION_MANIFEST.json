@@ -1,0 +1,71 @@
+{
+  "schema": "MUWEB_FIX145_PRE_REGEN_INTEGRATION_V1",
+  "date": "2026-10-08",
+  "status": "DEVELOPMENT / NOT PROMOTED",
+  "parent": "FIX144 DATA_LOCK_PRE_REGEN",
+  "promotedCentral": "FIX80 unchanged",
+  "officialDataRoot": "C:\\clientepromax\\Nova pasta\\MuPromax 1.0.1\\Data",
+  "officialDataMounted": false,
+  "tablesRegenerated": false,
+  "generatedTablesAbsent": [
+    "data/generated/RealItems.js",
+    "data/generated/RealMaps.js",
+    "data/generated/RealMonsters.js",
+    "skills/SkillAttributeData.js",
+    "data/OFFICIAL_DATA_AUTHORITY.json"
+  ],
+  "inputs": {
+    "MUWEB_R90_FIX144_DATA_LOCK_PRE_REGEN_CHECKPOINT_2026-10-08.zip": {
+      "sha256": "7b79360a355f677692c7ca88bb714f9dbb6a403cb9a6c5f2290fc9f91f787ddc",
+      "bytes": 6025681
+    },
+    "MUWEB_LANE_ITEMS_LUA_FIX140_FROM_FIX144_2026-10-08_SAFE.zip": {
+      "sha256": "befe1b286d832323991554ea4bb9e29340401b1af42ceacc143aa17bed7cde99",
+      "bytes": 24838
+    },
+    "MUWEB_LANE_MAPS_ENGINE_M144_FROM_FIX80_2026-10-08.zip": {
+      "sha256": "fbceeb9a6d7e290ce43eba6eb0e313de9d00160b9330e7bb7c84bfcc42eaad04",
+      "bytes": 2524430
+    },
+    "MUWEB_LANE_SKILLS_PROTOCOL_FIX142_FROM_FIX80_2026-10-08_SAFE.zip": {
+      "sha256": "abdf723a5467b9ff74e875a6537f3ad80613f1fbac252d4d0a5beda18000ce3e",
+      "bytes": 3477734
+    }
+  },
+  "productionChanged": {
+    "data/PcCustomCapeLua.js": "00ff85f6cd0e08e410c4646d566a7438321e190be012d422b7dbc97fa81b65c4",
+    "data/PcLuaStaticLex.js": "2eca320464eb05d24370ad845ee0379e62bd7be341c7f526a66c79de1f1616dc",
+    "world/TerrainObjectWorld.js": "6663bd2cd5bfb8ae169b0de05ff49c0346fed222a82f27c07ae4e91956564438",
+    "game/Monster.js": "66c532ac1d700e855bfa0c38145cdeb756adc3907bf35a486bae09a1ad1169aa"
+  },
+  "syntax": {
+    "total": 712,
+    "passed": 712,
+    "failed": []
+  },
+  "historicalAB": {
+    "total": 373,
+    "parentPass": 232,
+    "candidatePass": 232,
+    "newFailures": [],
+    "newFixes": []
+  },
+  "newDirectedTests": {
+    "test-maps-engine-m144-analysis.mjs": 0,
+    "test-maps-engine-m144-capture.mjs": 0,
+    "test-maps-engine-m144.mjs": 0,
+    "test-r90-items-fix140-cape-worldtime-lexical-owner.mjs": 0,
+    "test-r90-skills-protocol-fix142-monster-visual-publication-rollback.mjs": 0
+  },
+  "verifyOnlyRc": 2,
+  "regenerateRc": 2,
+  "bootRc": 1,
+  "bats": [
+    "DESLIGAR_WEB_R90.bat",
+    "INSTALAR_DEPENDENCIAS_R90.bat",
+    "LIGAR_WEB_R90_FIX145.bat"
+  ],
+  "githubTouched": false,
+  "centralPromoted": false,
+  "physicalVisualFpsVerified": false
+}

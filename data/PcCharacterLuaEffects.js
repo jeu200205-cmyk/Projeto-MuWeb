@@ -19,9 +19,6 @@ import {decodePcLuaText} from './PcLuaCrypt.js';
 import {RemoteAssets} from './RemoteAssets.js';
 
 const S=core.to_luastring;
-// Opaque pointer sentinels: distinct values let the S6 compatibility ABI prove
-// whether Object lives in arg2 or arg8/9 without guessing from EffectID ranges.
-const LUA_BMD_HANDLE=0x6d000001, LUA_OBJECT_HANDLE=0x6d000002;
 export const CHARACTER_ITEM_EFFECT_PATHS=Object.freeze([
   'Configs/Lua/EffectSystem/CharacterEffectItens.lua','Configs/lua/EffectSystem/CharacterEffectItens.lua','Configs/crypt/EffectSystem/CharacterEffectItens.lua',
 ]);
@@ -69,36 +66,12 @@ function runLua(text,path,entry,args,bridges,{instructionLimit=400000,modules=ne
   } finally { lua.lua_close(L); }
 }
 
-function itemSpriteBridge(a){
-  if(a.length===8 && a[0]===LUA_BMD_HANDLE && a[7]===LUA_OBJECT_HANDLE)
-    return {kind:'sprite',bitmap:a[1],bone:a[2],scale:a[3],r:a[4],g:a[5],b:a[6],owner:'CharacterEffectItens.lua'};
-  if(a.length===11 && a[0]===LUA_BMD_HANDLE){
-    // S6 layout A: BMD,Object,Bone,EffectID,Scale,RGB,XYZ
-    if(a[1]===LUA_OBJECT_HANDLE) return {kind:'sprite',bitmap:a[3],bone:a[2],scale:a[4],r:a[5],g:a[6],b:a[7],offset:Object.freeze([a[8],a[9],a[10]]),s6:true,owner:'CharacterEffectItens.lua'};
-    // S6 layout B: BMD,EffectID,Bone,Scale,RGB,Object,XYZ
-    if(a[7]===LUA_OBJECT_HANDLE) return {kind:'sprite',bitmap:a[1],bone:a[2],scale:a[3],r:a[4],g:a[5],b:a[6],offset:Object.freeze([a[8],a[9],a[10]]),s6:true,owner:'CharacterEffectItens.lua'};
-  }
-  return null;
-}
-function itemParticleBridge(a){
-  if(a.length===9 && a[0]===LUA_BMD_HANDLE && a[8]===LUA_OBJECT_HANDLE)
-    return {kind:'particle',bitmap:a[1],subtype:a[2],bone:a[3],scale:a[4],r:a[5],g:a[6],b:a[7],owner:'CharacterEffectItens.lua'};
-  if(a.length===12 && a[0]===LUA_BMD_HANDLE){
-    // S6 layout A: BMD,Object,Bone,EffectID,SubType,Scale,RGB,XYZ
-    if(a[1]===LUA_OBJECT_HANDLE) return {kind:'particle',bitmap:a[3],subtype:a[4],bone:a[2],scale:a[5],r:a[6],g:a[7],b:a[8],offset:Object.freeze([a[9],a[10],a[11]]),s6:true,owner:'CharacterEffectItens.lua'};
-    // S6 layout B: BMD,EffectID,SubType,Bone,Scale,RGB,Object,XYZ
-    if(a[8]===LUA_OBJECT_HANDLE) return {kind:'particle',bitmap:a[1],subtype:a[2],bone:a[3],scale:a[4],r:a[5],g:a[6],b:a[7],offset:Object.freeze([a[9],a[10],a[11]]),s6:true,owner:'CharacterEffectItens.lua'};
-  }
-  return null;
-}
-function itemEffectBridges(){return {
-  CreateSprite:itemSpriteBridge,CreateParticle:itemParticleBridge,
-  CreateSpriteS6Item:itemSpriteBridge,CreateParticleS6Item:itemParticleBridge,
-};}
-
 export function executeCharacterItemEffectsLua(text,{type,path='CharacterEffectItens.lua'}={}){
   const n=Number(type); if(!Number.isFinite(n)) return Object.freeze([]);
-  return runLua(text,path,'CharacterItensEffect',[LUA_OBJECT_HANDLE,LUA_BMD_HANDLE,n],itemEffectBridges());
+  return runLua(text,path,'CharacterItensEffect',[1,1,n],{
+    CreateSprite:(a)=>a.length===8?{kind:'sprite',bitmap:a[1],bone:a[2],scale:a[3],r:a[4],g:a[5],b:a[6],owner:'CharacterEffectItens.lua'}:null,
+    CreateParticle:(a)=>a.length===9?{kind:'particle',bitmap:a[1],subtype:a[2],bone:a[3],scale:a[4],r:a[5],g:a[6],b:a[7],owner:'CharacterEffectItens.lua'}:null,
+  });
 }
 export function executeCharacterSetEffectsLua(text,{itemIndex,equipmentLevelSet=0,path='CharacterSetEffect.lua'}={}){
   const item=Number(itemIndex),level=Number(equipmentLevelSet); if(!Number.isFinite(item)||!Number.isFinite(level)) return Object.freeze([]);
@@ -107,7 +80,7 @@ export function executeCharacterSetEffectsLua(text,{itemIndex,equipmentLevelSet=
     const off=hasLv?1:0;
     return {kind,bone:a[2],effectId:a[3],effectLv:hasLv?a[4]:0,scale:a[4+off],r:a[5+off],b:a[6+off],g:a[7+off],offset:Object.freeze([a[8+off],a[9+off],a[10+off]]),owner:'CharacterSetEffect.lua'};
   };
-  return runLua(text,path,'CreateEffectSetPlayer',[LUA_BMD_HANDLE,LUA_OBJECT_HANDLE,item,level],{
+  return runLua(text,path,'CreateEffectSetPlayer',[1,1,item,level],{
     CreateSprite:(a)=>map('sprite',a,false),
     CreateParticle:(a)=>map('particle',a,true),
     CreateSkill:(a)=>map('skill',a,true),
@@ -160,10 +133,10 @@ export async function loadPcCharacterLuaEffects(fetchBinary=(p)=>RemoteAssets.fe
     const [item,set]=await Promise.all([loadOne(CHARACTER_ITEM_EFFECT_PATHS,fetchBinary),loadOne(CHARACTER_SET_EFFECT_PATHS,fetchBinary)]);
     const [itemDeps,setDeps]=await Promise.all([preloadEffectLuaDeps(item.text,fetchBinary),preloadEffectLuaDeps(set.text,fetchBinary)]);
     // Compile/symbol smoke test using values that are safe even when no row matches.
-    runLua(item.text,item.path,'CharacterItensEffect',[LUA_OBJECT_HANDLE,LUA_BMD_HANDLE,-2147483648],{
-      CreateSprite:(a)=>null,CreateParticle:(a)=>null,CreateSpriteS6Item:(a)=>null,CreateParticleS6Item:(a)=>null,
+    runLua(item.text,item.path,'CharacterItensEffect',[1,1,-2147483648],{
+      CreateSprite:(a)=>null,CreateParticle:(a)=>null,
     },itemDeps);
-    runLua(set.text,set.path,'CreateEffectSetPlayer',[LUA_BMD_HANDLE,LUA_OBJECT_HANDLE,-2147483648,0],{
+    runLua(set.text,set.path,'CreateEffectSetPlayer',[1,1,-2147483648,0],{
       CreateSprite:(a)=>null,CreateParticle:(a)=>null,CreateSkill:(a)=>null,
     },setDeps);
     item.deps=itemDeps; set.deps=setDeps;
@@ -176,7 +149,10 @@ export function characterItemEffectPlan(type){
   if(!state.item) return Object.freeze([]);
   const n=Number(type); if(!Number.isFinite(n)) return Object.freeze([]);
   if(itemPlanCache.has(n)) return itemPlanCache.get(n);
-  const out=runLua(state.item.text,state.item.path,'CharacterItensEffect',[LUA_OBJECT_HANDLE,LUA_BMD_HANDLE,n],itemEffectBridges(),state.item.deps||{});
+  const out=runLua(state.item.text,state.item.path,'CharacterItensEffect',[1,1,n],{
+    CreateSprite:(a)=>a.length===8?{kind:'sprite',bitmap:a[1],bone:a[2],scale:a[3],r:a[4],g:a[5],b:a[6],owner:'CharacterEffectItens.lua'}:null,
+    CreateParticle:(a)=>a.length===9?{kind:'particle',bitmap:a[1],subtype:a[2],bone:a[3],scale:a[4],r:a[5],g:a[6],b:a[7],owner:'CharacterEffectItens.lua'}:null,
+  },state.item.deps||{});
   itemPlanCache.set(n,out); return out;
 }
 export function characterSetEffectPlan(itemIndex,equipmentLevelSet=0){
@@ -184,7 +160,7 @@ export function characterSetEffectPlan(itemIndex,equipmentLevelSet=0){
   const item=Number(itemIndex),level=Number(equipmentLevelSet);
   if(!Number.isFinite(item)||!Number.isFinite(level)) return Object.freeze([]);
   const key=`${item}:${level}`; if(setPlanCache.has(key)) return setPlanCache.get(key);
-  const out=runLua(state.set.text,state.set.path,'CreateEffectSetPlayer',[LUA_BMD_HANDLE,LUA_OBJECT_HANDLE,item,level],{
+  const out=runLua(state.set.text,state.set.path,'CreateEffectSetPlayer',[1,1,item,level],{
     CreateSprite:(a)=>{if(a.length!==11)return null;return {kind:'sprite',bone:a[2],effectId:a[3],effectLv:0,scale:a[4],r:a[5],b:a[6],g:a[7],offset:Object.freeze([a[8],a[9],a[10]]),owner:'CharacterSetEffect.lua'};},
     CreateParticle:(a)=>{if(a.length!==12)return null;return {kind:'particle',bone:a[2],effectId:a[3],effectLv:a[4],scale:a[5],r:a[6],b:a[7],g:a[8],offset:Object.freeze([a[9],a[10],a[11]]),owner:'CharacterSetEffect.lua'};},
     CreateSkill:(a)=>{if(a.length!==12)return null;return {kind:'skill',bone:a[2],effectId:a[3],effectLv:a[4],scale:a[5],r:a[6],b:a[7],g:a[8],offset:Object.freeze([a[9],a[10],a[11]]),owner:'CharacterSetEffect.lua'};}

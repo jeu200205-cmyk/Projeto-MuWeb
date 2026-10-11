@@ -3,7 +3,15 @@
 // and compiled MU extensions (.ozt/.ozj/.ozb) without inventing assets.
 // Usage: node tools/asset-server.cjs "E:\\...\\Data" 9100
 const http=require('http'), fs=require('fs'), path=require('path');
-const ROOT=path.resolve(process.argv[2]||'');
+// The asset server must not be usable as an independent escape hatch around
+// the official Data authority lock. Reject any supplied alternate root.
+const OFFICIAL_DATA_ROOT='C:\\clientepromax\\Nova pasta\\MuPromax 1.0.1\\Data';
+const ROOT=path.resolve(OFFICIAL_DATA_ROOT);
+if(process.argv[2] && path.resolve(process.argv[2]).toLowerCase()!==ROOT.toLowerCase()){
+  console.error('[ASSETS] Root divergente do Data oficial.');process.exit(2);
+}
+try{require('./verify-data-authority-r90.cjs').verify();}
+catch(e){console.error('[ASSETS] Tabelas nao regeneradas/validadas:',e.message);process.exit(2);}
 const PORT=Number(process.argv[3]||9100);
 const AUTHORITY_REVISION=String(process.argv[4]||'').trim() || require('crypto').createHash('sha256').update(path.resolve(process.argv[2]||'')).digest('hex');
 if(!ROOT || !fs.existsSync(ROOT)){ console.error('[ASSETS] Data root inexistente:',ROOT); process.exitCode=2; return; }

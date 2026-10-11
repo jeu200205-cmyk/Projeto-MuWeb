@@ -61,7 +61,17 @@ export async function createMonsterVisual(monsterClass, customRule = null) {
     const rel = customRule?.path || monsterBmdPath(modelType);
     const bmd = await MUAssets.loadBMD(rel); // fail-closed se o asset não existe
     const renderer = new MUModelRenderer();
-    await renderer.initFromBMD(bmd);        // throw se 0 meshes (sem placeholder)
+    try {
+        await renderer.initFromBMD(bmd);   // throw se 0 meshes (sem placeholder)
+    } catch (err) {
+        // A partial 0x13 monster/boss BMD allocation has no published visual
+        // for 0x14 to dispose. Release only this renderer's owned resources;
+        // shared MUAssets geometry/texture leases retain their existing owner.
+        try { renderer.dispose?.(); } catch (disposeErr) {
+            console.warn(`[MonsterModel] partial BMD dispose failed: ${disposeErr?.message || disposeErr}`);
+        }
+        throw err;
+    }
 
     // root: posição/yaw do jogo | fix: up-axis MU (Z-up) → three (Y-up)
     const root = new THREE.Group();

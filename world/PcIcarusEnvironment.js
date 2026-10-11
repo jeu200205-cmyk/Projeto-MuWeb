@@ -9,7 +9,7 @@ import { Sound } from '../audio/SoundManager.js';
 import { MUAssets } from '../assets/MUAssetLoader.js';
 import { MUModelRenderer } from '../assets/MUModelRenderer.js';
 import { applyMuUpAxis } from '../graphics/BmdAdapter.js';
-import { createPcThunderJointBatch } from './PcThunderJoint.js';
+import { createPcThunderJoint, tickPcThunderJoint, disposePcThunderJoint } from './PcThunderJoint.js';
 import { tryAcquirePcParticle, releasePcParticle } from './PcParticleBudget.js';
 
 const PC_HZ = 25;
@@ -145,18 +145,7 @@ export async function createPcIcarusEnvironmentOwner(gameScene) {
   // and only inactive renderers are reused, so visual ownership/lifetime is exact.
   const heavenCloudPool = [];
   let heavenCloudCreated = 0, heavenCloudReused = 0;
-  // FIX88: MoveHeavenThunder +1/subtype0 shares one retained batch for the whole
-  // environment owner. The source still spawns two logical joints per authored
-  // branch; only Web submission/allocation is fused.
-  let thunderBatch = null;
-  const pendingThunder=[];
-  void createPcThunderJointBatch({group,camera:gameScene.camera?.threeCamera,bitmapPlusOne:true,subtype:0,maxJoints:96})
-    .then((b)=>{
-      if(disposed){b?.dispose?.();return;}
-      thunderBatch=b; group.userData.muPcHeavenThunderBatch=Boolean(b);
-      if(b) for(const q of pendingThunder.splice(0)) b.spawn(q.start,q.end,q.scale,q.light);
-      else pendingThunder.length=0;
-    });
+  const thunderJoints = [];
 
   // ZzzObject.cpp::MoveObjectSetting(WD_10HEAVEN) creates BITMAP_LIGHT
   // around Hero with a 1/10 tick gate.  The effect itself is an invisible
@@ -165,10 +154,6 @@ export async function createPcIcarusEnvironmentOwner(gameScene) {
   // not distorted by the MU Z-up -> Three Y-up basis conversion.
   const heavenLightEffects = [];
   const heavenLightParticles = [];
-  // FIX83: reuse BITMAP_LIGHT sprite/material objects. The old path allocated and
-  // disposed a SpriteMaterial for every 25-Hz trail particle, producing GC/GPU
-  // churn severe enough to collapse Icarus to ~20 FPS on physical runs.
-  const heavenLightParticlePool = [];
   let heavenLightLoaded = null;
   void loadHeavenLightTexture().then((v) => {
     heavenLightLoaded = v;
@@ -249,20 +234,14 @@ export async function createPcIcarusEnvironmentOwner(gameScene) {
 
   const spawnHeavenLightTrailParticle = (fx) => {
     if (!heavenLightLoaded || !tryAcquirePcParticle()) return;
-    let pooled = heavenLightParticlePool.pop() || null;
-    let mat = pooled?.mat || null, sprite = pooled?.sprite || null;
-    if (!sprite || !mat) {
-      mat = new THREE.SpriteMaterial({
-        map: heavenLightLoaded.texture, color: new THREE.Color(.3,.3,.3),
-        transparent: true, opacity: 1, depthTest: true, depthWrite: false,
-        blending: THREE.AdditiveBlending, fog: false, toneMapped: false,
-      });
-      sprite = new THREE.Sprite(mat);
-      sprite.frustumCulled = true;
-      sprite.userData.muPcOwner = 'ZzzEffect.cpp::BITMAP_LIGHT/0 -> ZzzEffectParticle.cpp::BITMAP_LIGHT/1';
-    }
-    mat.map = heavenLightLoaded.texture; mat.opacity = 1; mat.color.setRGB(.3,.3,.3);
-    sprite.visible = true;
+    const mat = new THREE.SpriteMaterial({
+      map: heavenLightLoaded.texture, color: new THREE.Color(.3,.3,.3),
+      transparent: true, opacity: 1, depthTest: true, depthWrite: false,
+      blending: THREE.AdditiveBlending, fog: false, toneMapped: false,
+    });
+    const sprite = new THREE.Sprite(mat);
+    sprite.frustumCulled = true;
+    sprite.userData.muPcOwner = 'ZzzEffect.cpp::BITMAP_LIGHT/0 -> ZzzEffectParticle.cpp::BITMAP_LIGHT/1';
     group.add(sprite);
     heavenLightParticles.push({
       pos: [...fx.pos], light: [.3,.3,.3], scale: fx.scale, life: 50,
@@ -320,12 +299,7 @@ export async function createPcIcarusEnvironmentOwner(gameScene) {
     const pos=caseId===1?subPc(h,r1):addPc(h,r1);
     const r2=rotZ(v2,rot2); let p2=subPc(pos,r2),p1=addPc(pos,r2);
     p1=[p1[0],p1[1],p1[2]-300];p2=[p2[0],p2[1],p2[2]-300];
-    for(let i=0;i<2;i++){
-      const scale=40+Math.floor(Math.random()*10);
-      const start=pcToWeb(p1),end=pcToWeb(p2);
-      if(thunderBatch) thunderBatch.spawn(start,end,scale);
-      else pendingThunder.push({start,end,scale,light:null});
-    }
+    for(let i=0;i<2;i++){const scale=40+Math.floor(Math.random()*10);void createPcThunderJoint({group,camera:gameScene.camera?.threeCamera,start:pcToWeb(p1),end:pcToWeb(p2),bitmapPlusOne:true,subtype:0,scale}).then(j=>{if(j&&!disposed)thunderJoints.push(j);else if(j)disposePcThunderJoint(j);});}
   };
 
   const spawnHeavenThunderRoot = (hero) => {
@@ -363,7 +337,7 @@ export async function createPcIcarusEnvironmentOwner(gameScene) {
     // MoveObjectSetting(WD_10HEAVEN): independent 1/10 ambient light-effect gate.
     if(Math.floor(Math.random()*10)===0) spawnHeavenAmbientLight(hero);
     for(let i=heavenClouds.length-1;i>=0;i--){const c=heavenClouds[i];c.r.update?.(TICK,elapsed);c.ticks--;if(c.ticks<=0){c.r.group?.parent?.remove(c.r.group);heavenCloudPool.push(c.r);heavenClouds.splice(i,1);}}
-    thunderBatch?.tick?.();
+    for(let i=thunderJoints.length-1;i>=0;i--){if(!tickPcThunderJoint(thunderJoints[i]))thunderJoints.splice(i,1);}
     for(let i=heavenLightEffects.length-1;i>=0;i--){
       const fx=heavenLightEffects[i];
       // MoveEffects calls MoveEffect once, then BITMAP_LIGHT/0 can receive the
@@ -375,15 +349,13 @@ export async function createPcIcarusEnvironmentOwner(gameScene) {
     for(let i=heavenLightParticles.length-1;i>=0;i--){
       const p=heavenLightParticles[i];
       if(!stepHeavenLightParticle(p)){
-        p.sprite.parent?.remove(p.sprite); p.sprite.visible=false;
-        heavenLightParticlePool.push({sprite:p.sprite,mat:p.mat});
+        p.sprite.parent?.remove(p.sprite);p.mat.dispose?.();
         if(!p.released){p.released=true;releasePcParticle();}
         heavenLightParticles.splice(i,1);
       }
     }
     group.userData.muPcHeavenAmbientLightLive = heavenLightEffects.length;
     group.userData.muPcHeavenAmbientLightTrailLive = heavenLightParticles.length;
-    group.userData.muPcHeavenAmbientLightPool = heavenLightParticlePool.length;
     const rainly = rainCurrent * 2; // RainCurrent * MAX_LEAVES / 100; MAX_LEAVES=200.
     for(let i=0;i<MAX_ACTIVE_RAIN;i++) {
       const p=particles[i];
@@ -432,13 +404,12 @@ export async function createPcIcarusEnvironmentOwner(gameScene) {
       }
       for(const c of heavenClouds.splice(0)){try{c.r?.dispose?.();}catch{}}
       for(const r of heavenCloudPool.splice(0)){try{r?.dispose?.();}catch{}}
-      pendingThunder.length=0; thunderBatch?.dispose?.(); thunderBatch=null;
+      for(const j of thunderJoints.splice(0))disposePcThunderJoint(j);
       heavenLightEffects.length=0;
       for(const p of heavenLightParticles.splice(0)){
         try{p.sprite?.parent?.remove(p.sprite);p.mat?.dispose?.();}catch{}
         if(!p.released){p.released=true;releasePcParticle();}
       }
-      for(const p of heavenLightParticlePool.splice(0)){try{p.sprite?.parent?.remove(p.sprite);p.mat?.dispose?.();}catch{}}
       rainMesh?.parent?.remove(rainMesh);
       rainGeometry?.dispose?.(); rainMaterial?.dispose?.();
       group.clear();

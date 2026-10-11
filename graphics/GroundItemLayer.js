@@ -19,7 +19,6 @@ import { angleQuaternion } from './BmdParser.js';
 import { TERRAIN_SCALE, MAP_SIZE } from '../world/TerrainWorld.js';
 import { applyPcStockItemPresentation } from './ItemMaterialPresentation.js';
 import { currentClientItemModelForType } from '../data/CurrentClientItemOwners.js';
-import { createPcGroundItemEffectOwner } from './PcGroundItemEffects.js';
 
 const MAX_ITEM_INDEX = 512;
 const DEG = Math.PI / 180;
@@ -417,7 +416,7 @@ export class GroundItemLayer {
 
         const serial = item.runtimeSerial;
         const promise = (async () => {
-            let renderer = null, effectOwner = null;
+            let renderer = null;
             try {
                 const bmd = await this.loadBMD(path);
                 if (!bmd || !Array.isArray(bmd.meshes) || !bmd.meshes.length) throw new Error('BMD sem meshes');
@@ -441,7 +440,6 @@ export class GroundItemLayer {
                 // have happened while BMD/textures were loading.
                 const live = this.state.get(item.key);
                 if (this.disposed || !live || live.runtimeSerial !== serial) {
-                    effectOwner?.dispose?.();
                     renderer.dispose?.();
                     return null;
                 }
@@ -459,15 +457,6 @@ export class GroundItemLayer {
                 orient.add(renderer.group);
                 axis.add(orient);
                 outer.add(axis);
-                // EffectManager.cpp::LoadEffect belongs to settled world drops.
-                // Keep the effect group outside the BMD orientation axis: CreateShiny/
-                // CreateThunderBolt rotate their spawn offset explicitly by OBJECT::Angle.
-                effectOwner = await createPcGroundItemEffectOwner(item.itemType, tf.angle).catch((e) => {
-                    const warnKey=`itemfx:${item.itemType}`;
-                    if(!this._warned.has(warnKey)){this._warned.add(warnKey);console.warn(`[GroundItem] ItemEffects owner indisponível Type=${item.itemType}: ${e?.message||e}`);}
-                    return null;
-                });
-                if(effectOwner?.group) outer.add(effectOwner.group);
 
                 const policy = pcGroundMaterialPolicy(item.itemType, (typeof performance !== 'undefined' && typeof performance.now === 'function') ? performance.now() : Date.now());
                 renderer.meshes?.forEach((mesh, meshIndex) => {
@@ -478,12 +467,11 @@ export class GroundItemLayer {
                 renderer.playAction?.('action_0');
                 this.root.add(outer);
 
-                const visual = { serial, renderer, outer, axis, orient, effectOwner, itemType: item.itemType, rawLevel, path };
+                const visual = { serial, renderer, outer, axis, orient, itemType: item.itemType, rawLevel, path };
                 this.visuals.set(item.key, visual);
                 this._place(item, visual, Date.now());
                 return visual;
             } catch (e) {
-                try { effectOwner?.dispose?.(); } catch { /* noop */ }
                 try { renderer?.dispose?.(); } catch { /* noop */ }
                 const warnKey = `load:${path}`;
                 if (!this._warned.has(warnKey)) {
@@ -506,7 +494,6 @@ export class GroundItemLayer {
         const age = nowMs - (item.createdAt || nowMs);
         const rise = groundItemCreateRise(item.createFlag, age);
         visual.outer.position.set(p0.x, groundY + rise, p0.z);
-        return rise;
     }
 
     async sync() {
@@ -535,9 +522,8 @@ export class GroundItemLayer {
                 this._removeVisual(key);
                 continue;
             }
-            const rise = this._place(item, visual, now);
+            this._place(item, visual, now);
             visual.renderer.update?.(dt, elapsed);
-            visual.effectOwner?.update?.(dt, rise <= 0);
         }
     }
 
@@ -546,7 +532,6 @@ export class GroundItemLayer {
         if (!visual) return false;
         this.visuals.delete(key);
         try { this.root.remove(visual.outer); } catch { /* noop */ }
-        try { visual.effectOwner?.dispose?.(); } catch { /* noop */ }
         try { visual.renderer.dispose?.(); } catch { /* noop */ }
         return true;
     }

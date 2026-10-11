@@ -10,8 +10,8 @@
 // Goal: never silently bind this Web build to a different MU Data tree.
 // The R55 physical log proved that a generic "valid Data" can still contain
 // World75 while missing the current-client MainFrame/C/I/item owners and even a
-// different World1 EncTerrain. R90 scores every candidate while preserving the retained physical
-// client-data profile before opening the browser.
+// different World1 EncTerrain. R90 validates only the immutable official client-data profile
+// before opening the browser; no candidate discovery or alternate root.
 const http = require('http');
 const net = require('net');
 const fs = require('fs');
@@ -21,7 +21,6 @@ const { spawn, spawnSync } = require('child_process');
 
 const ROOT = path.resolve(__dirname, '..');
 const TOOLS = path.join(ROOT, 'tools');
-const DATA_ROOT_FILE = path.join(ROOT, '.muweb-data-root-r90');
 const OFFICIAL_CLIENT_ROOT = 'C:\\clientepromax\\Nova pasta\\MuPromax 1.0.1';
 const OFFICIAL_DATA_ROOT = path.join(OFFICIAL_CLIENT_ROOT, 'Data');
 // USER AUTHORITY LOCK: do not allow remembered/env/discovered Data trees to override this client.
@@ -245,60 +244,11 @@ function profileSummary(p){
 function hasExactR53Profile(root){return inspectDataRoot(root).exact;}
 function hasCompatibleDataProfile(root){return inspectDataRoot(root).compatible;}
 
-function addCandidate(out,p){if(!p)return;try{p=path.resolve(p);}catch{return;}if(!out.some(x=>norm(x)===norm(p)))out.push(p);}
-function rememberedCandidates(){
-  const out=[];
-  for(const file of [DATA_ROOT_FILE,path.join(ROOT,'.muweb-data-root')]){
-    try{addCandidate(out,fs.readFileSync(file,'utf8').trim());}catch{}
-  }
-  return out;
-}
-function siblingRememberedCandidates(){
-  const out=[]; const parent=path.dirname(ROOT); let ents=[]; try{ents=fs.readdirSync(parent,{withFileTypes:true});}catch{return out;}
-  for(const e of ents){
-    if(!e.isDirectory() || !/^MUWEB_/i.test(e.name))continue;
-    const d=path.join(parent,e.name);
-    let files=[];try{files=fs.readdirSync(d);}catch{continue;}
-    for(const n of files){
-      if(/^\.muweb-data-root/i.test(n)) {try{addCandidate(out,fs.readFileSync(path.join(d,n),'utf8').trim());}catch{}}
-      if(/^\.muweb-assets.*\.log$/i.test(n)) {try{const t=fs.readFileSync(path.join(d,n),'utf8'); for(const m of t.matchAll(/(?:root:|Data real encontrado:?)[ \t]*([^\r\n]+)/gi))addCandidate(out,m[1].trim());}catch{}}
-    }
-  }
-  return out;
-}
-function userCandidates(){
-  // Strict user authority: diagnostics may inspect only the exact official Data.
-  return [path.resolve(OFFICIAL_DATA_ROOT)];
-}
-function shallowCollectData(base,maxDepth=5,maxDirs=12000){
-  const out=[]; if(!existsDir(base))return out; const q=[[base,0]];let seen=0;
-  while(q.length&&seen++<maxDirs){const [d,depth]=q.shift();
-    if(path.basename(d).toLowerCase()==='data' && existsDir(path.join(d,'Interface')))addCandidate(out,d);
-    if(depth>=maxDepth)continue;let ents=[];try{ents=fs.readdirSync(d,{withFileTypes:true});}catch{continue;}
-    for(const e of ents){if(!e.isDirectory())continue;const low=e.name.toLowerCase();
-      if(['node_modules','$recycle.bin','windows','program files','program files (x86)','appdata','.git','system volume information'].includes(low))continue;
-      q.push([path.join(d,e.name),depth+1]);}
-  }return out;
-}
-function collectAutomaticCandidates(){
-  // Kept for diagnostics/tests, but discovery is intentionally disabled.
-  return [path.resolve(OFFICIAL_DATA_ROOT)];
-}
+// No discovery, remembered roots, picker, or environment-based Data selection.
+// Compatibility export only: it may inspect exactly the official root.
 function chooseBestDataRoot(){
-  const profiles=collectAutomaticCandidates().filter(existsDir).map(inspectDataRoot).sort((a,b)=>b.score-a.score);
-  if(profiles.length){
-    console.log('[R90] Candidatos Data encontrados:');
-    for(const p of profiles.slice(0,8)) console.log(`  ${p.exact?'[R53-EXATA]':p.compatible?'[COMPAT]   ':'[NO]       '} ${profileSummary(p)} :: ${p.root}`);
-  }
-  return {exact:profiles.find(p=>p.exact)||null,compatible:profiles.find(p=>p.compatible)||null,best:profiles[0]||null,profiles};
-}
-function persistDataRoot(p){try{fs.writeFileSync(DATA_ROOT_FILE,path.resolve(p)+'\n');}catch(e){console.warn('[R90] não consegui persistir Data:',e.message);}}
-function pickFolderWindows(){
-  if(process.platform!=='win32'||process.env.MUWEB_NO_PROMPT==='1')return null;
-  const ps=['Add-Type -AssemblyName System.Windows.Forms;','$d=New-Object System.Windows.Forms.FolderBrowserDialog;',
-    "$d.Description='Selecione a pasta Data do cliente MU (World1/World75/World95). R90 resolve TGA/JPG/OZT/OZJ automaticamente'",'$d.ShowNewFolderButton=$false;',
-    'if($d.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK){[Console]::Write($d.SelectedPath)}'].join(' ');
-  try{const r=spawnSync('powershell.exe',['-NoProfile','-STA','-ExecutionPolicy','Bypass','-Command',ps],{encoding:'utf8'});return (r.stdout||'').trim()||null;}catch{return null;}
+  const profile=existsDir(OFFICIAL_DATA_ROOT)?inspectDataRoot(OFFICIAL_DATA_ROOT):null;
+  return {exact:profile?.exact?profile:null,compatible:profile?.compatible?profile:null,best:profile,profiles:profile?[profile]:[]};
 }
 
 function httpGet(url,timeout=1600,method='GET'){
@@ -352,32 +302,42 @@ async function main(){
   console.log('================================================================');
   console.log(' MUWEB R90 - STRICT DATA AUTHORITY / OFFICIAL MuPromax 1.0.1 ONLY');
   console.log('================================================================');
-  console.log(`[R90] Source root: ${ROOT}`); assertRuntime();
+  console.log(`[R90] Source root: ${ROOT}`);
   console.log(`[R90] Cliente oficial: ${OFFICIAL_CLIENT_ROOT}`);
   console.log(`[R90] Data oficial: ${OFFICIAL_DATA_ROOT}`);
 
   if(!existsDir(OFFICIAL_DATA_ROOT)){
     throw new Error(`DATA OFICIAL OBRIGATORIA NAO ENCONTRADA: ${OFFICIAL_DATA_ROOT}. Nenhum outro cliente/Data sera aceito.`);
   }
+  // FIX140: verify the canonical Windows root and reject any symlink/junction
+  // inside the official Data tree BEFORE opening a single profile BMD/texture.
+  // The later provenance gate remains mandatory; this early guard prevents
+  // even transient reads from a redirected directory during profile scoring.
+  const officialGate=require('./verify-data-authority-r90.cjs');
+  officialGate.canonicalRoot();
+  const officialInventory=officialGate.dataInventory();
+  console.log(`[DATA AUTHORITY] Caminho canonico + ${officialInventory.fileCount} arquivos fisicos sem redirecionamentos.`);
   const selected=inspectDataRoot(OFFICIAL_DATA_ROOT);
   console.log(`[R90] Data oficial encontrada: ${profileSummary(selected)} :: ${selected.root}`);
-  if(!selected.compatible){
-    throw new Error(`DATA OFICIAL INVALIDA/INCOMPLETA: ${OFFICIAL_DATA_ROOT}; CORE faltando: ${selected.coreMissing.join(', ')}`);
+  if(!selected.exact){
+    throw new Error(`DATA OFICIAL INVALIDA/INCOMPLETA: ${OFFICIAL_DATA_ROOT}; CORE=${selected.coreMissing.join(', ')}; VISUAL=${selected.missing.join(', ')}; ItemAttr=${selected.itemAttr?.stride??'missing'}; World1=${selected.worldCount??'missing'}`);
   }
+  // Data authority is checked before runtime dependencies: missing/incomplete
+  // official assets must be the first fatal boot diagnostic, never a reason
+  // to discover or reuse another client's tree.
+  assertRuntime();
+  // Fail closed until all generated tables are physically derived from the exact
+  // official Data and a SHA-256 source/output manifest verifies them.
+  const regen=spawnSync(process.execPath,[path.join(TOOLS,'regenerate-official-data-r90.cjs'),'--regenerate'],{cwd:ROOT,encoding:'utf8'});
+  if(regen.stdout) process.stdout.write(regen.stdout);
+  if(regen.stderr) process.stderr.write(regen.stderr);
+  if(regen.status!==0) throw new Error(`TABELAS OFICIAIS INVALIDAS: regeneracao/verificacao falhou (exit=${regen.status}). Boot bloqueado.`);
   console.log('[R90] DATA AUTHORITY LOCK: discovery/fallback/picker desativados; somente MuPromax 1.0.1 oficial.');
 
-  persistDataRoot(selected.root);
-  console.log(`[R90] DATA SELECIONADA ${norm(selected.root)===norm(OFFICIAL_DATA_ROOT)?'[OFICIAL MuPromax 1.0.1]':selected.exact?'[R53 EXATA]':'[COMPATÍVEL]'}: ${selected.root}`);
+  console.log(`[R90] DATA SELECIONADA [OFICIAL MuPromax 1.0.1 / PERFIL EXATO]: ${selected.root}`);
   console.log(`[R90] ${profileSummary(selected)}`);
   const dataAuthority=computeDataAuthorityRevision(selected.root);
   console.log(`[R90] Data authority=${dataAuthority.revision.slice(0,16)}... files=${dataAuthority.files}`);
-  if(!selected.exact){
-    console.warn(`[R90] AVISO: Data é variante do cliente. World1=${selected.worldCount ?? '?'}; captura fisica tinha ${EXPECTED_WORLD1_OBJECT_COUNT}. Isso NÃO bloqueia o boot.`);
-    if(selected.missing.length){
-      console.warn(`[R90] Visual compiled paths ausentes (${selected.missing.length}); resolver tentará .TGA/.JPG/.BMP, aliases e basename único.`);
-      console.warn(`[R90 FIX44] Visual paths não resolvidos: ${selected.missing.join(', ')}`);
-    }
-  }
   const ap=await pickAssetPort(selected.root,dataAuthority.revision); let assetPort=ap.port;
   if(!ap.reuse){const pid=startDetached(path.join(TOOLS,'asset-server.cjs'),[selected.root,assetPort,dataAuthority.revision],'.muweb-assets-r90.log');console.log(`[R90] Asset server official-root PID ${pid} -> :${assetPort}`);}
   const remote=await waitRemoteProfile(assetPort,selected.root);

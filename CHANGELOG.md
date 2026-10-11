@@ -4,6 +4,180 @@ Base do projeto: **MU Online Main 5.2 do Dinho**.
 
 ---
 
+## 11/10/2026 17:26 BRT
+
+Atualização do Projeto MuWeb.
+
+### Documentação
+
+- `docs/ENGINE/00_INDEX.md`: alterado.
+- `docs/ENGINE/07_SKILLS_EFFECTS.md`: alterado.
+- `docs/ENGINE/10_PERFORMANCE.md`: alterado.
+- `docs/ENGINE/12_REMAINING_PORTS.md`: alterado.
+- `docs/ENGINE/AUTOGEN_MODULE_INDEX.md`: alterado.
+
+### Engine
+
+- `core/GameApp.js`: alterado.
+- `core/GameApp.js.orig`: adicionado.
+
+### Ferramentas
+
+- `tools/asset-server.cjs`: alterado.
+- `tools/dev-web-server.cjs`: alterado.
+- `tools/generateRealData.mjs`: alterado.
+- `tools/start-r90-safe.cjs`: alterado.
+- `tools/CAPTURE_M126_WORLD1_WORLD11.js`: adicionado.
+- `tools/CAPTURE_M127_README.md`: adicionado.
+- `tools/CAPTURE_M127_WORLD1_WORLD11.js`: adicionado.
+- `tools/official-item-index-r90.cjs`: adicionado.
+- `tools/regenerate-official-data-r90.cjs`: adicionado.
+- `tools/serve.mjs`: adicionado.
+- `tools/verify-data-authority-r90.cjs`: adicionado.
+- `tools/verify-fix154-runtime.mjs`: adicionado.
+
+### Inicialização
+
+- `INICIAR_MUWEB.bat`: alterado.
+- `INSTALAR_DEPENDENCIAS.bat`: alterado.
+
+### Interface
+
+- `ui2/InventoryWindow.js`: alterado.
+- `ui2/ItemIconRenderer.js`: alterado.
+
+### Itens e gameplay
+
+- `data/CurrentClientItemOwners.js`: alterado.
+- `data/CustomItemPresentation.js`: alterado.
+- `data/CustomPreviewElements.js`: alterado.
+- `data/ItemAttributeData.js`: alterado.
+- `data/ItemModelResolver.js`: alterado.
+- `data/PcGlobalText.js`: alterado.
+- `data/RealData.js`: alterado.
+- `data/RemoteAssets.js`: alterado.
+- `data/generated/RealItems.js`: removido.
+- `data/generated/RealMaps.js`: removido.
+- `data/generated/RealMonsters.js`: removido.
+- `game/BuffSystem.js`: alterado.
+- `game/Monster.js`: alterado.
+- `game/MonsterManager.js`: alterado.
+- `game/MonsterModel.js`: alterado.
+- `game/Movement.js`: alterado.
+- `game/NpcModel.js`: alterado.
+- `game/PetSystem.js`: alterado.
+- `game/PlayerViewportManager.js`: alterado.
+- `data/ModelPortabilityAudit.js`: adicionado.
+- `game/CompanionLoadQueue.js`: adicionado.
+- `game/PetSparkLifetime.js`: adicionado.
+- `game/SharedPetSparkTexture.js`: adicionado.
+- `game/StableCompanionLane.js`: adicionado.
+
+### Lua e dados
+
+- `data/CharacterHelperLua.js`: alterado.
+- `data/DarkSpiritLua.js`: alterado.
+- `data/ItemEffectsLuaConfig.js`: alterado.
+- `data/PcCharacterLuaEffects.js`: alterado.
+- `data/PcCustomCapeLua.js`: alterado.
+- `data/PcLuaStaticLex.js`: adicionado.
+
+### Mapas e mundo
+
+- `world/AttMapLoader.js`: alterado.
+- `world/PcIcarusBoids.js`: alterado.
+- `world/PcIcarusCloudField.js`: removido.
+- `world/PcIcarusEnvironment.js`: alterado.
+- `world/PcLorenciaVisuals.js`: alterado.
+- `world/PcMapParticles.js`: alterado.
+- `world/PcThunderJoint.js`: alterado.
+- `world/TerrainObjectWorld.js`: alterado.
+- `world/TerrainWorld.js`: alterado.
+- `world/test-maps-engine-m76-placement-frame-budget.mjs`: adicionado.
+
+### Outros
+
+- `README.md`: alterado.
+- `index.html`: alterado.
+- `ANALYZE_M133_WORLD1_WORLD11.mjs`: adicionado.
+- `ANALYZE_M136_WORLD1_WORLD11.mjs`: adicionado.
+- `ANALYZE_M137_WORLD1_WORLD11.mjs`: adicionado.
+- `ANALYZE_M138_WORLD1_WORLD11.mjs`: adicionado.
+- `ANALYZE_M139_WORLD1_WORLD11.mjs`: adicionado.
+- `ANALYZE_M140_WORLD1_WORLD11.mjs`: adicionado.
+- `ANALYZE_M141_WORLD1_WORLD11.mjs`: adicionado.
+- `ANALYZE_M142_WORLD1_WORLD11.mjs`: adicionado.
+- `ANALYZE_M143_WORLD1_WORLD11.mjs`: adicionado.
+- `ANALYZE_M144_WORLD1_WORLD11.mjs`: adicionado.
+- `CAPTURE_M129_WORLD1_WORLD11.js`: adicionado.
+- `CAPTURE_M130_WORLD1_WORLD11.js`: adicionado.
+- `CAPTURE_M133_ANALYSIS_README.md`: adicionado.
+- `CAPTURE_M136_README.md`: adicionado.
+- `CAPTURE_M137_README.md`: adicionado.
+- `CAPTURE_M138_README.md`: adicionado.
+- `CAPTURE_M139_README.md`: adicionado.
+- `CAPTURE_M140_README.md`: adicionado.
+- `CAPTURE_M141_README.md`: adicionado.
+- `CAPTURE_M142_README.md`: adicionado.
+- `CAPTURE_M143_README.md`: adicionado.
+- `CAPTURE_M144_README.md`: adicionado.
+- `CAPTURE_M144_WORLD1_WORLD11.js`: adicionado.
+- `LEIA_PRIMEIRO_FIX44.txt`: adicionado.
+- `M136_MANIFEST.json`: adicionado.
+- `M142_MANIFEST.json`: adicionado.
+- `M142_REPRODUCE.md`: adicionado.
+- `MUWEB_FIX139_INTEGRATION_MANIFEST.json`: adicionado.
+- `MUWEB_FIX140_INTEGRATION_MANIFEST.json`: adicionado.
+- `MUWEB_FIX141_INTEGRATION_MANIFEST.json`: adicionado.
+- `MUWEB_FIX142_INTEGRATION_MANIFEST.json`: adicionado.
+- `MUWEB_FIX143_INTEGRATION_NOTES.md`: adicionado.
+- `MUWEB_FIX145_INTEGRATION_MANIFEST.json`: adicionado.
+- `RELEASE_CURRENT.txt`: adicionado.
+- `TerrainObjectWorld.js`: adicionado.
+- `TerrainObjectWorld.m128.js`: adicionado.
+- `TerrainObjectWorld.m137.js`: adicionado.
+- `TerrainObjectWorld.m138.js`: adicionado.
+- `TerrainObjectWorld.m139.js`: adicionado.
+- `TerrainObjectWorld.m142.js`: adicionado.
+- `TerrainObjectWorld.m143.js`: adicionado.
+- `changed_files/`: adicionado.
+- `test-fixtures/`: adicionado.
+
+### Rede e protocolo
+
+- `protocol/MUPacketRouter.js`: alterado.
+- `protocol/RealMUProtocol.js`: alterado.
+- `network/README.md`: adicionado.
+
+### Renderização e efeitos
+
+- `assets/MUAssetLoader.js`: alterado.
+- `assets/MUModelRenderer.js`: alterado.
+- `assets/MUSoundManager.js`: alterado.
+- `assets/MUTextureManager.js`: alterado.
+- `effects2/DisplayEffectFX.js`: removido.
+- `effects2/DisplayPotionFX.js`: removido.
+- `effects2/LevelUpFX.js`: alterado.
+- `graphics/CharacterPreview.js`: alterado.
+- `graphics/Effects.js`: alterado.
+- `graphics/GroundItemLayer.js`: alterado.
+- `graphics/MuTerrain.js`: alterado.
+- `graphics/PcCharacterHelperPresentation.js`: removido.
+- `graphics/PcCustomCapePresentation.js`: alterado.
+- `graphics/PcGroundItemEffects.js`: removido.
+- `graphics/PlayerComposer.js`: alterado.
+- `graphics/Scene.js`: alterado.
+- `graphics/PcCharacterCapeFrame.js`: adicionado.
+- `graphics/TerrainObjectWorld.js`: adicionado.
+
+### Skills e combate
+
+- `skills/SkillAttributeData.js`: removido.
+- `tools/gen-skill-attribute-table.mjs`: alterado.
+- `ui2/SkillBar.js`: alterado.
+
+---
+
 ## 06/10/2026 12:23 BRT
 
 Atualização da source do Projeto MuWeb.

@@ -555,6 +555,9 @@ export class MUModelRenderer {
         // They are registered once per item appearance and updated without
         // allocating a second WebGL context or a second animation owner.
         this._overlayMeshes = [];
+        // Overlay material cache keys must never be reused while a prior pass
+        // is still in flight or being retired by a dynamic Lua program rebuild.
+        this._overlaySerial = 0;
         // Main 5.2 CreateSprite owners attached to animated BMD bones.  These
         // are persistent Web objects (instead of one-frame entries in the PC
         // Sprites[] pool), so this renderer must own their material lifetime.
@@ -1457,7 +1460,12 @@ export class MUModelRenderer {
                 continue;
             }
             const hasSourceAlpha = map?.userData?.muPcBitmapHasAlpha ?? (source.userData?.muSourceHasAlpha === true);
-            const material = this._getMaterial({ texture: -1, name: `${source.name}__pass_${this._overlayMeshes.length}` });
+            // Each overlay has a private ShaderMaterial; the base BMD and shared
+            // textures remain untouched. A monotonically increasing key avoids
+            // resurrecting a disposed material after dynamic cape rebuilds.
+            const materialName = `${source.name}__pass_${this._overlaySerial++}`;
+            const materialCacheKey = `mat_-1_${materialName}`;
+            const material = this._getMaterial({ texture: -1, name: materialName });
             material.uniforms.diffuse.value.copy(color);
             material.uniforms.map.value = baseMap;
             material.uniforms.hasMap.value = true;
@@ -1467,7 +1475,11 @@ export class MUModelRenderer {
             material.uniforms.enableLight.value = options.lightEnabled === true;
             material.map = baseMap;
             const state = applyPcRenderMeshPassState(material, flags, alpha, hasSourceAlpha, true);
-            if (state.skip) { material.dispose(); continue; }
+            if (state.skip) {
+                if (this._materialCache.get(materialCacheKey) === material) this._materialCache.delete(materialCacheKey);
+                material.dispose();
+                continue;
+            }
             const overlay = new THREE.SkinnedMesh(source.geometry, material);
             configurePcChromeBasis(overlay);
             overlay.name = `${source.name || 'mesh'}__mu_overlay`;
@@ -1475,6 +1487,7 @@ export class MUModelRenderer {
             overlay.renderOrder = (source.renderOrder || 0) + (options.passOrder ?? 1);
             overlay.userData.originalMap = baseMap;
             overlay.userData.muSourceHasAlpha = hasSourceAlpha;
+            overlay.userData.muOverlayMaterialCacheKey = materialCacheKey;
             overlay.bind(source.skeleton || this.skeleton, source.bindMatrix);
             overlay.bindMode = source.bindMode;
             // CHROME/METAL/OIL need the existing MU reflection shader instead
@@ -1493,8 +1506,32 @@ export class MUModelRenderer {
             overlays.push(overlay);
         }
         if (!overlays.length) return null;
+        let disposed = false;
         return {
             meshes: overlays,
+            // FIX124: cape programs can be replaced every authored Lua phase.
+            // Retire only private overlay materials and meshes, never shared
+            // geometry, skeleton or bitmap textures. Renderer.dispose() sees
+            // only the overlays still resident in _overlayMeshes.
+            dispose: () => {
+                if (disposed) return;
+                disposed = true;
+                for (const mesh of overlays) {
+                    mesh.parent?.remove(mesh);
+                    const i = this._overlayMeshes.indexOf(mesh);
+                    if (i >= 0) this._overlayMeshes.splice(i,1);
+                    const key = mesh.userData?.muOverlayMaterialCacheKey;
+                    const mat = mesh.material;
+                    if (key && this._materialCache.get(key) === mat) this._materialCache.delete(key);
+                    // Chrome/metal overlays are also registered for shader-time
+                    // updates. Retired materials must leave that hot registry.
+                    const animated = this._animatedShaderMaterials.indexOf(mat);
+                    if (animated >= 0) this._animatedShaderMaterials.splice(animated, 1);
+                    if (Array.isArray(mat)) mat.forEach(m => m?.dispose?.());
+                    else mat?.dispose?.();
+                }
+                overlays.length=0;
+            },
             setColor: (c) => {
                 const next = c?.isColor ? c : new THREE.Color(c ?? 0xffffff);
                 for (const mesh of overlays) {
@@ -1570,6 +1607,17 @@ export class MUModelRenderer {
                 owner.disposed = true;
                 sprite.parent?.remove(sprite);
                 material.dispose();
+                // FIX90: createBoneSprite owners are renderer-owned. Atomic cape
+                // proof can provision then immediately dispose authored sprites; do not
+                // retain those dead owners in _boneSprites until the whole renderer dies.
+                // The renderer's dispose() iterates _boneSprites directly. When
+                // disposing the whole renderer, do not splice that live array:
+                // removing the current entry would skip the next sprite owner.
+                // Individual equip/preview owner disposal still unregisters now.
+                if (!this._disposed) {
+                    const i = this._boneSprites.indexOf(owner);
+                    if (i >= 0) this._boneSprites.splice(i, 1);
+                }
             },
             disposed: false,
         };
@@ -1628,8 +1676,26 @@ export class MUModelRenderer {
             },
             setColor:(next)=>{ for(const p of particles)p.material.color.copy(next?.isColor?next:new THREE.Color(next??0xffffff)); },
             setEnabled:(next)=>{ owner.enabled=!!next; if(!owner.enabled) for(const p of particles)p.sprite.visible=false; },
-            dispose:()=>{ if(owner.disposed)return; owner.disposed=true; for(const p of particles){p.sprite.parent?.remove(p.sprite);p.material.dispose();} },
+            dispose:()=>{
+                if(owner.disposed)return;
+                owner.disposed=true;
+                for(const p of particles){p.sprite.parent?.remove(p.sprite);p.material.dispose();}
+                // FIX87 ITEMS/LUA: equip/preview can dispose an individual particle owner
+                // while the renderer itself stays alive. Remove the dead callback/owner now;
+                // otherwise every rebuild leaves a no-op closure in the per-frame update list.
+                const ui=this._presentationUpdates.indexOf(owner.update);
+                if(ui>=0)this._presentationUpdates.splice(ui,1);
+                // During renderer-wide disposal, keep the iteration stable.
+                // Standalone pool disposal must still unregister immediately.
+                if (!this._disposed) {
+                    const oi=this._boneSprites.indexOf(owner);
+                    if(oi>=0)this._boneSprites.splice(oi,1);
+                }
+            },
         };
+        // FIX81 prerequisite retained cumulatively: particle pools are renderer-owned
+        // resources; textures remain asset-manager owned and are not disposed here.
+        this._boneSprites.push(owner);
         this._presentationUpdates.push(owner.update);
         return owner;
     }
@@ -1860,13 +1926,21 @@ export class MUModelRenderer {
     dispose() {
         if (this._disposed) return;
         this._disposed = true;
+        // Materials are registered both on meshes and in _materialCache.
+        // Dispose each private material once, then release the cache references.
+        const disposedMaterials = new Set();
+        const disposeMaterial = (material) => {
+            if (!material || disposedMaterials.has(material)) return;
+            disposedMaterials.add(material);
+            material.dispose?.();
+        };
         // Overlay geometries are shared with base meshes: dispose only their
         // materials, never the shared geometry/textures here.
         for (const mesh of this._overlayMeshes) {
             try { mesh.parent?.remove(mesh); } catch {}
             if (mesh.material) {
-                if (Array.isArray(mesh.material)) mesh.material.forEach(m => m.dispose?.());
-                else mesh.material.dispose?.();
+                if (Array.isArray(mesh.material)) mesh.material.forEach(disposeMaterial);
+                else disposeMaterial(mesh.material);
             }
         }
         this._overlayMeshes = [];
@@ -1888,9 +1962,9 @@ export class MUModelRenderer {
             if(!isSharedBmdGeometry(mesh.geometry))mesh.geometry.dispose();
             if (mesh.material) {
                 if (Array.isArray(mesh.material)) {
-                    mesh.material.forEach(m => m.dispose());
+                    mesh.material.forEach(disposeMaterial);
                 } else {
-                    mesh.material.dispose();
+                    disposeMaterial(mesh.material);
                 }
             }
         }
@@ -1902,8 +1976,9 @@ export class MUModelRenderer {
             // Maps belong to MUAssets and may still be used by another actor,
             // icon or the replacement graph. Only private presentation clones
             // (disposed above) belong to this renderer.
-            mat.dispose();
+            disposeMaterial(mat);
         }
+        this._materialCache.clear();
         
         
         // Remove from scene

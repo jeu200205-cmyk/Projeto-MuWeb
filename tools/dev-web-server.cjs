@@ -7,6 +7,9 @@ const path = require('path');
 const crypto = require('crypto');
 
 const ROOT = path.resolve(__dirname, '..');
+// Standalone HTTP cannot bypass the official Data/generated-table provenance gate.
+try{require('./verify-data-authority-r90.cjs').verify();}
+catch(e){console.error('[MUWEB DEV] Boot bloqueado: '+e.message);process.exit(2);}
 const PORT = Number(process.argv[2] || 8080);
 const TYPES = {
   '.html':'text/html; charset=utf-8', '.js':'text/javascript; charset=utf-8',

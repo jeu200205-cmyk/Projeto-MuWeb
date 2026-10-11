@@ -17,8 +17,17 @@ const NPC_IDLE_SPEED = 0.25;
 async function loadRenderer(rel) {
   const bmd = await MUAssets.loadBMD(rel);
   const renderer = new MUModelRenderer();
-  await renderer.initFromBMD(bmd);
-  return renderer;
+  try {
+    await renderer.initFromBMD(bmd);
+    return renderer;
+  } catch (err) {
+    // A failed BMD init may already have allocated meshes/materials. Since
+    // no visual was returned, 0x14 cannot reach these resources later.
+    try { renderer.dispose?.(); } catch (disposeErr) {
+      console.warn(`[NpcModel] partial BMD dispose failed: ${disposeErr?.message || disposeErr}`);
+    }
+    throw err;
+  }
 }
 
 function relDir(rel) {
@@ -85,37 +94,58 @@ async function loadPlayerNpcVisual(rule) {
   const attach = await buildEquipmentAttach(charset, io, composed.renderData.bones, composed.renderData.bones.length);
   let finalData = mergeEquipmentBodyRenderData(composed.renderData, attach);
   const renderer = new MUModelRenderer({ skinIndex: getPcTextureSkinIndex(classId) });
-  await renderer.initFromBMD(finalData);
-  await applyBodyEquipmentPresentation(renderer, attach);
-  const root = new THREE.Group();
-  const fix = new THREE.Group();
-  applyMuUpAxis(fix);
-  root.add(fix);
-  fix.add(renderer.group);
-  root.scale.setScalar(pcCharacterScale(classId, { characterScene:false, skin:0 }));
-
   const extras = [];
-  const linked = [];
-  for (const spec of [attach.weaponRightSpec, attach.weaponLeftSpec]) {
-    if (!spec) continue;
-    const wr = await buildLinkedWeaponRenderer({ scene:null, camera:null }, spec);
-    const bone = renderer.bones?.[spec.linkBone];
-    if (!wr || !bone) { wr?.dispose?.(); throw new Error(`NPC MODEL_PLAYER weapon bone ${spec.linkBone} inexistente`); }
-    bone.add(wr.group);
-    extras.push(wr); linked.push({wr,spec});
-  }
-  const anim = buildAnimationControl(renderer, classId, attach, { safeZone:()=>false });
-  let currentState = '';
-  const visual = {
-    root, bmdPath:'Player/Player.bmd', renderer, renderers:[{renderer,path:'Player/Player.bmd'}], extras,
-    setBodyLight(color) { renderer.setBodyLight?.(color); for (const wr of extras) wr.setBodyLight?.(color); },
-    setAction(idx) { const a=renderer.playAction('action_'+idx); if (a) a.timeScale=NPC_IDLE_SPEED; },
-    setActionFor(state) { currentState=state; anim?.play?.(state === 'walk' ? 'walk' : 'idle'); },
-    update(dt, elapsed=0) { renderer.update(dt, elapsed); for (const wr of extras) wr.update?.(dt, elapsed); },
-    dispose() { renderer.dispose?.(); for (const wr of extras) wr.dispose?.(); },
+  let disposed = false;
+  // A MODEL_PLAYER guard may fail while its Player.bmd body or a later
+  // linked weapon is still being built. In that case Monster._initRealModel()
+  // never receives a visual to dispose on 0x14. Own all already-allocated
+  // renderers here, including the partial-construction failure path.
+  const release = () => {
+    if (disposed) return;
+    disposed = true;
+    for (const wr of extras) {
+      try { wr.dispose?.(); } catch (err) { console.warn(`[NpcModel] linked weapon dispose failed: ${err?.message || err}`); }
+    }
+    try { renderer.dispose?.(); } catch (err) { console.warn(`[NpcModel] guard body dispose failed: ${err?.message || err}`); }
   };
-  visual.setActionFor('idle');
-  return visual;
+  try {
+    await renderer.initFromBMD(finalData);
+    await applyBodyEquipmentPresentation(renderer, attach);
+    const root = new THREE.Group();
+    const fix = new THREE.Group();
+    applyMuUpAxis(fix);
+    root.add(fix);
+    fix.add(renderer.group);
+    root.scale.setScalar(pcCharacterScale(classId, { characterScene:false, skin:0 }));
+
+    for (const spec of [attach.weaponRightSpec, attach.weaponLeftSpec]) {
+      if (!spec) continue;
+      const wr = await buildLinkedWeaponRenderer({ scene:null, camera:null }, spec);
+      const bone = renderer.bones?.[spec.linkBone];
+      if (!wr || !bone) {
+        // This renderer was not admitted to extras yet; dispose it separately.
+        wr?.dispose?.();
+        throw new Error(`NPC MODEL_PLAYER weapon bone ${spec.linkBone} inexistente`);
+      }
+      bone.add(wr.group);
+      extras.push(wr);
+    }
+    const anim = buildAnimationControl(renderer, classId, attach, { safeZone:()=>false });
+    let currentState = '';
+    const visual = {
+      root, bmdPath:'Player/Player.bmd', renderer, renderers:[{renderer,path:'Player/Player.bmd'}], extras,
+      setBodyLight(color) { renderer.setBodyLight?.(color); for (const wr of extras) wr.setBodyLight?.(color); },
+      setAction(idx) { const a=renderer.playAction('action_'+idx); if (a) a.timeScale=NPC_IDLE_SPEED; },
+      setActionFor(state) { currentState=state; anim?.play?.(state === 'walk' ? 'walk' : 'idle'); },
+      update(dt, elapsed=0) { renderer.update(dt, elapsed); for (const wr of extras) wr.update?.(dt, elapsed); },
+      dispose: release,
+    };
+    visual.setActionFor('idle');
+    return visual;
+  } catch (err) {
+    release();
+    throw err;
+  }
 }
 
 /**
@@ -145,8 +175,15 @@ async function loadCompositeNpcRenderer(rule) {
 
   if (!baseMeshes.length) throw new Error(`NPC composto sem meshes: ${rule.base}`);
   const renderer = new MUModelRenderer();
-  await renderer.initFromBMD({ ...base, meshes: baseMeshes, textures, source: `npc:${rule.base}+${(rule.parts || []).join('+')}` });
-  return renderer;
+  try {
+    await renderer.initFromBMD({ ...base, meshes: baseMeshes, textures, source: `npc:${rule.base}+${(rule.parts || []).join('+')}` });
+    return renderer;
+  } catch (err) {
+    try { renderer.dispose?.(); } catch (disposeErr) {
+      console.warn(`[NpcModel] partial BMD dispose failed: ${disposeErr?.message || disposeErr}`);
+    }
+    throw err;
+  }
 }
 
 export async function createNpcVisual(npcType, customRule = null) {
@@ -169,6 +206,7 @@ export async function createNpcVisual(npcType, customRule = null) {
   fix.add(baseRenderer.group);
 
   let currentAction = -1;
+  let disposed = false;
   const visual = {
     root,
     bmdPath: rule.base,
@@ -189,6 +227,15 @@ export async function createNpcVisual(npcType, customRule = null) {
     },
     update(dt, elapsed = 0) {
       for (const { renderer } of renderers) renderer.update(dt, elapsed);
+    },
+    // 0x14 DeleteViewport / world teardown calls Monster.dispose(), which
+    // delegates to this visual. Release the REAL NPC BMD renderer (including
+    // composite NPCs) instead of only detaching the mesh from the scene.
+    // MODEL_PLAYER NPCs already own a separate dispose() above.
+    dispose() {
+      if (disposed) return;
+      disposed = true;
+      for (const { renderer } of renderers) renderer.dispose?.();
     },
   };
   visual.setAction(0);

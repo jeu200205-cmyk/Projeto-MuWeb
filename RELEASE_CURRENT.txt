@@ -1,0 +1,7 @@
+MUWEB FIX154 (candidato) — source atual e scripts de inicializacao
+LIGAR_WEB_R90_FIX154.bat = entrypoint atual (nao e o FIX145).
+LIGAR_WEB_R90_FIX145.bat = ponte para o FIX154, mantido por compatibilidade.
+AUDITAR_MODELOS_FIX154.bat = censo de BMD fisico da pasta Data oficial.
+A pasta C:\clientepromax\Nova pasta\MuPromax 1.0.1\Data continua obrigatoria e nao e substituida por dados de teste.
+O log de origem rodava FIX153 mesmo com .bat rotulado FIX145.
+Validacao WebGL+GameServer real continua pendente; modelos custom completos exigem BMD e owners reais.

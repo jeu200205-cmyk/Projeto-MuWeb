@@ -25,13 +25,16 @@ import {pcIndoorObject,pcIndoorAlphaTarget,pcTerrainTileAt,stepPcIndoorAlpha} fr
 import { createPcMapParticleOwner, hasPcMapParticleVisual } from './PcMapParticles.js';
 import { createPcIcarusEnvironmentOwner } from './PcIcarusEnvironment.js';
 import { createPcIcarusBoidsOwner } from './PcIcarusBoids.js';
-import { createPcIcarusCloudField } from './PcIcarusCloudField.js';
 import { createPcLorenciaFaunaOwner } from './PcLorenciaFauna.js';
 import { createPcLorenciaEnvironmentOwner } from './PcLorenciaEnvironment.js';
 import { createPcLorenciaFishOwner } from './PcLorenciaFish.js';
 
 const ENTRY_SIZE = 30;
 const HEADER_SIZE = 4;
+// MAPS_ENGINE M110: MAP_SIZE is immutable for the loaded engine. Hoist its half-map
+// basis once so the measured static placement/terrain-light paths do not repeat the
+// same division for every instance. IEEE-754 result is identical to MAP_SIZE / 2.
+const HALF_MAP_SIZE = MAP_SIZE / 2;
 const BASIS = new THREE.Matrix4().makeRotationX(-Math.PI / 2);
 const BASIS_INV = BASIS.clone().invert();
 
@@ -182,17 +185,29 @@ export function parseTerrainObjects(raw) {
 }
 
 export function muObjectPositionToThree(obj, out = new THREE.Vector3()) {
-  return out.set(obj.x - MAP_SIZE / 2, obj.z, MAP_SIZE / 2 - obj.y);
+  return out.set(obj.x - HALF_MAP_SIZE, obj.z, HALF_MAP_SIZE - obj.y);
 }
 
-/** Converte a rotação local MU Z-up para Three Y-up por mudança de base. */
-export function muObjectQuaternion(obj, out = new THREE.Quaternion()) {
-  const rx = new THREE.Matrix4().makeRotationX(THREE.MathUtils.degToRad(obj.angleX));
-  const ry = new THREE.Matrix4().makeRotationY(THREE.MathUtils.degToRad(obj.angleY));
-  const rz = new THREE.Matrix4().makeRotationZ(THREE.MathUtils.degToRad(obj.angleZ));
-  // AngleMatrix legado: composição local XYZ representada por Rz*Ry*Rx.
-  const rMu = rz.clone().multiply(ry).multiply(rx);
-  const rThree = BASIS.clone().multiply(rMu).multiply(BASIS_INV);
+/**
+ * Converte a rotação local MU Z-up para Three Y-up por mudança de base.
+ * MAPS_ENGINE M126: optional per-load scratch reuses exactly the five matrices
+ * from the original Rz*Ry*Rx / BASIS conjugation. The exported two-argument
+ * behavior remains unchanged; no shared global mutable scratch is introduced.
+ * Placement workers never yield inside this synchronous math block.
+ */
+export function muObjectQuaternion(obj, out = new THREE.Quaternion(), scratch = null) {
+  const rx = scratch?.rx || new THREE.Matrix4();
+  const ry = scratch?.ry || new THREE.Matrix4();
+  const rz = scratch?.rz || new THREE.Matrix4();
+  const rMu = scratch?.rMu || new THREE.Matrix4();
+  const rThree = scratch?.rThree || new THREE.Matrix4();
+  rx.makeRotationX(THREE.MathUtils.degToRad(obj.angleX));
+  ry.makeRotationY(THREE.MathUtils.degToRad(obj.angleY));
+  rz.makeRotationZ(THREE.MathUtils.degToRad(obj.angleZ));
+  // Same multiply order as legacy: rz.clone().multiply(ry).multiply(rx).
+  rMu.copy(rz).multiply(ry).multiply(rx);
+  // Same BASIS clone/multiply order; preserve authored angles and handedness.
+  rThree.copy(BASIS).multiply(rMu).multiply(BASIS_INV);
   return out.setFromRotationMatrix(rThree).normalize();
 }
 
@@ -206,66 +221,187 @@ export function bakeStaticSkinnedGeometry(mesh) {
   const src = mesh?.geometry;
   if (!src?.getAttribute?.('position')) throw new Error('mesh sem position');
   const geo = src.clone();
-  const pos = src.getAttribute('position');
-  const out = new Float32Array(pos.count * 3);
-  const v = new THREE.Vector3();
+  // M137: caller cannot register this geometry for disposal until the bake
+  // returns. A malformed BMD bone/normal stream must release the partial clone.
+  try {
+    const pos = src.getAttribute('position');
+    const out = new Float32Array(pos.count * 3);
+    const v = new THREE.Vector3();
 
-  if (mesh.isSkinnedMesh && src.getAttribute('skinIndex') && src.getAttribute('skinWeight')) {
-    mesh.skeleton?.update?.();
-    for (let i = 0; i < pos.count; i++) {
-      v.fromBufferAttribute(pos, i);
-      mesh.applyBoneTransform(i, v);
-      out[i * 3] = v.x; out[i * 3 + 1] = v.y; out[i * 3 + 2] = v.z;
-    }
-    geo.setAttribute('position', new THREE.BufferAttribute(out, 3));
-    geo.deleteAttribute('skinIndex');
-    geo.deleteAttribute('skinWeight');
-    // Keep PC-authored smoothing and Normal_t.Node. Rebuilding triangle
-    // normals changes illumination at UV seams and across static props.
-    const normals = src.getAttribute('normal');
-    if (normals) {
-      const normalNodes = src.getAttribute('normalSkinIndex');
-      const skinNodes = src.getAttribute('skinIndex');
-      const weights = src.getAttribute('skinWeight');
-      const transformed = new Float32Array(normals.count * 3);
-      const boneMatrix = new THREE.Matrix4();
-      const skinMatrix = new THREE.Matrix4();
-      const rotation = new THREE.Matrix3();
-      for (let i = 0; i < normals.count; i++) {
-        if (normalNodes) {
-          boneMatrix.fromArray(mesh.skeleton.boneMatrices, normalNodes.getX(i) * 16);
-        } else {
-          // Retain Three's weighted normal skinning for non-BMD geometry.
-          boneMatrix.elements.fill(0);
-          for (let lane = 0; lane < 4; lane++) {
-            const node = skinNodes.array[i * 4 + lane];
-            const weight = weights.array[i * 4 + lane];
-            if (!weight) continue;
-            for (let k = 0; k < 16; k++) boneMatrix.elements[k] += mesh.skeleton.boneMatrices[node * 16 + k] * weight;
-          }
-        }
-        skinMatrix.multiplyMatrices(mesh.bindMatrixInverse, boneMatrix).multiply(mesh.bindMatrix);
-        rotation.setFromMatrix4(skinMatrix);
-        v.fromBufferAttribute(normals, i).applyMatrix3(rotation);
-        transformed[i * 3] = v.x; transformed[i * 3 + 1] = v.y; transformed[i * 3 + 2] = v.z;
+    if (mesh.isSkinnedMesh && src.getAttribute('skinIndex') && src.getAttribute('skinWeight')) {
+      mesh.skeleton?.update?.();
+      for (let i = 0; i < pos.count; i++) {
+        v.fromBufferAttribute(pos, i);
+        mesh.applyBoneTransform(i, v);
+        out[i * 3] = v.x; out[i * 3 + 1] = v.y; out[i * 3 + 2] = v.z;
       }
-      geo.setAttribute('normal', new THREE.BufferAttribute(transformed, 3));
-    } else geo.computeVertexNormals();
-    geo.deleteAttribute('normalSkinIndex');
+      geo.setAttribute('position', new THREE.BufferAttribute(out, 3));
+      geo.deleteAttribute('skinIndex');
+      geo.deleteAttribute('skinWeight');
+      // Keep PC-authored smoothing and Normal_t.Node. Rebuilding triangle
+      // normals changes illumination at UV seams and across static props.
+      const normals = src.getAttribute('normal');
+      if (normals) {
+        const normalNodes = src.getAttribute('normalSkinIndex');
+        const skinNodes = src.getAttribute('skinIndex');
+        const weights = src.getAttribute('skinWeight');
+        const transformed = new Float32Array(normals.count * 3);
+        const boneMatrix = new THREE.Matrix4();
+        const skinMatrix = new THREE.Matrix4();
+        const rotation = new THREE.Matrix3();
+        for (let i = 0; i < normals.count; i++) {
+          if (normalNodes) {
+            boneMatrix.fromArray(mesh.skeleton.boneMatrices, normalNodes.getX(i) * 16);
+          } else {
+            // Retain Three's weighted normal skinning for non-BMD geometry.
+            boneMatrix.elements.fill(0);
+            for (let lane = 0; lane < 4; lane++) {
+              const node = skinNodes.array[i * 4 + lane];
+              const weight = weights.array[i * 4 + lane];
+              if (!weight) continue;
+              for (let k = 0; k < 16; k++) boneMatrix.elements[k] += mesh.skeleton.boneMatrices[node * 16 + k] * weight;
+            }
+          }
+          skinMatrix.multiplyMatrices(mesh.bindMatrixInverse, boneMatrix).multiply(mesh.bindMatrix);
+          rotation.setFromMatrix4(skinMatrix);
+          v.fromBufferAttribute(normals, i).applyMatrix3(rotation);
+          transformed[i * 3] = v.x; transformed[i * 3 + 1] = v.y; transformed[i * 3 + 2] = v.z;
+        }
+        geo.setAttribute('normal', new THREE.BufferAttribute(transformed, 3));
+      } else geo.computeVertexNormals();
+      geo.deleteAttribute('normalSkinIndex');
+    }
+    geo.computeBoundingBox();
+    geo.computeBoundingSphere();
+    return geo;
+  } catch (e) {
+    try { geo.dispose?.(); } catch (_) { /* preserve original BMD failure */ }
+    throw e;
   }
-  geo.computeBoundingBox();
-  geo.computeBoundingSphere();
-  return geo;
 }
 
 /** Matriz que substitui outer(position/rotation/scale) -> inner(MU Z-up) -> child. */
-export function staticPlacementMatrix(obj, child = null, out = new THREE.Matrix4()) {
-  const pos = muObjectPositionToThree(obj, new THREE.Vector3());
-  const quat = muObjectQuaternion(obj, new THREE.Quaternion());
-  const scl = new THREE.Vector3(obj.scale, obj.scale, obj.scale);
-  const outer = new THREE.Matrix4().compose(pos, quat, scl);
-  const childLocal = child ? child.matrix.clone() : new THREE.Matrix4();
-  return out.copy(outer).multiply(BASIS).multiply(childLocal);
+export function createStaticPlacementScratch() {
+  return {
+    pos: new THREE.Vector3(), quat: new THREE.Quaternion(), scl: new THREE.Vector3(),
+    rx: new THREE.Matrix4(), ry: new THREE.Matrix4(), rz: new THREE.Matrix4(),
+    rMu: new THREE.Matrix4(), rThree: new THREE.Matrix4(), outer: new THREE.Matrix4(),
+    // M94: one-entry MRU avoids nested Map traversal for consecutive authored rotations.
+    lastAngleX: 0, lastAngleY: 0, lastAngleZ: 0, lastRotationValid: false,
+    lastQuat: new THREE.Quaternion(), rotationMruHits: 0, rotationMapHits: 0, rotationMisses: 0,
+    // M114: uniform scale MRU; Object.is preserves authored -0/NaN semantics exactly.
+    lastUniformScale: 0, lastUniformScaleValid: false, scaleMruHits: 0, scaleWrites: 0,
+  };
+}
+
+/**
+ * MAPS_ENGINE M82: allocation-free hot path for static placement batching.
+ * M75/M81 physical profiling isolates staticBatch as a dominant World1 phase.
+ * The previous helper allocated 3 vectors/quaternions plus 6+ Matrix4 objects
+ * for EVERY placement (muObjectQuaternion clones included). Reuse one scratch
+ * set per synchronous static-batch build. Matrix order and numeric operations
+ * remain identical; no placement/material/terrain-light/mesh content changes.
+ */
+export function staticPlacementMatrix(obj, child = null, out = new THREE.Matrix4(), scratch = null, rotationCache = null, positionX = undefined, positionY = undefined, positionZ = undefined) {
+  const sc = scratch || createStaticPlacementScratch();
+  // MAPS_ENGINE M108: staticPlacementMatrix is the measured staticBatch hot path.
+  // Avoid the helper call/property rereads for position while preserving the exact
+  // MU->Three mapping used by muObjectPositionToThree(): x-half, z, half-y.
+  // Keep the exported helper unchanged for all non-batch callers.
+  // MAPS_ENGINE M111: the instanceFill caller already snapshots x/y for region
+  // attribution and terrain BodyLight. Accept that snapshot so staticPlacementMatrix
+  // does not resolve x/y from the placement object a second time. z is included in
+  // the same immutable snapshot. Non-batch callers keep the exact legacy reads.
+  // MAPS_ENGINE M112: M111 proved that instanceFill already owns the exact x/y/z
+  // snapshot. Pass those primitive values directly instead of mutating/reading a
+  // scratch snapshot object for every placement. Undefined is only the sentinel
+  // used by legacy/non-batch callers; authored numeric values (including 0) pass
+  // through unchanged. This removes three scratch writes + three scratch reads
+  // from the dominant fill without changing mapping, placement order or content.
+  const px = positionX === undefined ? obj.x : positionX;
+  const py = positionY === undefined ? obj.y : positionY;
+  const pz = positionZ === undefined ? obj.z : positionZ;
+  sc.pos.set(px - HALF_MAP_SIZE, pz, HALF_MAP_SIZE - py);
+  // MAPS_ENGINE M92: map placements overwhelmingly reuse authored angle triples
+  // inside one ObjectXX family. Cache the exact quaternion produced by the old
+  // Rz*Ry*Rx -> MU/Three basis conversion per serial, so repeated placements do
+  // not rebuild six rotation matrices. The first occurrence uses the unchanged
+  // numeric path below; later occurrences only copy that exact quaternion.
+  // MAPS_ENGINE M93: keep M92 reuse but remove the per-placement template-string
+  // allocation/hash from the hot loop. Numeric nested Maps preserve the exact
+  // authored angle triple identity while allocating only on first-seen triples.
+  let cachedRotation = null;
+  let rotationZMap = null;
+  // MAPS_ENGINE M107: angleX/Y/Z feed the MRU test, nested rotation cache,
+  // miss-path matrix construction and MRU refresh. Snapshot each authored value
+  // once per placement so the dominant staticBatch fill does not repeatedly
+  // resolve the same object properties. Numeric identity and cache keys are
+  // unchanged; this is only hot-path property-access reduction.
+  const angleX = obj.angleX;
+  const angleY = obj.angleY;
+  const angleZ = obj.angleZ;
+  // MAPS_ENGINE M94: spatial/object data commonly contains runs with the same
+  // authored rotation. Before traversing the three-level M93 cache, test one
+  // scratch-local MRU entry. This removes Map hashing/lookups on the common run
+  // path while preserving exact angle identity and the cached quaternion bytes.
+  // It is local to the synchronous static-batch scratch and cannot leak maps.
+  const m94MruHit = sc.lastRotationValid &&
+    sc.lastAngleX === angleX && sc.lastAngleY === angleY && sc.lastAngleZ === angleZ;
+  if (m94MruHit) {
+    cachedRotation = sc.lastQuat;
+    sc.rotationMruHits++;
+  } else if (rotationCache) {
+    let rotationYMap = rotationCache.get(angleX);
+    if (rotationYMap) rotationZMap = rotationYMap.get(angleY) || null;
+    cachedRotation = rotationZMap?.get(angleZ) || null;
+    if (cachedRotation) sc.rotationMapHits++;
+  }
+  if (cachedRotation) {
+    sc.quat.copy(cachedRotation);
+  } else {
+    sc.rotationMisses++;
+    sc.rx.makeRotationX(THREE.MathUtils.degToRad(angleX));
+    sc.ry.makeRotationY(THREE.MathUtils.degToRad(angleY));
+    sc.rz.makeRotationZ(THREE.MathUtils.degToRad(angleZ));
+    sc.rMu.copy(sc.rz).multiply(sc.ry).multiply(sc.rx);
+    sc.rThree.copy(BASIS).multiply(sc.rMu).multiply(BASIS_INV);
+    sc.quat.setFromRotationMatrix(sc.rThree).normalize();
+    if (rotationCache) {
+      let rotationYMap = rotationCache.get(angleX);
+      if (!rotationYMap) rotationCache.set(angleX, rotationYMap = new Map());
+      rotationZMap = rotationYMap.get(angleY);
+      if (!rotationZMap) rotationYMap.set(angleY, rotationZMap = new Map());
+      rotationZMap.set(angleZ, sc.quat.clone());
+    }
+  }
+  // Refresh MRU from the exact quaternion selected/generated above.
+  // MAPS_ENGINE M113: on an M94 MRU hit these fields already contain this exact
+  // angle triple/quaternion, so rewriting three scalars plus copying the same
+  // quaternion back into lastQuat is redundant. Refresh only after map-hit/miss.
+  if (!m94MruHit) {
+    sc.lastAngleX = angleX; sc.lastAngleY = angleY; sc.lastAngleZ = angleZ;
+    sc.lastQuat.copy(sc.quat); sc.lastRotationValid = true;
+  }
+  // MAPS_ENGINE M109: scale is uniform and authored once per placement. Snapshot
+  // it once instead of resolving the authored scale three times while filling the measured
+  // staticBatch instance path. The resulting Vector3 is numerically identical.
+  const uniformScale = obj.scale;
+  // MAPS_ENGINE M114: static object families commonly contain runs of the same
+  // authored uniform scale. Avoid rewriting the scratch Vector3 when the exact
+  // scalar is unchanged. Object.is (rather than ===) keeps -0 distinct and NaN
+  // stable, so the resulting compose input is byte/semantic-equivalent.
+  if (sc.lastUniformScaleValid && Object.is(sc.lastUniformScale, uniformScale)) {
+    sc.scaleMruHits++;
+  } else {
+    sc.scl.set(uniformScale, uniformScale, uniformScale);
+    sc.lastUniformScale = uniformScale;
+    sc.lastUniformScaleValid = true;
+    sc.scaleWrites++;
+  }
+  sc.outer.compose(sc.pos, sc.quat, sc.scl);
+  out.copy(sc.outer).multiply(BASIS);
+  if (child) out.multiply(child.matrix);
+  return out;
 }
 
 // R15.4: vários ObjectXX.bmd dividem a mesma textura/material entre submeshes.
@@ -274,37 +410,219 @@ export function staticPlacementMatrix(obj, child = null, out = new THREE.Matrix4
 // equivalente, preservando exatamente triângulos/UV/normais e producer visual.
 // O merge é fail-closed: qualquer diferença de atributos/material mantém o path
 // antigo. Nenhum placement, triângulo ou material é descartado.
+// M134: the previous coarse key compared material.map and a few render flags,
+// but not ShaderMaterial's ACTUAL GPU inputs. Two different BMD shaders could
+// therefore be fused into one draw while using only the first material's map,
+// hasMap, chrome flags, BodyLight, alpha, lighting or UV scroll. This is a
+// correctness issue, not an optimization opportunity. Keep the cheap legacy
+// key for ordinary materials, but fail closed on unknown ShaderMaterial state.
+// Shader sources are compared as exact strings and assigned collision-free IDs;
+// this avoids inserting multi-KB shader programs into every cluster key.
+const m134ShaderProgramIds = new Map();
+const m134OpaqueMaterialIds = new WeakMap();
+let m134NextMaterialId = 1;
+function m134ObjectIdentity(value) {
+  if (value === null || (typeof value !== 'object' && typeof value !== 'function')) return 'invalid';
+  let id = m134OpaqueMaterialIds.get(value);
+  if (!id) { id = m134NextMaterialId++; m134OpaqueMaterialIds.set(value, id); }
+  return id;
+}
+function m134ShaderProgramId(mat) {
+  if (typeof mat.vertexShader !== 'string' || typeof mat.fragmentShader !== 'string') return null;
+  // Nested maps compare both sources exactly, without hash collisions.
+  let fragments = m134ShaderProgramIds.get(mat.vertexShader);
+  if (!fragments) { fragments = new Map(); m134ShaderProgramIds.set(mat.vertexShader, fragments); }
+  let id = fragments.get(mat.fragmentShader);
+  if (!id) { id = m134NextMaterialId++; fragments.set(mat.fragmentShader, id); }
+  return id;
+}
+function m134UniformValueKey(value, depth = 0) {
+  if (value === null) return 'null';
+  if (value === undefined) return 'undefined';
+  if (typeof value === 'boolean') return value ? 'true' : 'false';
+  if (typeof value === 'number') return `n:${Object.is(value, -0) ? '-0' : String(value)}`;
+  if (typeof value === 'string') return `s:${JSON.stringify(value)}`;
+  if (depth > 3) return null; // unexpected nested owner: do not fuse
+  if (value.isTexture) {
+    // A texture UUID identifies one mutable sampler/upload owner. Comparing
+    // only texture.source.uuid would incorrectly merge distinct wrap/filter
+    // states sharing the same pixels.
+    return typeof value.uuid === 'string' ? `texture:${value.uuid}` : null;
+  }
+  if (value.isColor) return `color:${value.r},${value.g},${value.b}`;
+  if (value.isVector2) return `v2:${value.x},${value.y}`;
+  if (value.isVector3) return `v3:${value.x},${value.y},${value.z}`;
+  if (value.isVector4) return `v4:${value.x},${value.y},${value.z},${value.w}`;
+  if (value.isEuler) return `euler:${value.x},${value.y},${value.z},${value.order}`;
+  if (value.isMatrix3 || value.isMatrix4) {
+    const arr = value.elements;
+    return arr && arr.length === (value.isMatrix3 ? 9 : 16) ? `mat:${Array.from(arr).join(',')}` : null;
+  }
+  if (Array.isArray(value) || ArrayBuffer.isView(value)) {
+    const values = [];
+    for (const item of value) {
+      const key = m134UniformValueKey(item, depth + 1);
+      if (key === null) return null;
+      values.push(key);
+    }
+    return `[${values.join(',')}]`;
+  }
+  return null; // arbitrary object/function uniform: material identity only
+}
+function m134ShaderStateKey(mat) {
+  // User hooks can mutate the final WebGL program independently of uniforms.
+  // Do not assume two separately owned hook-bearing materials are equivalent.
+  if (Object.hasOwn(mat, 'onBeforeCompile') || Object.hasOwn(mat, 'customProgramCacheKey')) return null;
+  if (mat.uniformsGroups?.length || mat.clippingPlanes?.length) return null;
+  const program = m134ShaderProgramId(mat);
+  if (program === null || !mat.uniforms || typeof mat.uniforms !== 'object') return null;
+  const uniforms = [];
+  for (const name of Object.keys(mat.uniforms).sort()) {
+    const uniform = mat.uniforms[name];
+    if (!uniform || !Object.hasOwn(uniform, 'value')) return null;
+    const value = m134UniformValueKey(uniform.value);
+    if (value === null) return null;
+    uniforms.push(`${JSON.stringify(name)}=${value}`);
+  }
+  const defines = [];
+  for (const name of Object.keys(mat.defines || {}).sort()) {
+    const value = m134UniformValueKey(mat.defines[name]);
+    if (value === null) return null;
+    defines.push(`${JSON.stringify(name)}=${value}`);
+  }
+  // Include every state that can change shader compilation, depth, blending,
+  // stencil or rasterization, not only the original staticMaterialKey fields.
+  const stateFields = [
+    'glslVersion','precision','lights','fog','clipping','toneMapped','premultipliedAlpha',
+    'dithering','alphaToCoverage','colorWrite','depthFunc','stencilWrite',
+    'stencilWriteMask','stencilFunc','stencilRef','stencilFuncMask',
+    'stencilFail','stencilZFail','stencilZPass','polygonOffset',
+    'polygonOffsetFactor','polygonOffsetUnits','blendSrc','blendDst',
+    'blendEquation','blendSrcAlpha','blendDstAlpha','blendEquationAlpha',
+    'forceSinglePass','wireframe','wireframeLinewidth','visible',
+    'clipIntersection','clipShadows','shadowSide','alphaHash','blendAlpha',
+    'blendColor','blendDstAlpha','blendEquationAlpha'
+  ];
+  const states = [];
+  for (const name of stateFields) {
+    const key = m134UniformValueKey(mat[name]);
+    if (key === null) return null;
+    states.push(key);
+  }
+  // ShaderMaterial.extensions are plain feature toggles; any unknown nested
+  // value falls back to unique owner rather than assuming shader equivalence.
+  const extensions = [];
+  for (const name of Object.keys(mat.extensions || {}).sort()) {
+    const key = m134UniformValueKey(mat.extensions[name]);
+    if (key === null) return null;
+    extensions.push(`${JSON.stringify(name)}=${key}`);
+  }
+  // M135: shader defaults are injected when an attribute is absent from the
+  // BMD geometry. Equal uniforms do NOT imply equal pixels if one shader uses
+  // a different fallback color/UV or binds a different index-0 attribute.
+  const defaults = [];
+  for (const name of Object.keys(mat.defaultAttributeValues || {}).sort()) {
+    const key = m134UniformValueKey(mat.defaultAttributeValues[name]);
+    if (key === null) return null;
+    defaults.push(`${JSON.stringify(name)}=${key}`);
+  }
+  const index0 = m134UniformValueKey(mat.index0AttributeName);
+  if (index0 === null) return null;
+  return `${program}|${states.join('|')}|${defines.join(';')}|${extensions.join(';')}|${defaults.join(';')}|${index0}|${uniforms.join(';')}`;
+}
+// M135: the former legacy key for non-shader materials ignored secondary
+// texture samplers, light maps, environment maps, stencil and other GPU state.
+// Preserve the fast structural grouping for ordinary MeshBasicMaterial only,
+// with its complete supported input set. Other material classes or custom
+// program hooks stay on their exact authored owner (fail closed). BMD
+// ShaderMaterial grouping above is unchanged except for attribute defaults.
+function m135BasicMaterialStateKey(mat) {
+  if (mat.type !== 'MeshBasicMaterial' ||
+      Object.hasOwn(mat, 'onBeforeCompile') || Object.hasOwn(mat, 'customProgramCacheKey') ||
+      mat.clippingPlanes?.length || mat.uniformsGroups?.length) return null;
+  const fields = [
+    'map','alphaMap','aoMap','lightMap','envMap','specularMap',
+    'normalMap','bumpMap','displacementMap','emissiveMap','metalnessMap',
+    'roughnessMap','matcap','gradientMap','color','lightMapIntensity',
+    'aoMapIntensity','envMapIntensity','envMapRotation','reflectivity','refractionRatio',
+    'combine','fog','toneMapped','colorWrite','depthFunc','polygonOffset',
+    'polygonOffsetFactor','polygonOffsetUnits','premultipliedAlpha',
+    'alphaToCoverage','dithering','stencilWrite','stencilWriteMask',
+    'stencilFunc','stencilRef','stencilFuncMask','stencilFail',
+    'stencilZFail','stencilZPass','blendSrc','blendDst','blendEquation',
+    'blendSrcAlpha','blendDstAlpha','blendEquationAlpha','wireframe',
+    'wireframeLinewidth','wireframeLinecap','wireframeLinejoin',
+    'visible','side','shadowSide','vertexColors','alphaTest',
+    'transparent','opacity','depthWrite','depthTest','blending',
+    'clipIntersection','clipShadows','forceSinglePass','alphaHash',
+    'blendAlpha','blendColor',
+  ];
+  const keys = [];
+  for (const field of fields) {
+    const key = m134UniformValueKey(mat[field]);
+    if (key === null) return null;
+    keys.push(key);
+  }
+  return keys.join('|');
+}
 export function staticMaterialKey(mat) {
   if (!mat) return 'null';
-  const map = mat.map?.source?.uuid || mat.map?.uuid || 'nomap';
+  const map = mat.map?.uuid || 'nomap';
   const color = mat.color?.getHexString?.() || '';
-  return [mat.type, map, color, mat.transparent ? 1 : 0, Number(mat.alphaTest || 0),
+  const base = [mat.type, map, color, mat.transparent ? 1 : 0, Number(mat.alphaTest || 0),
     mat.depthWrite ? 1 : 0, mat.depthTest ? 1 : 0, mat.side, mat.blending,
     Number(mat.opacity ?? 1), Number(mat.metalness ?? 0), Number(mat.roughness ?? 1), mat.vertexColors ? 1 : 0].join('|');
+  if (!mat.isShaderMaterial) {
+    const basicState = m135BasicMaterialStateKey(mat);
+    return basicState === null
+      ? `${base}|material-owner:${m134ObjectIdentity(mat)}`
+      : `${base}|basic-state:${basicState}`;
+  }
+  const shaderState = m134ShaderStateKey(mat);
+  return shaderState === null
+    ? `${base}|shader-owner:${m134ObjectIdentity(mat)}`
+    : `${base}|shader-state:${shaderState}`;
 }
 
 export function mergeStaticGeometries(parts) {
   if (!parts?.length) return null;
   const geos = [];
+  let out = null;
+  // M139: CPU transport can pass a single packed Float32 matrix buffer for
+  // the whole bin. Rehydrate into one scratch Matrix4 instead of allocating a
+  // Matrix4 clone for every placement. Legacy part.matrix remains supported.
+  const packedMatrixScratch = parts.some(p => p.matrixElements) ? new THREE.Matrix4() : null;
   try {
     for (const part of parts) {
       let g = part.geometry.index ? part.geometry.toNonIndexed() : part.geometry.clone();
-      g.applyMatrix4(part.matrix);
+      // M137: own the temporary clone BEFORE transforms/vertex-color writes.
+      // A corrupt BMD attribute or failing transform must not strand its CPU/GPU
+      // geometry lease outside the transport transaction's rollback path.
+      geos.push(g);
+      const placementMatrix = part.matrixElements
+        ? packedMatrixScratch.fromArray(part.matrixElements, part.matrixOffset)
+        : part.matrix;
+      g.applyMatrix4(placementMatrix);
       // R73 visual parity: CPU transport merges must not erase the per-object
       // BodyLight that existed as InstancedMesh.instanceColor.  When a part
       // carries an authored placement color, expand it to a normal vertex-color
       // attribute before concatenation; the BMD shader consumes this as a
       // second BodyLight multiplier only on the merged material clone.
-      if (part.color) {
+      // M138: CPU transport carries sampled BodyLight as three primitive
+      // values on the existing part object. Avoid a THREE.Color allocation
+      // per placement while retaining exact Float32 RGB writes.
+      // Legacy callers with part.color remain supported.
+      if (part.color || part.hasInstanceBodyLight) {
         const count = g.getAttribute('position')?.count || 0;
-        const c = part.color;
+        const r = part.color ? part.color.r : part.colorR;
+        const green = part.color ? part.color.g : part.colorG;
+        const b = part.color ? part.color.b : part.colorB;
         const arr = new Float32Array(count * 3);
         for (let i = 0; i < count; i++) {
-          arr[i*3] = c.r; arr[i*3+1] = c.g; arr[i*3+2] = c.b;
+          arr[i*3] = r; arr[i*3+1] = green; arr[i*3+2] = b;
         }
         g.setAttribute('color', new THREE.BufferAttribute(arr, 3));
       }
-      geos.push(g);
     }
     const names = Object.keys(geos[0].attributes).sort();
     if (!names.includes('position')) return null;
@@ -314,7 +632,7 @@ export function mergeStaticGeometries(parts) {
       const gs = ns.map(n => { const a=g.getAttribute(n); return `${n}:${a.itemSize}:${a.normalized?1:0}:${a.array.constructor.name}`; }).join(',');
       if (gs !== sig) return null;
     }
-    const out = new THREE.BufferGeometry();
+    out = new THREE.BufferGeometry();
     for (const name of names) {
       const first = geos[0].getAttribute(name);
       const Ctor = first.array.constructor;
@@ -326,6 +644,11 @@ export function mergeStaticGeometries(parts) {
     }
     out.computeBoundingBox(); out.computeBoundingSphere();
     return out;
+  } catch (e) {
+    // M137: a partially assembled merged BufferGeometry has no caller owner
+    // until return. Release it even if attribute/bounds creation throws.
+    try { out?.dispose?.(); } catch (_) { /* preserve original error */ }
+    throw e;
   } finally {
     for (const g of geos) try { g.dispose?.(); } catch (_) {}
   }
@@ -365,14 +688,31 @@ export function spatialBatchKey(obj, chunkTiles = DEFAULT_STATIC_BATCH_TILES) {
 }
 
 export function partitionSpatialPlacements(placements, chunkTiles = DEFAULT_STATIC_BATCH_TILES) {
+  return partitionSpatialPlacementsProfiled(placements, chunkTiles).groups;
+}
+
+// MAPS_ENGINE M85: build the baseline spatial grid and exact placement bounds
+// in the SAME traversal. M83 removed a duplicate grid build for non-compact
+// serials, but partitionAdaptiveSpatialPlacements still rescanned every placement
+// solely to recover min/max bounds. World1 staticBatch is a measured dominant
+// entry phase, so keep those bounds beside the grid and reuse them below.
+// This is bookkeeping only: group keys, members and insertion order are unchanged.
+export function partitionSpatialPlacementsProfiled(placements, chunkTiles = DEFAULT_STATIC_BATCH_TILES) {
   const groups = new Map();
+  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+  let count = 0;
   for (const item of placements || []) {
-    const key = spatialBatchKey(item.obj || item, chunkTiles);
+    const o = item.obj || item;
+    const x = Number(o?.x || 0), y = Number(o?.y || 0);
+    if (x < minX) minX = x; if (x > maxX) maxX = x;
+    if (y < minY) minY = y; if (y > maxY) maxY = y;
+    const key = spatialBatchKey(o, chunkTiles);
     let arr = groups.get(key);
     if (!arr) groups.set(key, arr = []);
     arr.push(item);
+    count++;
   }
-  return groups;
+  return { groups, bounds: { minX, maxX, minY, maxY, count } };
 }
 
 // R15.7 PERF: serials estáticos espacialmente compactos não precisam pagar
@@ -382,19 +722,27 @@ export function partitionSpatialPlacements(placements, chunkTiles = DEFAULT_STAT
 // todas as instâncias reais, então o frustum segue fail-closed: nada é removido,
 // nenhuma distância/LOD é alterada e serials espalhados continuam no grid R15.5.
 const COMPACT_SERIAL_SPAN_TILES = 64;
-export function partitionAdaptiveSpatialPlacements(placements, chunkTiles = DEFAULT_STATIC_BATCH_TILES, compactSpanTiles = COMPACT_SERIAL_SPAN_TILES) {
+export function partitionAdaptiveSpatialPlacements(placements, chunkTiles = DEFAULT_STATIC_BATCH_TILES, compactSpanTiles = COMPACT_SERIAL_SPAN_TILES, baselineGroups = null, baselineBounds = null) {
   const items = placements || [];
   if (items.length <= 1) return new Map(items.length ? [['compact', items]] : []);
-  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
-  for (const item of items) {
-    const o = item.obj || item;
-    const x = Number(o?.x || 0), y = Number(o?.y || 0);
-    if (x < minX) minX = x; if (x > maxX) maxX = x;
-    if (y < minY) minY = y; if (y > maxY) maxY = y;
+  let minX, maxX, minY, maxY;
+  if (baselineBounds && baselineBounds.count === items.length) {
+    ({ minX, maxX, minY, maxY } = baselineBounds);
+  } else {
+    minX = Infinity; maxX = -Infinity; minY = Infinity; maxY = -Infinity;
+    for (const item of items) {
+      const o = item.obj || item;
+      const x = Number(o?.x || 0), y = Number(o?.y || 0);
+      if (x < minX) minX = x; if (x > maxX) maxX = x;
+      if (y < minY) minY = y; if (y > maxY) maxY = y;
+    }
   }
   const limit = Math.max(1, compactSpanTiles) * TERRAIN_SCALE;
   if ((maxX - minX) <= limit && (maxY - minY) <= limit) return new Map([['compact', items]]);
-  return partitionSpatialPlacements(items, chunkTiles);
+  // MAPS_ENGINE M83: callers that already built the baseline grid for metrics
+  // can reuse it here. This avoids a second full placement->grid pass for every
+  // non-compact serial while preserving the exact same cluster keys/members.
+  return baselineGroups || partitionSpatialPlacements(items, chunkTiles);
 }
 
 // R15.8 PERF: second-stage transport compaction. R15.4/R15.7 already
@@ -404,8 +752,78 @@ export function partitionAdaptiveSpatialPlacements(placements, chunkTiles = DEFA
 // per-object frustum culling. This pass is deliberately fail-closed: opaque only,
 // identical attribute layout/index mode, positive transforms, and runtime feature
 // detection. Any unsupported/failed group remains on the proven InstancedMesh path.
+// M136: a transport may only replace a source draw when its geometry is
+// rendered in full, as one primitive stream, and no source-local callback or
+// shadow override owns its presentation. CPU merge expands every vertex and
+// discards BufferGeometry.groups/drawRange; BatchedMesh uses one material and
+// one per-object geometry ID. Combining partial/multi-group/morph geometries
+// would silently add triangles or erase per-draw semantics. Keep those original
+// InstancedMesh owners instead (no content deletion). The ordinary baked BMD
+// geometry path (one complete stream, no custom hooks) remains eligible.
+export function pcMapStaticGeometryTransportSafe(geo) {
+  const pos = geo?.getAttribute?.('position') || geo?.attributes?.position;
+  if (!pos || geo.isInstancedBufferGeometry || geo.groups?.length) return false;
+  const total = geo.index?.count ?? pos.count;
+  const range = geo.drawRange;
+  if (range && (range.start !== 0 ||
+      (range.count !== Infinity && !(Number.isFinite(range.count) && range.count >= total)))) return false;
+  if (Object.values(geo.morphAttributes || {}).some(attrs => attrs?.length)) return false;
+  if (geo.index?.isInterleavedBufferAttribute ||
+      Object.values(geo.attributes || {}).some(attr => attr?.isInterleavedBufferAttribute || attr?.isInstancedBufferAttribute)) return false;
+  // M137: mergeStaticGeometries constructs ordinary BufferAttributes. Custom
+  // integer GPU attribute types or incomplete vertex streams would silently
+  // change shader inputs if repacked; retain the original BMD geometry.
+  if (Object.values(geo.attributes || {}).some(attr =>
+    (attr?.gpuType !== undefined && attr.gpuType !== THREE.FloatType) ||
+    (attr?.count !== undefined && attr.count !== pos.count))) return false;
+  return true;
+}
+
+
+// MAPS_ENGINE M137: template submesh fusion happens BEFORE the M136 static
+// transport gate.  The same full-draw safety rules must apply here: merging
+// partial/grouped geometry can add hidden triangles or erase material groups.
+// A fused render part has no single child transform, but it must retain a
+// common presentation owner (visibility, shadows, order, layers).  If authored
+// children disagree, keep their separate InstancedMesh render parts.
+// Blended/depth-independent BMD passes depend on per-mesh submission order.
+// Geometry fusion and cross-serial transport are only provably order-neutral
+// for ordinary opaque depth-tested, depth-writing passes. Preserve every
+// authored glow/chrome/additive source on its existing render owner.
+export function pcMapStaticOpaqueTransportSafe(mat) {
+  return !!mat && !mat.transparent && !mat.wireframe && mat.depthWrite !== false && mat.depthTest !== false &&
+    (mat.blending === undefined || mat.blending === (THREE.NormalBlending ?? 1));
+}
+
+export function pcMapStaticTemplateFusionSafe(parts) {
+  if (!Array.isArray(parts) || parts.length < 2) return false;
+  const first = parts[0]?.child;
+  if (!first) return false;
+  const hooks = ['onBeforeRender', 'onAfterRender', 'onBeforeShadow', 'onAfterShadow'];
+  const safeChild = (child) => {
+    if (!child || Array.isArray(child.material) || !pcMapStaticOpaqueTransportSafe(child.material) ||
+        child.customDepthMaterial || child.customDistanceMaterial) return false;
+    for (const name of hooks) {
+      const hook = child[name];
+      if (typeof hook === 'function' &&
+          (Object.hasOwn(child, name) || hook !== THREE.Object3D?.prototype?.[name])) return false;
+    }
+    return true;
+  };
+  if (!safeChild(first)) return false;
+  const flags = (child) => [child.visible !== false, !!child.castShadow, !!child.receiveShadow,
+    child.renderOrder ?? 0, child.layers?.mask ?? 1];
+  const reference = flags(first);
+  for (const part of parts) {
+    if (!pcMapStaticGeometryTransportSafe(part?.baked) || !safeChild(part?.child)) return false;
+    const actual = flags(part.child);
+    for (let i = 0; i < reference.length; i++) if (!Object.is(reference[i], actual[i])) return false;
+  }
+  return true;
+}
+
 export function staticGeometryLayoutKey(geometry) {
-  if (!geometry?.attributes?.position) return null;
+  if (!pcMapStaticGeometryTransportSafe(geometry)) return null;
   const names = Object.keys(geometry.attributes).sort();
   const attrs = names.map((n) => {
     const a = geometry.getAttribute(n);
@@ -415,7 +833,7 @@ export function staticGeometryLayoutKey(geometry) {
 }
 
 export function compactStaticInstancedTransport(root, meshes, options = {}) {
-  const result = { multiDrawSupported: options.multiDrawSupported !== false, attemptedGroups: 0, batchedGroups: 0, sourceDraws: 0, batchedDraws: 0, sourceInstances: 0, expandedVertices: 0, expandedIndices: 0, skippedBudget: 0, packingCandidates: 0, packingSelected: 0, packingSavedDraws: 0, mode: 'none' };
+  const result = { multiDrawSupported: options.multiDrawSupported !== false, attemptedGroups: 0, batchedGroups: 0, sourceDraws: 0, batchedDraws: 0, sourceInstances: 0, expandedVertices: 0, expandedIndices: 0, skippedBudget: 0, skippedUnsafeGeometry: 0, skippedCustomRenderOwner: 0, skippedAuthoredVertexColor: 0, skippedOrderDependentMaterial: 0, packingCandidates: 0, packingSelected: 0, packingSavedDraws: 0, mode: 'none' };
   if (!THREE.BatchedMesh || !Array.isArray(meshes) || meshes.length < 2) return result;
   // R15.11 PERF: BatchedMesh only reduces physical GPU submissions on r160
   // when WEBGL_multi_draw exists. Without it Three's WebGL backend explicitly
@@ -439,17 +857,74 @@ export function compactStaticInstancedTransport(root, meshes, options = {}) {
   const R160_MAX_EXPANDED_INDICES = 360000;
   const R160_MAX_GEOMETRY_IDS = 256;
   const groups = new Map();
+  // M133: all spatial clusters of a serial share the same immutable baked
+  // BufferGeometry. Resolve its attribute/index signature once per transport
+  // invocation, not once per cluster. WeakMap is load-local and cannot retain
+  // BMD geometries across map transitions.
+  const m133LayoutByGeometry = new WeakMap();
+  // M134: one immutable material-state snapshot per transport invocation.
+  // No cross-map/global cache: runtime uniforms may change after the build.
+  const m134MaterialKeys = new WeakMap();
+  // M136: allocate hook names once per transport, not per spatial cluster.
+  const m136RenderHooks = ['onBeforeRender','onAfterRender','onBeforeShadow','onAfterShadow'];
   for (const mesh of meshes) {
+    // Per-mesh callbacks/shadow overrides cannot be replayed by a merged
+    // transport. Keep their exact authored InstancedMesh draw owner.
+    let m136CustomHook = false;
+    for (const name of m136RenderHooks) {
+      const hook = mesh?.[name];
+      // Object3D's built-in no-op is safe; own OR inherited custom hooks
+      // are not replayed by a transport that replaces the source mesh.
+      if (typeof hook === 'function' &&
+          (Object.hasOwn(mesh, name) || hook !== THREE.Object3D?.prototype?.[name])) {
+        m136CustomHook = true;
+        break;
+      }
+    }
+    if (Array.isArray(mesh?.material) || mesh?.customDepthMaterial || mesh?.customDistanceMaterial || m136CustomHook) {
+      result.skippedCustomRenderOwner++;
+      continue;
+    }
     const mat = mesh?.material;
-    const layout = staticGeometryLayoutKey(mesh?.geometry);
-    if (!mat || mat.transparent || !layout || !mesh.count) continue;
-    const key = `${staticMaterialKey(mat)}||${layout}`;
+    const geometry = mesh?.geometry;
+    // M137: r160's per-geometry BodyLight expansion overwrites an authored
+    // vertex-color attribute.  Preserve the original InstancedMesh instead of
+    // replacing its PC BMD color stream (modern addInstance keeps the source).
+    if (!modernInstances && geometry?.getAttribute?.('color')) {
+      result.skippedAuthoredVertexColor++;
+      continue;
+    }
+    let layout = null;
+    if (geometry) {
+      if (m133LayoutByGeometry.has(geometry)) layout = m133LayoutByGeometry.get(geometry);
+      else { layout = staticGeometryLayoutKey(geometry); m133LayoutByGeometry.set(geometry, layout); }
+    }
+    if (geometry && !layout) result.skippedUnsafeGeometry++;
+    if (!mat) continue;
+    if (mat.transparent || mat.wireframe || mat.depthWrite === false || mat.depthTest === false ||
+        (mat.blending !== undefined && mat.blending !== (THREE.NormalBlending ?? 1))) {
+      result.skippedOrderDependentMaterial++;
+      continue;
+    }
+    if (!layout || !mesh.count) continue;
+    let materialKey = m134MaterialKeys.get(mat);
+    if (materialKey === undefined) { materialKey = staticMaterialKey(mat); m134MaterialKeys.set(mat, materialKey); }
+    // M134: BatchedMesh has one visible/shadow/render-order/layer owner.
+    // Do not combine authored sources with different presentation flags.
+    const flags = `${mesh.visible ? 1 : 0}|${mesh.castShadow ? 1 : 0}|${mesh.receiveShadow ? 1 : 0}|${mesh.renderOrder ?? 0}|${mesh.layers?.mask ?? 1}`;
+    const key = `${materialKey}||${layout}||${flags}`;
     let arr = groups.get(key); if (!arr) groups.set(key, arr = []);
     arr.push(mesh);
   }
   for (const rawSource of groups.values()) {
     if (rawSource.length < 2) continue; // one InstancedMesh is already one draw
     result.attemptedGroups++;
+    // M133: batch construction is a transaction. If the WebGL transport owner
+    // rejects geometry, upload allocation or scene publication, release its
+    // private GPU/material resources and keep every source InstancedMesh alive.
+    // Only a successfully committed batch transfers ownership to dispose().
+    let m133Batch = null, m133Material = null, m133OwnMaterial = false;
+    const m133RemovedSources = [];
     try {
       // r160: choose a deterministic bounded prefix of source meshes. A source
       // is indivisible: either all of its instances move to BatchedMesh or none,
@@ -522,13 +997,21 @@ export function compactStaticInstancedTransport(root, meshes, options = {}) {
       const batchMaterial = (!modernInstances && sourceHasBodyLight)
         ? source[0].material.clone()
         : source[0].material;
-      if (batchMaterial !== source[0].material) {
+      m133Material = batchMaterial;
+      m133OwnMaterial = batchMaterial !== source[0].material;
+      if (m133OwnMaterial) {
         batchMaterial.vertexColors = true;
         batchMaterial.needsUpdate = true;
       }
       const batch = new THREE.BatchedMesh(maxGeometryCount, maxVertices, maxIndices, batchMaterial);
-      batch.userData.__muOwnedMaterial = batchMaterial !== source[0].material;
+      m133Batch = batch;
+      batch.userData.__muOwnedMaterial = m133OwnMaterial;
       batch.name = `MU_STATIC_MULTIDRAW_${result.batchedGroups}`;
+      batch.visible = source[0].visible;
+      batch.castShadow = source[0].castShadow;
+      batch.receiveShadow = source[0].receiveShadow;
+      batch.renderOrder = source[0].renderOrder ?? 0;
+      if (batch.layers && source[0].layers) batch.layers.mask = source[0].layers.mask;
       batch.perObjectFrustumCulled = true;
       batch.sortObjects = false;
       batch.matrixAutoUpdate = false;
@@ -559,31 +1042,49 @@ export function compactStaticInstancedTransport(root, meshes, options = {}) {
           for (let i = 0; i < m.count; i++) {
             m.getMatrixAt(i, local);
             let geometryForBatch = m.geometry;
-            if (sourceHasBodyLight) {
-              if (m.instanceColor) m.getColorAt(i, batchColor); else batchColor.setRGB(1, 1, 1);
-              geometryForBatch = m.geometry.clone();
-              const count = geometryForBatch.getAttribute('position')?.count || 0;
-              const colors = new Float32Array(count * 3);
-              for (let v = 0; v < count; v++) {
-                colors[v*3] = batchColor.r; colors[v*3+1] = batchColor.g; colors[v*3+2] = batchColor.b;
+            // M133: clone/color allocation AND addGeometry/setMatrixAt can
+            // throw. Dispose temporary expanded vertex-color geometry even if
+            // the failure occurs before WebGL receives the geometry ID.
+            try {
+              if (sourceHasBodyLight) {
+                if (m.instanceColor) m.getColorAt(i, batchColor); else batchColor.setRGB(1, 1, 1);
+                geometryForBatch = m.geometry.clone();
+                const count = geometryForBatch.getAttribute('position')?.count || 0;
+                const colors = new Float32Array(count * 3);
+                for (let v = 0; v < count; v++) {
+                  colors[v*3] = batchColor.r; colors[v*3+1] = batchColor.g; colors[v*3+2] = batchColor.b;
+                }
+                geometryForBatch.setAttribute('color', new THREE.BufferAttribute(colors, 3));
               }
-              geometryForBatch.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+              const gid = batch.addGeometry(geometryForBatch);
+              batch.setMatrixAt(gid, local);
+            } finally {
+              if (geometryForBatch !== m.geometry) geometryForBatch.dispose?.();
             }
-            const gid = batch.addGeometry(geometryForBatch);
-            batch.setMatrixAt(gid, local);
-            if (geometryForBatch !== m.geometry) geometryForBatch.dispose?.();
           }
         }
-        result.expandedVertices += maxVertices;
-        result.expandedIndices += indexed ? maxIndices : 0;
       }
       batch.computeBoundingBox?.(); batch.computeBoundingSphere?.();
-      for (const m of source) root.remove(m);
+      for (const m of source) { root.remove(m); m133RemovedSources.push(m); }
       root.add(batch);
       for (const m of source) m.userData.__muTransportCompacted = true;
       result.batchedGroups++; result.sourceDraws += source.length; result.batchedDraws += 1; result.sourceInstances += maxInstances; result.packingSavedDraws += Math.max(0, source.length - 1);
+      if (!modernInstances) { result.expandedVertices += maxVertices; result.expandedIndices += indexed ? maxIndices : 0; }
       result.batches ||= []; result.batches.push(batch);
-    } catch (e) { console.warn(`[WorldObjects] R15.11 BatchedMesh fallback: ${e.message}`); }
+      // Batch + cloned material are now owned by the returned committed list.
+      m133Batch = null; m133Material = null; m133RemovedSources.length = 0;
+    } catch (e) {
+      // Restore the exact source nodes; never dispose source geometry/material.
+      if (m133Batch) {
+        try { if (m133Batch.parent === root) root.remove(m133Batch); } catch (_) { /* best effort */ }
+      }
+      for (const m of m133RemovedSources) {
+        try { if (m.parent !== root) root.add(m); m.userData.__muTransportCompacted = false; } catch (_) { /* best effort */ }
+      }
+      try { m133Batch?.dispose?.(); } catch (_) { /* best effort */ }
+      if (m133OwnMaterial) { try { m133Material?.dispose?.(); } catch (_) { /* best effort */ } }
+      console.warn(`[WorldObjects] R15.11 BatchedMesh fallback: ${e.message}`);
+    }
   }
   return result;
 }
@@ -601,19 +1102,70 @@ export function compactStaticInstancedFallbackMerge(root, meshes, options = {}) 
   // as many independent bounded bins as useful. Each bin keeps the exact same
   // regional culling key and material/layout state, so this only reduces CPU /
   // WebGL submissions; it does not remove placements, triangles or quality.
-  const result = { attemptedGroups: 0, mergedGroups: 0, sourceDraws: 0, mergedDraws: 0, sourceInstances: 0, expandedVertices: 0, skippedBudget: 0, packingCandidates: 0, packingSelected: 0, packingSavedDraws: 0, packingBins: 0, singletonRemainder: 0, mode: 'cpu-merged-regional', meshes: [] };
+  const result = { attemptedGroups: 0, mergedGroups: 0, sourceDraws: 0, mergedDraws: 0, sourceInstances: 0, expandedVertices: 0, skippedBudget: 0, skippedUnsafeGeometry: 0, skippedCustomRenderOwner: 0, skippedAuthoredVertexColor: 0, skippedOrderDependentMaterial: 0, packingCandidates: 0, packingSelected: 0, packingSavedDraws: 0, packingBins: 0, singletonRemainder: 0, uncoloredMergedBins: 0, coloredMergedBins: 0, avoidedColorUploadBytes: 0, avoidedColorObjects: 0, matrixPackedBins: 0, avoidedMatrixObjects: 0, packedMatrixBytes: 0, bulkMatrixCopies: 0, bulkMatrixBytes: 0, avoidedGetMatrixAtCalls: 0, directMatrixBins: 0, directMatrixPlacements: 0, avoidedPackedMatrixBytes: 0, avoidedBoundsRecomputes: 0, avoidedBoundsVertexVisits: 0, mode: 'cpu-merged-regional', meshes: [] };
   if (!Array.isArray(meshes) || meshes.length < 2) return result;
   const maxVertices = Number(options.maxExpandedVertices) || 180000;
   const groups = new Map();
+  // M133: the CPU regional fallback sees the same shared baked geometry across
+  // clusters. Cache the exact layout signature only within this one invocation;
+  // never cache a mutable renderer or shader/material decision.
+  const m133LayoutByGeometry = new WeakMap();
+  // M134: one immutable material-state snapshot per transport invocation.
+  // No cross-map/global cache: runtime uniforms may change after the build.
+  const m134MaterialKeys = new WeakMap();
+  // M136: allocate hook names once per transport, not per spatial cluster.
+  const m136RenderHooks = ['onBeforeRender','onAfterRender','onBeforeShadow','onAfterShadow'];
   for (const mesh of meshes) {
-    const mat = mesh?.material, layout = staticGeometryLayoutKey(mesh?.geometry), region = mesh?.userData?.__muTransportRegion;
-    if (!mat || mat.transparent || !layout || !mesh.count || !region) continue;
-    const flags = `${mesh.visible ? 1 : 0}|${mesh.castShadow ? 1 : 0}|${mesh.receiveShadow ? 1 : 0}`;
-    const key = `${region}||${staticMaterialKey(mat)}||${layout}||${flags}`;
+    // Per-mesh callbacks/shadow overrides cannot be replayed by a merged
+    // transport. Keep their exact authored InstancedMesh draw owner.
+    let m136CustomHook = false;
+    for (const name of m136RenderHooks) {
+      const hook = mesh?.[name];
+      // Object3D's built-in no-op is safe; own OR inherited custom hooks
+      // are not replayed by a transport that replaces the source mesh.
+      if (typeof hook === 'function' &&
+          (Object.hasOwn(mesh, name) || hook !== THREE.Object3D?.prototype?.[name])) {
+        m136CustomHook = true;
+        break;
+      }
+    }
+    if (Array.isArray(mesh?.material) || mesh?.customDepthMaterial || mesh?.customDistanceMaterial || m136CustomHook) {
+      result.skippedCustomRenderOwner++;
+      continue;
+    }
+    const mat = mesh?.material, geometry = mesh?.geometry, region = mesh?.userData?.__muTransportRegion;
+    // M137: mergeStaticGeometries(part.color) creates a new per-placement
+    // color attribute.  Do not overwrite an existing authored BMD color lane.
+    if (geometry?.getAttribute?.('color')) {
+      result.skippedAuthoredVertexColor++;
+      continue;
+    }
+    let layout = null;
+    if (geometry) {
+      if (m133LayoutByGeometry.has(geometry)) layout = m133LayoutByGeometry.get(geometry);
+      else { layout = staticGeometryLayoutKey(geometry); m133LayoutByGeometry.set(geometry, layout); }
+    }
+    if (geometry && !layout) result.skippedUnsafeGeometry++;
+    if (!mat) continue;
+    if (mat.transparent || mat.wireframe || mat.depthWrite === false || mat.depthTest === false ||
+        (mat.blending !== undefined && mat.blending !== (THREE.NormalBlending ?? 1))) {
+      result.skippedOrderDependentMaterial++;
+      continue;
+    }
+    if (!layout || !mesh.count || !region) continue;
+    const flags = `${mesh.visible ? 1 : 0}|${mesh.castShadow ? 1 : 0}|${mesh.receiveShadow ? 1 : 0}|${mesh.renderOrder ?? 0}|${mesh.layers?.mask ?? 1}`;
+    let materialKey = m134MaterialKeys.get(mat);
+    if (materialKey === undefined) { materialKey = staticMaterialKey(mat); m134MaterialKeys.set(mat, materialKey); }
+    const key = `${region}||${materialKey}||${layout}||${flags}`;
     let arr = groups.get(key); if (!arr) groups.set(key, arr = []); arr.push(mesh);
   }
   for (const raw of groups.values()) {
     if (raw.length < 2) continue; result.attemptedGroups++;
+    // M133: CPU fallback merge also transfers geometry/material ownership only
+    // after scene commit. A failed merge must not strand GPU allocations or
+    // detach any of the authored source instances.
+    let m133Geometry = null, m133MergedMaterial = null, m133MergedMesh = null;
+    const m133RemovedCpuSources = [];
     try {
       // Budget by expanded POSITION vertices, not index count. mergeStaticGeometries
       // converts indexed sources to non-indexed before concatenation, therefore
@@ -639,31 +1191,151 @@ export function compactStaticInstancedFallbackMerge(root, meshes, options = {}) 
       for (const bin of bins) {
         if (bin.chosen.length < 2) { result.singletonRemainder += bin.chosen.length; continue; }
         const chosen=[...bin.chosen].sort((a,b)=>a.order-b.order);
+        // MAPS_ENGINE M138: a CPU regional bin without ANY instanceColor must
+        // not manufacture white per-vertex colors. The former unconditional
+        // expansion allocated 12 bytes per vertex and compiled a vertexColors
+        // material variant even when the source BMD had no BodyLight lane.
+        // Mixed bins retain the exact old white fallback for colorless sources.
+        const hasInstanceBodyLight = chosen.some(c => !!c.m.instanceColor);
+        // One temporary Color per colored BIN, not per placement. getColorAt
+        // copies synchronously; primitive RGB values are snapshotted on each
+        // part so later iterations cannot overwrite an earlier BodyLight.
+        const sampledBodyLight = hasInstanceBodyLight ? new THREE.Color(1, 1, 1) : null;
         const local=new THREE.Matrix4(), parts=[]; let safe=true, instances=0;
+        // Three's InstancedMesh stores placement matrices as Float32. Packing
+        // those exact 16 components once per bin preserves all input bits and
+        // avoids N short-lived Matrix4 objects during staticBatch. Unsupported
+        // matrix owners retain the original per-placement clone path.
+        const canPackMatrices = typeof local.toArray === 'function' &&
+          typeof THREE.InstancedMesh?.prototype?.getMatrixAt === 'function' &&
+          chosen.every(c => c.m.isInstancedMesh === true &&
+            c.m.getMatrixAt === THREE.InstancedMesh.prototype.getMatrixAt &&
+            c.m.instanceMatrix?.array instanceof Float32Array &&
+            c.m.instanceMatrix?.itemSize === 16 && c.m.instanceMatrix?.count >= c.m.count);
+        // M143: for large immutable bins, read the original THREE-owned
+        // instanceMatrix Float32Array directly. No intermediate packed copy is
+        // needed: determinant validation and mergeStaticGeometries() both run
+        // synchronously BEFORE the authored InstancedMesh is removed, and no
+        // await/mutation can invalidate these buffers. Small bins retain M140
+        // (and its established diagnostics); custom getMatrixAt owners retain
+        // the legacy matrix-clone path. Threshold avoids changing small-bin
+        // hot paths without physical evidence of a gain there.
+        const m143TotalInstances = chosen.reduce((n,c)=>n+c.m.count,0);
+        const m143DirectMatrixView = canPackMatrices && m143TotalInstances >= 256 &&
+          options.directMatrixViews !== false &&
+          // Reject SharedArrayBuffer-backed custom owners: another worker
+          // could mutate them while the synchronous merge reads its views.
+          chosen.every(c => Object.prototype.toString.call(c.m.instanceMatrix.array.buffer) === '[object ArrayBuffer]');
+        const matrixElements = canPackMatrices && !m143DirectMatrixView
+          ? new Float32Array(m143TotalInstances * 16)
+          : null;
+        // M140: a vanilla THREE.InstancedMesh.getMatrixAt() only invokes
+        // Matrix4.fromArray(instanceMatrix.array, i * 16). M139 immediately
+        // serialized that Matrix4 into another Float32Array, duplicating two
+        // per-placement 16-float copies and a virtual call. Copy each authored
+        // source attribute once into the bin's temporary packed buffer, then
+        // rehydrate the same scratch matrix ONLY for the positive-determinant
+        // safety gate. This preserves the exact 16 Float32 bits (including
+        // signed zero), instance ordering and legacy/custom matrix owners.
+        // Nothing is uploaded to GPU by this CPU-only copy.
+        let m140BulkCopies = 0;
         for (const c of chosen) {
+          if (matrixElements) {
+            const countFloats = c.m.count * 16;
+            // This array layout is guaranteed by canPackMatrices above.
+            matrixElements.set(c.m.instanceMatrix.array.subarray(0, countFloats), instances * 16);
+            m140BulkCopies++;
+          }
           for (let i=0;i<c.m.count;i++) {
-            c.m.getMatrixAt(i,local);
+            if (m143DirectMatrixView) local.fromArray(c.m.instanceMatrix.array, i * 16);
+            else if (matrixElements) local.fromArray(matrixElements, instances * 16);
+            else c.m.getMatrixAt(i,local);
             if (!(local.determinant()>0)) { safe=false; break; }
-            const bodyLight = new THREE.Color(1, 1, 1);
-            if (c.m.instanceColor) c.m.getColorAt(i, bodyLight);
-            parts.push({geometry:c.m.geometry,matrix:local.clone(),color:bodyLight}); instances++;
+            // Direct views are safe because this synchronous transport never
+            // edits instanceMatrix; mergeStaticGeometries reads the exact same
+            // Float32 bits before any source is removed from the scene.
+            const matrixPart = m143DirectMatrixView
+              ? {matrixElements:c.m.instanceMatrix.array, matrixOffset:i * 16}
+              : matrixElements
+                ? {matrixElements, matrixOffset: instances * 16}
+                : {matrix:local.clone()};
+            if (hasInstanceBodyLight) {
+              if (c.m.instanceColor) c.m.getColorAt(i, sampledBodyLight);
+              else sampledBodyLight.setRGB(1, 1, 1);
+              parts.push({geometry:c.m.geometry,...matrixPart,hasInstanceBodyLight:true,
+                colorR:sampledBodyLight.r,colorG:sampledBodyLight.g,colorB:sampledBodyLight.b});
+            } else parts.push({geometry:c.m.geometry,...matrixPart});
+            instances++;
           }
           if(!safe) break;
         }
         if (!safe) continue;
         const geometry=mergeStaticGeometries(parts); if(!geometry) continue;
+        m133Geometry = geometry;
         const first=chosen[0].m;
-        const mergedMaterial=first.material.clone();
-        mergedMaterial.vertexColors=true; mergedMaterial.needsUpdate=true;
+        // A shared immutable source material is safe when no vertex color
+        // attribute is introduced; only colored bins own a cloned material.
+        const mergedMaterial=hasInstanceBodyLight ? first.material.clone() : first.material;
+        m133MergedMaterial = hasInstanceBodyLight ? mergedMaterial : null;
+        if (hasInstanceBodyLight) { mergedMaterial.vertexColors=true; mergedMaterial.needsUpdate=true; }
         const merged=new THREE.Mesh(geometry,mergedMaterial);
-        merged.userData.__muOwnedMaterial=true;
+        m133MergedMesh = merged;
+        merged.userData.__muOwnedMaterial=hasInstanceBodyLight;
         merged.name=`MU_STATIC_CPU_MERGE_${result.mergedGroups}`; merged.castShadow=first.castShadow; merged.receiveShadow=first.receiveShadow; merged.visible=first.visible; merged.frustumCulled=true;
+        merged.renderOrder=first.renderOrder ?? 0;
+        if (merged.layers && first.layers) merged.layers.mask=first.layers.mask;
         merged.updateMatrix(); merged.matrixAutoUpdate=false; merged.updateMatrixWorld(true); merged.matrixWorldAutoUpdate=false;
-        geometry.computeBoundingBox?.(); geometry.computeBoundingSphere?.();
-        for(const c of chosen) root.remove(c.m); root.add(merged); for(const c of chosen) c.m.userData.__muTransportCompacted=true;
+        // M141: mergeStaticGeometries() already computed BOTH boundingBox and
+        // boundingSphere on the exact final merged vertex stream. Recomputing
+        // them here scanned the same (often large) CPU-expanded BMD vertices
+        // twice more without changing the bounds or culling. Keep the original
+        // first calculations and their fail-closed exception path intact.
+        for(const c of chosen) { root.remove(c.m); m133RemovedCpuSources.push(c.m); }
+        root.add(merged); for(const c of chosen) c.m.userData.__muTransportCompacted=true;
         result.mergedGroups++; result.packingBins++; result.sourceDraws+=chosen.length; result.mergedDraws++; result.sourceInstances+=instances; result.expandedVertices+=bin.vertices; result.packingSelected+=chosen.length; result.packingSavedDraws+=chosen.length-1; result.meshes.push(merged);
+        // Count only COMMITTED CPU merges. These are avoided duplicate CPU
+        // bounding API calls and their input vertex counts, not GPU upload or
+        // an estimate of milliseconds saved. mergeStaticGeometries computed
+        // both bounds once before publication, as before M141.
+        result.avoidedBoundsRecomputes += 2;
+        result.avoidedBoundsVertexVisits += 2 * (geometry.getAttribute?.('position')?.count || 0);
+        // Diagnostic count only after successful scene publication. These are
+        // avoided CPU color arrays / prospective WebGL attribute bytes, NOT
+        // measured GPU upload time or FPS gains.
+        if (hasInstanceBodyLight) result.coloredMergedBins++;
+        else { result.uncoloredMergedBins++; result.avoidedColorUploadBytes += bin.vertices * 3 * Float32Array.BYTES_PER_ELEMENT; }
+        result.avoidedColorObjects += instances - (hasInstanceBodyLight ? 1 : 0);
+        if (matrixElements || m143DirectMatrixView) {
+          result.avoidedMatrixObjects += Math.max(0, instances - 1);
+          result.avoidedGetMatrixAtCalls += instances;
+          if (matrixElements) {
+            result.matrixPackedBins++;
+            result.packedMatrixBytes += matrixElements.byteLength;
+            // Count only actual committed M140 bulk copies.
+            result.bulkMatrixCopies += m140BulkCopies;
+            result.bulkMatrixBytes += instances * 16 * Float32Array.BYTES_PER_ELEMENT;
+          } else {
+            // M143: actual allocation/copy avoided versus M140, not GPU bytes.
+            result.directMatrixBins++;
+            result.directMatrixPlacements += instances;
+            result.avoidedPackedMatrixBytes += instances * 16 * Float32Array.BYTES_PER_ELEMENT;
+          }
+        }
+        // Ownership transferred; next bin starts a fresh transaction.
+        m133Geometry = null; m133MergedMaterial = null; m133MergedMesh = null;
+        m133RemovedCpuSources.length = 0;
       }
-    } catch(e) { console.warn(`[WorldObjects] R15.14 CPU-merge fallback: ${e.message}`); }
+    } catch(e) {
+      if (m133MergedMesh) {
+        try { if (m133MergedMesh.parent === root) root.remove(m133MergedMesh); } catch (_) { /* best effort */ }
+      }
+      for (const m of m133RemovedCpuSources) {
+        try { if (m.parent !== root) root.add(m); m.userData.__muTransportCompacted = false; } catch (_) { /* best effort */ }
+      }
+      try { m133Geometry?.dispose?.(); } catch (_) { /* best effort */ }
+      try { m133MergedMaterial?.dispose?.(); } catch (_) { /* best effort */ }
+      console.warn(`[WorldObjects] R15.14 CPU-merge fallback: ${e.message}`);
+    }
   }
   return result;
 }
@@ -776,7 +1448,14 @@ async function mapLimit(items, limit, worker) {
       results[i] = await worker(items[i], i);
     }
   });
-  await Promise.all(jobs);
+  // MAPS_ENGINE M128: Promise.all rejects on the FIRST failed worker while
+  // other in-flight BMD/renderer awaits continue running. During a superseded
+  // world load, the caller can then dispose the layer before those workers
+  // resume and attach stale objects. Drain all workers before propagating the
+  // first rejection; successful jobs, order and concurrency are unchanged.
+  const settled = await Promise.allSettled(jobs);
+  const firstFailure = settled.find((entry) => entry.status === 'rejected');
+  if (firstFailure) throw firstFailure.reason;
   return results;
 }
 
@@ -1033,11 +1712,113 @@ export function rendererNeedsPerPlacementAnimation(renderer) {
 // A single authored local AABB per serial encloses every placement's initial
 // pose. Transforming its eight corners is conservative under rotation/scale;
 // unlike Box3.setFromObject per placement it never sweeps skinned vertices.
-export function placementCullSphere(localBounds, worldMatrix) {
+export function placementCullSphere(localBounds, worldMatrix, scratchBox = null) {
   if (!localBounds || localBounds.isEmpty()) return null;
-  const sphere = localBounds.clone().applyMatrix4(worldMatrix).getBoundingSphere(new THREE.Sphere());
+  // M126: per-load scratch copies the authored AABB before the identical
+  // eight-corner world transform. The returned Sphere is still unique per
+  // placement; cached localBounds are never mutated or exposed as scratch.
+  const transformedBounds = scratchBox && scratchBox !== localBounds ? scratchBox.copy(localBounds) : localBounds.clone();
+  const sphere = transformedBounds.applyMatrix4(worldMatrix).getBoundingSphere(new THREE.Sphere());
   sphere.radius = Math.max(220, sphere.radius + 120);
   return sphere;
+}
+
+/**
+ * MAPS_ENGINE M127: retire all map-owned update references in ONE stable pass.
+ * The previous disposal first filtered registered owners, then ran indexOf +
+ * splice for every placement visual and environment group. In a crowded scene
+ * those repeated linear scans delayed World1/World11 transitions even when
+ * every search missed. Preserve the original array identity and survivor order;
+ * do not dispose, hide, detach, or otherwise mutate any owner here.
+ */
+export function retireMapSceneObjectReferences(owners, registered, slots, extras = []) {
+  const retiring = new Set(registered);
+  for (const s of slots) {
+    if (!s) continue;
+    if (s.outer) retiring.add(s.outer);
+    if (s.pcVisualSprite) retiring.add(s.pcVisualSprite);
+    if (s.pcParticleOwner?.group) retiring.add(s.pcParticleOwner.group);
+    if (s.pcLorenciaVisualOwner?.group) retiring.add(s.pcLorenciaVisualOwner.group);
+    // M144: bone-space owners can be inserted in scene callback arrays by
+    // presentation extensions. Retire their references even when the owning
+    // renderer (not the group itself) normally drives their updates.
+    if (s.pcLorenciaBoneVisualOwner?.group) retiring.add(s.pcLorenciaBoneVisualOwner.group);
+    if (s.pcMapBoneVisualOwner?.group) retiring.add(s.pcMapBoneVisualOwner.group);
+    if (s.pcMapParticleOwner?.group) retiring.add(s.pcMapParticleOwner.group);
+  }
+  for (const owner of extras) if (owner) retiring.add(owner);
+  const before = owners.length;
+  let write = 0;
+  for (let read = 0; read < before; read++) {
+    const owner = owners[read];
+    if (!retiring.has(owner)) owners[write++] = owner;
+  }
+  owners.length = write;
+  return { removed: before - write, retained: write };
+}
+
+/**
+ * MAPS_ENGINE M130: a map's authored cull spheres are immutable after placement.
+ * A stationary camera therefore yields the same frustum decision on every frame.
+ * Compare all three 4x4 camera matrices, not just position: rotation, zoom, near/far,
+ * aspect and projection changes must all invalidate the cached result. The
+ * 48-number cache is allocated once per layer and never shares scene state.
+ */
+export function pcMapFrustumPoseUnchanged(camera, cache, placementCount) {
+  if (!cache?.valid || cache.count !== placementCount) return false;
+  const view = camera?.matrixWorld?.elements;
+  const projection = camera?.projectionMatrix?.elements;
+  const inverse = camera?.matrixWorldInverse?.elements;
+  if (!view || !projection || !inverse || view.length !== 16 || projection.length !== 16 || inverse.length !== 16) return false;
+  // M131: most moving-camera frames change translation first. Reject them
+  // before scanning the full 48-value pose; the saved pose was finite-checked
+  // at publication, so a new NaN/Infinity necessarily differs from its cache.
+  if (cache.elements[12] !== view[12] || cache.elements[13] !== view[13] || cache.elements[14] !== view[14] ||
+      cache.elements[28] !== projection[12] || cache.elements[16] !== projection[0]) return false;
+  for (let i = 0; i < 16; i++) {
+    if (cache.elements[i] !== view[i] || cache.elements[i + 16] !== projection[i] || cache.elements[i + 32] !== inverse[i]) return false;
+  }
+  return true;
+}
+
+export function pcMapRememberFrustumPose(camera, cache, placementCount) {
+  cache.valid = false; // Fail closed on invalid/incomplete camera matrices.
+  const view = camera?.matrixWorld?.elements;
+  const projection = camera?.projectionMatrix?.elements;
+  const inverse = camera?.matrixWorldInverse?.elements;
+  if (!view || !projection || !inverse || view.length !== 16 || projection.length !== 16 || inverse.length !== 16) return false;
+  // M131: moving camera position/zoom is the common case in World1/World11.
+  // Do not copy/check 48 floats every moving frame; keep a five-value quick
+  // signature and publish the full finite pose only once motion settles.
+  const quick = cache.quick;
+  const x = view[12], y = view[13], z = view[14], p0 = projection[0], p5 = projection[5];
+  if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z) || !Number.isFinite(p0) || !Number.isFinite(p5)) { cache.quickValid = false; return false; }
+  const changed = cache.quickValid && (quick[0] !== x || quick[1] !== y || quick[2] !== z || quick[3] !== p0 || quick[4] !== p5);
+  quick[0] = x; quick[1] = y; quick[2] = z; quick[3] = p0; quick[4] = p5;
+  cache.quickValid = true;
+  if (changed) return false; // scan happened; NEVER skip on incomplete pose.
+  for (let i = 0; i < 16; i++) {
+    if (!Number.isFinite(view[i]) || !Number.isFinite(projection[i]) || !Number.isFinite(inverse[i])) return false;
+    cache.elements[i] = view[i];
+    cache.elements[i + 16] = projection[i];
+    cache.elements[i + 32] = inverse[i];
+  }
+  cache.count = placementCount;
+  cache.valid = true;
+  return true;
+}
+
+// M135: map-transition release is independent per resource. A failing scene
+// detach or WebGL buffer disposal must not suppress material/geometry cleanup.
+// Successful paths retain exactly the previous release order and ownership.
+function m135ReleaseTransportResources(root, mesh, { batched = false, geometry = false } = {}) {
+  if (!mesh) return;
+  try { root?.remove?.(mesh); } catch (_) { /* continue releasing */ }
+  if (batched) { try { mesh.dispose?.(); } catch (_) { /* continue releasing */ } }
+  if (geometry) { try { mesh.geometry?.dispose?.(); } catch (_) { /* continue releasing */ } }
+  if (mesh.userData?.__muOwnedMaterial) {
+    try { mesh.material?.dispose?.(); } catch (_) { /* best effort */ }
+  }
 }
 
 export class TerrainObjectLayer {
@@ -1056,13 +1837,17 @@ export class TerrainObjectLayer {
     // hundreds of off-screen animated Object1 placements in render.calls.
     this._viewFrustum = new THREE.Frustum();
     this._viewProjection = new THREE.Matrix4();
+    // M130: no per-frame array allocations; invalidated by camera pose,
+    // projection or the count of committed/partially built placements.
+    this._viewCullPose = { valid: false, count: -1, elements: new Float64Array(48), quick: new Float64Array(5), quickValid: false };
+    this._viewCullProfile = { version: 'M130', scans: 0, skippedUnchanged: 0, testedSlots: 0, visible: 0, total: 0, lastScanMs: 0 };
+    this.root.userData.muMapFrustumCullProfile = this._viewCullProfile;
     this._visibleAnimated = 0;
     this._totalAnimated = 0;
     this._dynamicTerrainLightOwner = null;
     this._mapWorldVisualOwner = null;
     this._icarusEnvironmentOwner = null;
     this._icarusBoidsOwner = null;
-    this._icarusCloudFieldOwner = null;
     this._lorenciaEnvironmentOwner = null;
     this._lorenciaFishOwner = null;
     this._lorenciaFaunaOwner = null;
@@ -1071,6 +1856,8 @@ export class TerrainObjectLayer {
     this._pendingUpdateOwnerSet = new Set();
     this._ownedUpdateOwners = new Set();
     this._terrainLightMesh = null;
+    // M142: per-layer native RGB tuple; never shared across world generations.
+    this._terrainRgbScratch = [0, 0, 0];
   }
 
   _registerUpdateOwner(owner) {
@@ -1088,10 +1875,12 @@ export class TerrainObjectLayer {
   _terrainLightAt(x, z, target = null) {
     const sample = this._terrainLightMesh?.userData?.sampleTerrainLight;
     if (typeof sample !== 'function') return this.gameScene?.terrainLightAt?.(x, z, target) || null;
-    const muX = Number(x) + MAP_SIZE / 2;
-    const muY = MAP_SIZE / 2 - Number(z);
+    const muX = Number(x) + HALF_MAP_SIZE;
+    const muY = HALF_MAP_SIZE - Number(z);
     if (!Number.isFinite(muX) || !Number.isFinite(muY)) return null;
-    const rgb = sample(muX, muY);
+    // MuTerrain accepts a caller-owned tuple. A custom sampler may ignore the
+    // optional output argument; in either case consume its returned RGB as-is.
+    const rgb = sample(muX, muY, this._terrainRgbScratch);
     const color = target || new THREE.Color();
     color.setRGB(Number(rgb?.[0]) || 0, Number(rgb?.[1]) || 0, Number(rgb?.[2]) || 0);
     return color;
@@ -1099,6 +1888,9 @@ export class TerrainObjectLayer {
 
   activate() {
     if (this._disposed) return false;
+    // Staged map publication forces a first live visibility pass even when
+    // the camera has not moved since the final loading frame.
+    if (this._viewCullPose) this._viewCullPose.valid = false;
     this._staged = false;
     this.root.visible = true;
     const liveOwners = new Set(this.gameScene.objects);
@@ -1114,6 +1906,7 @@ export class TerrainObjectLayer {
   }
 
   async load(worldNum, { cooperative = true, idleMs = 16, sliceMs = 0, staged = false, terrainLightMesh = null, shouldContinue = null } = {}) {
+    if (this._viewCullPose) this._viewCullPose.valid = false;
     this.worldNum = worldNum;
     this._staged = Boolean(staged);
     this._terrainLightMesh = terrainLightMesh || null;
@@ -1129,7 +1922,7 @@ export class TerrainObjectLayer {
       else await yieldToBrowserIdle(idleMs === 16 ? 16 : idleMs);
     };
     const assertContinue = () => {
-      if (typeof shouldContinue === 'function' && shouldContinue() !== true) {
+      if (this._disposed || (typeof shouldContinue === 'function' && shouldContinue() !== true)) {
         const e = new Error(`World${worldNum} staging superseded`);
         e.code = 'MUWEB_STALE_WORLD_LOAD';
         throw e;
@@ -1176,12 +1969,24 @@ export class TerrainObjectLayer {
     else this._dynamicTerrainLightOwner = createPcMapDynamicTerrainLightOwner(this.gameScene, worldNum, parsed.objects);
     if (this._dynamicTerrainLightOwner) this._registerUpdateOwner(this._dynamicTerrainLightOwner);
     this._mapWorldVisualOwner = await createPcMapWorldVisualOwner(worldNum, parsed.objects);
+    try { assertContinue(); }
+    catch (e) {
+      try { this._mapWorldVisualOwner?.dispose?.(); } catch (_) { /* best effort */ }
+      this._mapWorldVisualOwner = null;
+      throw e;
+    }
     if (this._mapWorldVisualOwner?.group) {
       this.root.add(this._mapWorldVisualOwner.group);
       if (typeof this._mapWorldVisualOwner.group.userData.update === 'function') this._registerUpdateOwner(this._mapWorldVisualOwner.group);
     }
     if (worldNum === 11) {
       this._icarusEnvironmentOwner = await createPcIcarusEnvironmentOwner(this.gameScene);
+      try { assertContinue(); }
+      catch (e) {
+        try { this._icarusEnvironmentOwner?.dispose?.(); } catch (_) { /* best effort */ }
+        this._icarusEnvironmentOwner = null;
+        throw e;
+      }
       if (this._icarusEnvironmentOwner?.group) {
         this.root.add(this._icarusEnvironmentOwner.group);
         if (typeof this._icarusEnvironmentOwner.group.userData.update === 'function') this._registerUpdateOwner(this._icarusEnvironmentOwner.group);
@@ -1192,7 +1997,7 @@ export class TerrainObjectLayer {
       if (this._icarusBoidsOwner?.group) {
         this.root.add(this._icarusBoidsOwner.group);
         if (typeof this._icarusBoidsOwner.group.userData.update === 'function') this._registerUpdateOwner(this._icarusBoidsOwner.group);
-        console.info('[WorldObjects FIX72] World11 Icarus: GOBoid owners installed (3 Monster32 sky dragons; 10 MODEL_SPEARSKILL joint boids active in one retained batch).');
+        console.info('[WorldObjects FIX72] World11 Icarus: GOBoid CreateDragon owner installed (3 Monster32 sky dragons; 10 MODEL_SPEARSKILL joint boids remain fail-closed).');
       }
     }
     const unique = [...new Set(parsed.objects.map((o) => o.serial))];
@@ -1201,19 +2006,12 @@ export class TerrainObjectLayer {
     // the giant black/ice/tree slabs visible in the physical screenshots.
     // Keep a renderer only when a ported bone/runtime/particle owner requires
     // the controller skeleton; otherwise the desktop never draws the base BMD.
-    // FIX86: Icarus Object1..6 are source HiddenMesh=-2 cloud controllers.
-    // Their ported particle owner uses only OBJECT world position; keeping one
-    // MUModelRenderer/skeleton per placement was Web-only overhead. Run those
-    // owners standalone and skip the invisible BMD renderer entirely.
-    const sourceHiddenStandaloneParticleSerials = new Set(unique.filter((serial) =>
-      worldNum === 11 && pcMapHideBaseBmd(worldNum, serial) && hasPcMapParticleVisual(worldNum, serial)
-    ));
     const sourceHiddenNoRendererSerials = new Set(unique.filter((serial) =>
       pcMapHideBaseBmd(worldNum, serial) &&
       !(worldNum === 1 && PC_LORENCIA_RUNTIME_VISUAL_SERIALS.includes(serial)) &&
       !hasPcMapBoneVisual(worldNum, serial) &&
       !hasPcMapRuntimePresentation(worldNum, serial) &&
-      (!hasPcMapParticleVisual(worldNum, serial) || sourceHiddenStandaloneParticleSerials.has(serial))
+      !hasPcMapParticleVisual(worldNum, serial)
     ));
     const modelCache = new Map();
     const modelStageConcurrency = pcMapModelStageConcurrency();
@@ -1225,8 +2023,11 @@ export class TerrainObjectLayer {
       if (sourceHiddenNoRendererSerials.has(serial)) return;
       const path = modelPath(worldNum, serial);
       try {
-        modelCache.set(serial, await MUAssets.loadBMD(path));
+        const loadedModel = await MUAssets.loadBMD(path);
+        assertContinue(); // M128: do not publish a stale model after an await.
+        modelCache.set(serial, loadedModel);
       } catch (e) {
+        if (e?.code === 'MUWEB_STALE_WORLD_LOAD') throw e;
         console.warn(`[WorldObjects] modelo ausente/inválido ${path}: ${e.message}`);
         modelCache.set(serial, null);
       }
@@ -1243,6 +2044,17 @@ export class TerrainObjectLayer {
     // serial estático usa 1 template e clones que compartilham
     // geometry/material/skeleton — visualmente idêntico, sem upload duplicado.
     const templates = new Map();   // serial -> renderer (somente estáticos)
+    // M142: templateProbe owns immutable source child order for this load.  A
+    // static fallback clone previously rescanned every Group child and tested
+    // its type on every placement. Cache only the eligible Mesh/SkinnedMesh
+    // references, never clone instances, GPU resources, bones or materials.
+    // Weak keys die with the load's template groups on map transitions.
+    const m142CloneChildrenByGroup = new WeakMap();
+    let m142CloneListBuilds = 0, m142CloneListHits = 0, m142ClonedChildren = 0;
+    // M129: dispose() must own every successful static probe immediately.
+    // Before this, a stale transition during templateProbe could reject before
+    // the final _templateRenderers assignment and strand GPU/BMD leases.
+    this._templateRenderers = [];
     const localBoundsBySerial = new Map();
     const animatedSerials = new Set();
     const constantPoseSerials = new Set();
@@ -1258,6 +2070,7 @@ export class TerrainObjectLayer {
       });
       try {
         await probe.initFromBMD(data);
+        assertContinue(); // M128: do not publish a probe after a superseded await.
         if (worldNum === 75) applyPcWorld75ObjectMaterialPresentation(probe, serial);
         // Same initial pose as each placement, before the MU-up conversion.
         // Cache only within this load: never reuse bounds across Data authorities.
@@ -1313,11 +2126,15 @@ export class TerrainObjectLayer {
             }
           }
           templates.set(serial, probe);
+          // Workers are drained by M128 before load rejection; this register
+          // happens synchronously after the post-await generation check.
+          this._templateRenderers.push(probe);
         }
       } catch (e) {
         console.warn(`[WorldObjects] template Object${serial + 1} falhou: ${e.message}`);
         modelCache.set(serial, null);
         try { probe.dispose?.(); } catch (_) { /* noop */ }
+        if (e?.code === 'MUWEB_STALE_WORLD_LOAD') throw e;
       }
     });
 
@@ -1329,9 +2146,30 @@ export class TerrainObjectLayer {
     let instancedDraws = 0;
     let staticSubmeshesBeforeFusion = 0;
     let staticSubmeshesAfterFusion = 0;
+    let m137UnsafeTemplateFusionGroups = 0;
+    const m137UnsafeFusionBySerial = new Map();
+    let m137TemplateMaterialKeyHits = 0, m137TemplateMaterialKeyMisses = 0;
     let boundReusePlacements = 0;
     let boundFallbackPlacements = 0;
     const instancedSerials = new Set();
+    // M81 diagnostic-only: attribute static batching CPU time to ObjectXX.
+    const staticBatchCostBySerial = new Map();
+    // M91 diagnostic: attribute the M88 owners to ObjectXX, including partition.
+    // This makes a physical World1/World11 capture identify whether a hot serial is
+    // expensive because of spatial partitioning, template bake, instance fill or finalize.
+    const staticBatchPhaseBySerial = new Map();
+    // MAPS_ENGINE M99: attribute immutable instance-upload volume to ObjectXX so
+    // World1/World11 captures can correlate M91 CPU owners with M98 GPU bytes.
+    // Profiling only: no buffer, upload, placement or rendering policy changes.
+    const staticUploadBySerial = new Map();
+    // MAPS_ENGINE M116: retain M115 scale-MRU counters per ObjectXX so physical
+    // World1/World11 captures can identify families with poor locality before any
+    // batching/order policy is changed. Profiling only; placement order is untouched.
+    const staticScaleBySerial = new Map();
+    // MAPS_ENGINE M88 diagnostic: split the measured M81 staticBatch cost into
+    // coarse CPU owners without timing every placement. This keeps profiler
+    // overhead cluster-level while making the next World1/World11 capture actionable.
+    const staticBatchBreakdown = { partitionMs: 0, templateBakeMs: 0, instanceFillMs: 0, cooperativeWaitMs: 0, finalizeMs: 0, clusters: 0, instances: 0, rotationCacheEntries: 0, rotationMruHits: 0, rotationMapHits: 0, rotationMisses: 0, scaleMruHits: 0, scaleWrites: 0, directTerrainColorWrites: 0, reusableTerrainRgbSamples: 0, fallbackTerrainColorWrites: 0, matrixUploadBytes: 0, colorUploadBytes: 0, gpuUploadBytes: 0, maxClusterUploadBytes: 0 };
 
     // Agrupa placements para batching real. O caminho antigo compartilhava
     // geometry/material, mas ainda criava ~2985 Object3D/SkinnedMesh e milhares
@@ -1344,67 +2182,12 @@ export class TerrainObjectLayer {
       if (!arr) placementsBySerial.set(obj.serial, arr = []);
       arr.push({ obj, index });
     });
-    // FIX91 / Main 5.2 CreateOperate ownership. These are logical interaction
-    // records, not renderers. In Lorencia the desktop registers exactly
-    // Tree01+6, PoseBox, Furniture01+5 and Furniture01+6 in Operates[].
-    // PoseBox remains HiddenMesh=-2; exposing this registry must never make the
-    // controller BMD visible. TargetX/Y are the exact OBJECT position/TERRAIN_SCALE.
-    if (worldNum === 1) {
-      const operateKinds = new Map([[6,'sit'],[133,'pose'],[145,'sit-facing'],[146,'sit']]);
-      this.root.userData.pcOperatePlacements = parsed.objects.flatMap((obj,index) => {
-        const kind=operateKinds.get(obj.serial|0); if(!kind)return [];
-        const position=muObjectPositionToThree(obj,new THREE.Vector3());
-        const q=muObjectQuaternion(obj,new THREE.Quaternion());
-        const maxHeight=(obj.serial|0)===133?160:80; // CreateObject default; PoseBox overrides Z max.
-        return [Object.freeze({
-          worldNum:1, serial:obj.serial|0, objectNumber:(obj.serial|0)+1, index, kind,
-          targetX:Math.trunc(Number(obj.x)/100), targetY:Math.trunc(Number(obj.y)/100),
-          targetAngle:Number(obj.angleZ)||0, scale:Number(obj.scale)||1,
-          position:Object.freeze({x:position.x,y:position.y,z:position.z}),
-          quaternion:Object.freeze({x:q.x,y:q.y,z:q.z,w:q.w}),
-          // ZzzObject.cpp CreateObject defaults BoundingBoxMin=(-40,-40,0),
-          // BoundingBoxMax=(40,40,80). MODEL_POSE_BOX changes only Max to
-          // (40,40,160). Convert MU Z-up box to Three Y-up, no guessed bounds.
-          localBounds:Object.freeze({min:Object.freeze({x:-40,y:0,z:-40}),max:Object.freeze({x:40,y:maxHeight,z:40})}),
-        })];
-      });
-      this.root.userData.muPcOperateOwner='ZzzObject.cpp::CreateOperate + ZzzInterface.cpp::MOVEMENT_OPERATE';
-    }
     let sourceHiddenPlacements = 0;
     for (const serial of sourceHiddenNoRendererSerials) {
       const n = placementsBySerial.get(serial)?.length || 0;
       sourceHiddenPlacements += n;
       rendered += n; // faithfully handled: PC intentionally renders no base mesh
     }
-    // FIX87: all World11 source-hidden Object1..6 controllers share one logical
-    // field owner.  PC semantics remain per placement, but Web submission is
-    // one instanced cloud field + one shared thunder batch instead of hundreds
-    // of controller groups/materials/update callbacks.
-    let standaloneParticleControllers = 0;
-    if (worldNum === 11 && sourceHiddenStandaloneParticleSerials.size) {
-      const fieldPlacements=[];
-      for (const serial of sourceHiddenStandaloneParticleSerials)
-        for (const {obj} of placementsBySerial.get(serial) || []) fieldPlacements.push({serial,obj});
-      this._icarusCloudFieldOwner = await createPcIcarusCloudField(this.gameScene,fieldPlacements);
-      if (this._icarusCloudFieldOwner?.group) {
-        this.root.add(this._icarusCloudFieldOwner.group);
-        this._registerUpdateOwner(this._icarusCloudFieldOwner.group);
-        standaloneParticleControllers=this._icarusCloudFieldOwner.controllers||fieldPlacements.length;
-      }
-    } else {
-      for (const serial of sourceHiddenStandaloneParticleSerials) {
-        for (const {obj} of placementsBySerial.get(serial) || []) {
-          assertContinue();
-          const owner = await createPcMapParticleOwner(worldNum, serial, null, obj);
-          if (!owner?.group) continue;
-          this.root.add(owner.group);
-          if (typeof owner.group.userData.update === 'function') this._registerUpdateOwner(owner.group);
-          (this._standalonePcMapParticleOwners ??= []).push(owner); standaloneParticleControllers++;
-        }
-      }
-    }
-    if (standaloneParticleControllers)
-      console.info(`[WorldObjects R87] World${worldNum}: source-hidden particle controllers=${standaloneParticleControllers}; mergedField=${this._icarusCloudFieldOwner?1:0}; BMD renderers skipped`);
 
     if (staticInstancingEnabled()) {
       const chunkTiles = staticBatchTiles();
@@ -1418,36 +2201,79 @@ export class TerrainObjectLayer {
         const placements = placementsBySerial.get(serial) || [];
         if (STRUCTURAL_FULL_FIDELITY_SERIALS.has(serial)) continue;
         if (!placements.length) continue;
-        const baselineClusters = partitionSpatialPlacements(placements, chunkTiles);
-        const clusters = partitionAdaptiveSpatialPlacements(placements, chunkTiles);
+        // M83 regression contract: partitionAdaptiveSpatialPlacements(placements, chunkTiles, COMPACT_SERIAL_SPAN_TILES, baselineClusters)
+        const m88PartitionT0 = performance.now();
+        const baselinePartition = partitionSpatialPlacementsProfiled(placements, chunkTiles);
+        const baselineClusters = baselinePartition.groups;
+        const clusters = partitionAdaptiveSpatialPlacements(placements, chunkTiles, COMPACT_SERIAL_SPAN_TILES, baselineClusters, baselinePartition.bounds);
+        const m91PartitionMs = performance.now() - m88PartitionT0;
+        staticBatchBreakdown.partitionMs += m91PartitionMs;
         baselineSpatialClusters += baselineClusters.size;
         if (clusters.size < baselineClusters.size) compactSerials++;
+        // M132: keep ownership of static geometries/instances visible to the
+        // failure path, including cooperative cancellation before publication.
+        // Previously a rejected checkpoint could strand baked geometries and
+        // swallowed stale-world errors as an ordinary fallback-clone warning.
+        const staged = [];
+        const bakedGeometries = [];
+        const m132OwnedStaticGeometries = new Set();
         try {
           template.group.updateMatrixWorld(true);
           template.skeleton?.update?.();
-          const staged = [];
-          const bakedGeometries = [];
           let createdForSerial = 0;
+          const staticSerialProfileT0 = performance.now();
+          let m91SerialBakeMs = 0, m91SerialFillCpuMs = 0, m91SerialFinalizeMs = 0;
+          let m99SerialMatrixUploadBytes = 0, m99SerialColorUploadBytes = 0, m99SerialMaxClusterUploadBytes = 0;
+          // M90: keep serial attribution CPU-only; cooperative waits are scheduler time.
+          let m90SerialCooperativeWaitMs = 0;
           // R15.4 exact-material fusion: bake primeiro, depois funde apenas
           // submeshes estáticos material-equivalentes. Isso reduz draw calls
           // por cluster sem tocar nos placements nem na aparência.
+          const m88BakeT0 = performance.now();
           const materialGroups = new Map();
+          // M137: material key serialization includes ShaderMaterial programs,
+          // uniforms and GPU state. Children of one immutable template often
+          // share the same material. Cache only for this synchronous serial
+          // bake (never across cooperative yields or different map serials).
+          const m137MaterialKeys = new WeakMap();
           for (const child of template.group.children) {
             if (!(child.isSkinnedMesh || child.isMesh)) continue;
             child.updateMatrix();
             const baked = bakeStaticSkinnedGeometry(child);
-            const key = staticMaterialKey(child.material);
+            m132OwnedStaticGeometries.add(baked);
+            const material = child.material;
+            const canCache = material !== null && (typeof material === 'object' || typeof material === 'function');
+            let key;
+            if (canCache && m137MaterialKeys.has(material)) {
+              key = m137MaterialKeys.get(material);
+              m137TemplateMaterialKeyHits++;
+            } else {
+              key = staticMaterialKey(material);
+              if (canCache) m137MaterialKeys.set(material, key);
+              m137TemplateMaterialKeyMisses++;
+            }
             let arr = materialGroups.get(key);
             if (!arr) materialGroups.set(key, arr = []);
             arr.push({ child, baked });
           }
           const renderParts = [];
           for (const parts of materialGroups.values()) {
-            if (parts.length > 1) {
+            const m137CanFuse = parts.length > 1 && pcMapStaticTemplateFusionSafe(parts);
+            if (parts.length > 1 && !m137CanFuse) {
+              m137UnsafeTemplateFusionGroups++;
+              m137UnsafeFusionBySerial.set(serial, (m137UnsafeFusionBySerial.get(serial) || 0) + 1);
+            }
+            if (m137CanFuse) {
               const merged = mergeStaticGeometries(parts.map(p => ({ geometry: p.baked, matrix: p.child.matrix })));
               if (merged) {
-                renderParts.push({ geometry: merged, material: parts[0].child.material, child: null, owned: true });
-                for (const p of parts) p.baked.dispose?.();
+                m132OwnedStaticGeometries.add(merged);
+                // Geometry already embeds every child.matrix; presentation
+                // flags still come from the equivalent authored first child.
+                renderParts.push({ geometry: merged, material: parts[0].child.material, child: null, presentationChild: parts[0].child, owned: true });
+                for (const p of parts) {
+                  p.baked.dispose?.();
+                  m132OwnedStaticGeometries.delete(p.baked);
+                }
                 continue;
               }
             }
@@ -1455,37 +2281,199 @@ export class TerrainObjectLayer {
           }
           staticSubmeshesBeforeFusion += [...materialGroups.values()].reduce((n, parts) => n + parts.length, 0);
           staticSubmeshesAfterFusion += renderParts.length;
+          m91SerialBakeMs = performance.now() - m88BakeT0;
+          staticBatchBreakdown.templateBakeMs += m91SerialBakeMs;
+          // MAPS_ENGINE M86: the cluster loop is strictly serial, including across
+          // cooperative yields, so matrix/scratch/light temporaries can be reused
+          // for every cluster of this ObjectXX render part. M82 removed per-placement
+          // allocation; M86 removes the remaining per-cluster temporary allocation
+          // pressure without changing matrices, terrain samples, bounds or content.
+          // M92 serial-local authored rotation cache shared by every fused/submesh render part.
+          const placementRotationCache = new Map();
+          let placementRotationCacheEntries = 0;
+          let m94SerialRotationMruHits = 0, m94SerialRotationMapHits = 0, m94SerialRotationMisses = 0;
+          let m115SerialScaleMruHits = 0, m115SerialScaleWrites = 0;
           for (const part of renderParts) {
             const child = part.child;
             const baked = part.geometry;
             bakedGeometries.push(baked);
             let childClusterIndex = 0;
+            // MAPS_ENGINE M87: static placements already carry native MU terrain
+            // coordinates. Resolve the terrain sampler once per render part and feed
+            // the exact original placement.x/y directly, avoiding MU->Three->MU
+            // round-trips and repeated dynamic sampler lookup per instance.
+            const staticTerrainLightSample = this._terrainLightMesh?.userData?.sampleTerrainLight;
+            const hasStaticTerrainLightSample = typeof staticTerrainLightSample === 'function';
+            // M142: MuTerrain.samplePrimaryTerrainLight supports a caller-owned
+            // output tuple. Reuse it for all placements of this render part,
+            // instead of allocating a fresh 3-element array per BodyLight sample.
+            // Third-party samplers that ignore the optional argument still return
+            // their own tuple, which we consume unchanged. No async gap exists
+            // between sampling and the Float32 attribute writes.
+            // Diagnostic-only escape hatch permits same-build physical A/B.
+            const m142TerrainRgbScratch = hasStaticTerrainLightSample &&
+              !(typeof window !== 'undefined' && window.__MU_DISABLE_TERRAIN_RGB_SCRATCH === true)
+              ? [0, 0, 0] : null;
+            const m = new THREE.Matrix4();
+            const placementMatrixScratch = createStaticPlacementScratch();
+            // MAPS_ENGINE M111: reusable position snapshot; no per-placement allocation.
+                    const instanceLight = new THREE.Color(1, 1, 1);
             for (const [clusterKey, clusterPlacements] of clusters) {
-              const inst = new THREE.InstancedMesh(baked, part.material, clusterPlacements.length);
+              const m88FillT0 = performance.now();
+              let m89ClusterCooperativeWaitMs = 0;
+              // MAPS_ENGINE M105: this cluster membership is immutable for the
+              // complete instance-build/finalize path. Snapshot its count once so
+              // the measured fill loop and its accounting do not repeatedly resolve
+              // Array.length. This does not alter membership, order or chunk32 cadence.
+              const placementCount = clusterPlacements.length;
+              const inst = new THREE.InstancedMesh(baked, part.material, placementCount);
               // staticPlacementMatrix already embeds the MU->Three basis.
               // There is no converted ancestor in this transport hierarchy.
               if (part.material?.uniforms?.pcChromeUpAxis) part.material.uniforms.pcChromeUpAxis.value = 1;
               inst.name = `World${worldNum}_Object${serial + 1}_INST_${createdForSerial}_${clusterKey}`;
-              inst.castShadow = child?.castShadow ?? false;
-              inst.receiveShadow = child?.receiveShadow ?? false;
-              inst.visible = child?.visible ?? true;
+              const presentationChild = part.presentationChild || child;
+              inst.castShadow = presentationChild?.castShadow ?? false;
+              inst.receiveShadow = presentationChild?.receiveShadow ?? false;
+              inst.visible = presentationChild?.visible ?? true;
+              inst.renderOrder = presentationChild?.renderOrder ?? 0;
+              if (presentationChild?.layers) inst.layers.mask = presentationChild.layers.mask;
               inst.frustumCulled = true;
               inst.instanceMatrix.setUsage(THREE.StaticDrawUsage);
-              const m = new THREE.Matrix4();
-              const instanceLight = new THREE.Color(1, 1, 1);
-              for (let i = 0; i < clusterPlacements.length; i++) {
+              // MAPS_ENGINE M84: region tagging used to rescan every placement
+              // after the matrix/BodyLight fill solely to compute the centroid.
+              // Accumulate the exact same x/y values in the existing hot loop,
+              // removing one full O(clusterPlacements) pass with zero visual change.
+              // MAPS_ENGINE M95: non-compact clusters come directly from the M85
+              // baseline grid, so clusterKey already IS the exact transport region
+              // that spatialBatchKey(centroid) resolves to for every member. Avoid
+              // two numeric conversions/additions per placement in that common hot
+              // path. Compact serials can cross a grid boundary, so they retain the
+              // previous exact centroid calculation and region derivation.
+              const m95NeedsRegionCentroid = clusterKey === 'compact';
+              let regionSumX = 0, regionSumY = 0;
+              // MAPS_ENGINE M96: setColorAt() lazily allocates instanceColor and
+              // calls Color.toArray() for every placement. staticBatch already owns
+              // the exact RGB values, so allocate the identical float attribute once
+              // per cluster and fill its backing array directly. This removes one
+              // method dispatch + Color serialization per instance without changing
+              // terrain sampling, RGB precision, material, placement or GPU layout.
+              const instanceColorArray = new Float32Array(placementCount * 3);
+              inst.instanceColor = new THREE.InstancedBufferAttribute(instanceColorArray, 3);
+              // MAPS_ENGINE M97: setMatrixAt() is only a thin wrapper around
+              // Matrix4.toArray(instanceMatrix.array, index * 16). The static batch
+              // already owns the destination attribute and the exact Matrix4, so
+              // write through Matrix4.toArray directly. This preserves the same
+              // Float32 serialization/GPU layout while removing one InstancedMesh
+              // method dispatch per placement in the measured instanceFill owner.
+              const instanceMatrixArray = inst.instanceMatrix.array;
+              // MAPS_ENGINE M101: both instance attributes are tightly packed and
+              // traversed linearly. Keep running write offsets instead of rebuilding
+              // i*16 / i*3 for every placement. Also aggregate the M100 diagnostic
+              // counter once per cluster below; profiling must not add a hot-loop
+              // increment to the phase it is measuring.
+              let instanceMatrixOffset = 0;
+              let instanceColorOffset = 0;
+              // MAPS_ENGINE M106: keep M103's exact chunk32 cooperative cadence, but
+              // resolve the chunk boundary with one integer add/compare instead of
+              // Math.min() for every chunk. This is intentionally a narrow hot-path
+              // change: same placement order and checkpoints before 32,64,96...
+              // MAPS_ENGINE M103: preserve M80/M102's exact cooperative cadence
+              // (checkpoint before placement 32,64,96...) but process placements in
+              // 32-wide chunks. The measured per-placement fill loop now has no
+              // countdown decrement/branch at all; scheduler work stays between
+              // chunks and content/order are unchanged.
+              for (let chunkStart = 0; chunkStart < placementCount; chunkStart += 32) {
+                if (chunkStart !== 0) {
+                  assertContinue();
+                  // M89 profiler correction: M80's cooperative yield is frame-pacing
+                  // wait, not instance-fill CPU. Measure it separately so physical
+                  // World1/World11 captures identify the actual dominant CPU owner.
+                  const m89YieldT0 = performance.now();
+                  await cooperate();
+                  const m90YieldWaitMs = performance.now() - m89YieldT0;
+                  m89ClusterCooperativeWaitMs += m90YieldWaitMs;
+                  m90SerialCooperativeWaitMs += m90YieldWaitMs;
+                  assertContinue();
+                }
+                const nextChunkEnd = chunkStart + 32;
+                const chunkEnd = nextChunkEnd < placementCount ? nextChunkEnd : placementCount;
+                for (let i = chunkStart; i < chunkEnd; i++, instanceMatrixOffset += 16, instanceColorOffset += 3) {
                 const placement = clusterPlacements[i].obj;
-                staticPlacementMatrix(placement, child, m);
-                inst.setMatrixAt(i, m);
+                // MAPS_ENGINE M104: x/y are consumed by centroid attribution and
+                // terrain BodyLight sampling after the matrix build. Snapshot the
+                // exact placement values once per instance instead of repeatedly
+                // resolving object properties across the measured fill hot path.
+                // Keep M95's Number(value || 0) centroid semantics unchanged and
+                // pass the original values unchanged to the terrain sampler.
+                const placementX = placement.x;
+                const placementY = placement.y;
+                const placementZ = placement.z;
+                if (m95NeedsRegionCentroid) {
+                  regionSumX += Number(placementX || 0);
+                  regionSumY += Number(placementY || 0);
+                }
+                staticPlacementMatrix(placement, child, m, placementMatrixScratch, placementRotationCache, placementX, placementY, placementZ);
+                m.toArray(instanceMatrixArray, instanceMatrixOffset);
                 // PC Calc_RenderObject -> BodyLight samples the terrain at EACH
                 // OBJECT placement. Preserve that per-instance value instead of
                 // one white/shared material for a whole spatial batch.
-                const sampled = this._terrainLightAt(
-                  placement.x - MAP_SIZE / 2, MAP_SIZE / 2 - placement.y, instanceLight);
-                if (sampled) inst.setColorAt(i, sampled);
-                else inst.setColorAt(i, instanceLight.setRGB(1, 1, 1));
+                const colorOffset = instanceColorOffset;
+                // MAPS_ENGINE M100: when the terrain owner exposes the native
+                // sampleTerrainLight RGB tuple, write those exact numeric channels
+                // straight into the instance-color backing attribute. M96 already
+                // removed Color.toArray(); keeping a THREE.Color round-trip here was
+                // redundant work in every static placement. The fallback path stays
+                // byte-for-byte equivalent for worlds without the native sampler.
+                if (hasStaticTerrainLightSample) {
+                  const rgb = m142TerrainRgbScratch
+                    ? staticTerrainLightSample(placementX, placementY, m142TerrainRgbScratch)
+                    : staticTerrainLightSample(placementX, placementY);
+                  instanceColorArray[colorOffset] = Number(rgb?.[0]) || 0;
+                  instanceColorArray[colorOffset + 1] = Number(rgb?.[1]) || 0;
+                  instanceColorArray[colorOffset + 2] = Number(rgb?.[2]) || 0;
+                } else {
+                  const sampled = this._terrainLightAt(
+                    placementX - HALF_MAP_SIZE, HALF_MAP_SIZE - placementY, instanceLight);
+                  if (!sampled) instanceLight.setRGB(1, 1, 1);
+                  const finalColor = sampled || instanceLight;
+                  instanceColorArray[colorOffset] = finalColor.r;
+                  instanceColorArray[colorOffset + 1] = finalColor.g;
+                  instanceColorArray[colorOffset + 2] = finalColor.b;
+                }
+                }
               }
+              // M101: preserve M100 totals exactly while keeping instrumentation
+              // outside the measured per-placement instanceFill hot loop.
+              if (hasStaticTerrainLightSample) {
+                staticBatchBreakdown.directTerrainColorWrites += placementCount;
+                if (m142TerrainRgbScratch) staticBatchBreakdown.reusableTerrainRgbSamples += placementCount;
+              }
+              else staticBatchBreakdown.fallbackTerrainColorWrites += placementCount;
               inst.instanceMatrix.needsUpdate = true;
+              // MAPS_ENGINE M98: quantify the immutable static-instance GPU upload
+              // owned by this cluster. These are the exact backing attributes that
+              // WebGL uploads after needsUpdate; profiling only, with no new upload,
+              // allocation, draw, placement or material change. This lets physical
+              // World1/World11 captures distinguish CPU instanceFill from transport
+              // volume before changing renderer/BMD/GPU policy.
+              const m98MatrixUploadBytes = inst.instanceMatrix?.array?.byteLength || 0;
+              const m98ColorUploadBytes = inst.instanceColor?.array?.byteLength || 0;
+              const m98ClusterUploadBytes = m98MatrixUploadBytes + m98ColorUploadBytes;
+              staticBatchBreakdown.matrixUploadBytes += m98MatrixUploadBytes;
+              staticBatchBreakdown.colorUploadBytes += m98ColorUploadBytes;
+              staticBatchBreakdown.gpuUploadBytes += m98ClusterUploadBytes;
+              staticBatchBreakdown.maxClusterUploadBytes = Math.max(staticBatchBreakdown.maxClusterUploadBytes, m98ClusterUploadBytes);
+              m99SerialMatrixUploadBytes += m98MatrixUploadBytes;
+              m99SerialColorUploadBytes += m98ColorUploadBytes;
+              m99SerialMaxClusterUploadBytes = Math.max(m99SerialMaxClusterUploadBytes, m98ClusterUploadBytes);
+              const m89FillElapsedMs = performance.now() - m88FillT0;
+              staticBatchBreakdown.cooperativeWaitMs += m89ClusterCooperativeWaitMs;
+              const m91ClusterFillCpuMs = Math.max(0, m89FillElapsedMs - m89ClusterCooperativeWaitMs);
+              staticBatchBreakdown.instanceFillMs += m91ClusterFillCpuMs;
+              m91SerialFillCpuMs += m91ClusterFillCpuMs;
+              staticBatchBreakdown.clusters++;
+              staticBatchBreakdown.instances += placementCount;
+              const m88FinalizeT0 = performance.now();
               if (inst.instanceColor) inst.instanceColor.needsUpdate = true;
               // R15.3: batch estático é realmente imutável. InstancedMesh herda
               // matrixAutoUpdate=true de Object3D; com centenas de clusters isso
@@ -1500,14 +2488,41 @@ export class TerrainObjectLayer {
               // descarte espacial do PC sem remover nenhuma instância.
               try { inst.computeBoundingBox?.(); } catch (_) {}
               try { inst.computeBoundingSphere?.(); } catch (_) {}
-              let sx = 0, sy = 0;
-              for (const cp of clusterPlacements) { sx += Number(cp.obj?.x || 0); sy += Number(cp.obj?.y || 0); }
-              inst.userData.__muTransportRegion = spatialBatchKey({ x: sx / clusterPlacements.length, y: sy / clusterPlacements.length }, chunkTiles);
+              inst.userData.__muTransportRegion = m95NeedsRegionCentroid
+                ? spatialBatchKey({ x: regionSumX / placementCount, y: regionSumY / placementCount }, chunkTiles)
+                : clusterKey;
               staged.push(inst);
+              const m91ClusterFinalizeMs = performance.now() - m88FinalizeT0;
+              staticBatchBreakdown.finalizeMs += m91ClusterFinalizeMs;
+              m91SerialFinalizeMs += m91ClusterFinalizeMs;
               childClusterIndex++;
             }
+            m94SerialRotationMruHits += placementMatrixScratch.rotationMruHits;
+            m94SerialRotationMapHits += placementMatrixScratch.rotationMapHits;
+            m94SerialRotationMisses += placementMatrixScratch.rotationMisses;
+            // MAPS_ENGINE M115: expose M114 scale-MRU effectiveness in the same
+            // physical World1/World11 staticBatch capture without changing work.
+            m115SerialScaleMruHits += placementMatrixScratch.scaleMruHits;
+            m115SerialScaleWrites += placementMatrixScratch.scaleWrites;
             createdForSerial += childClusterIndex;
           }
+          for (const rotationYMap of placementRotationCache.values())
+            for (const rotationZMap of rotationYMap.values()) placementRotationCacheEntries += rotationZMap.size;
+          staticBatchBreakdown.rotationCacheEntries += placementRotationCacheEntries;
+          staticBatchBreakdown.rotationMruHits += m94SerialRotationMruHits;
+          staticBatchBreakdown.rotationMapHits += m94SerialRotationMapHits;
+          staticBatchBreakdown.rotationMisses += m94SerialRotationMisses;
+          staticBatchBreakdown.scaleMruHits += m115SerialScaleMruHits;
+          staticBatchBreakdown.scaleWrites += m115SerialScaleWrites;
+          staticScaleBySerial.set(serial, Object.freeze({ serial, scaleMruHits: m115SerialScaleMruHits, scaleWrites: m115SerialScaleWrites }));
+          const staticSerialWallMs = performance.now() - staticSerialProfileT0;
+          const staticSerialMs = Math.max(0, staticSerialWallMs - m90SerialCooperativeWaitMs);
+          const prevStaticCost = staticBatchCostBySerial.get(serial) || { serial, count: 0, totalMs: 0, maxMs: 0 };
+          prevStaticCost.count++; prevStaticCost.totalMs += staticSerialMs;
+          if (staticSerialMs > prevStaticCost.maxMs) prevStaticCost.maxMs = staticSerialMs;
+          staticBatchCostBySerial.set(serial, prevStaticCost);
+          staticBatchPhaseBySerial.set(serial, Object.freeze({ serial, partitionMs: m91PartitionMs, bakeMs: m91SerialBakeMs, fillCpuMs: m91SerialFillCpuMs, cooperativeWaitMs: m90SerialCooperativeWaitMs, finalizeMs: m91SerialFinalizeMs, cpuMs: m91PartitionMs + m91SerialBakeMs + m91SerialFillCpuMs + m91SerialFinalizeMs }));
+          staticUploadBySerial.set(serial, Object.freeze({ serial, matrixUploadBytes: m99SerialMatrixUploadBytes, colorUploadBytes: m99SerialColorUploadBytes, gpuUploadBytes: m99SerialMatrixUploadBytes + m99SerialColorUploadBytes, maxClusterUploadBytes: m99SerialMaxClusterUploadBytes }));
           if (createdForSerial > 0) {
             for (const inst of staged) {
               this.root.add(inst);
@@ -1520,9 +2535,24 @@ export class TerrainObjectLayer {
             rendered += placements.length;
             shared += placements.length;
           } else {
-            for (const g of bakedGeometries) g.dispose?.();
+            for (const g of m132OwnedStaticGeometries) g.dispose?.();
           }
         } catch (e) {
+          // M132: only committed batches may outlive this serial. On a failed
+          // static build, remove partial scene references and release every
+          // baked/merged geometry exactly once; shared template materials are
+          // NOT owned here and must remain untouched. Stale loads must unwind
+          // to the M128 generation fence, never resume fallback clones.
+          for (const inst of staged) {
+            try { this.root.remove(inst); } catch (_) { /* best effort */ }
+            const at = this._instancedMeshes.indexOf(inst);
+            if (at >= 0) this._instancedMeshes.splice(at, 1);
+          }
+          for (const g of m132OwnedStaticGeometries) {
+            this._instancedGeometries.delete(g);
+            try { g.dispose?.(); } catch (_) { /* best effort */ }
+          }
+          if (e?.code === 'MUWEB_STALE_WORLD_LOAD') throw e;
           console.warn(`[WorldObjects] InstancedMesh Object${serial + 1} falhou; fallback clones: ${e.message}`);
         }
       }
@@ -1532,10 +2562,29 @@ export class TerrainObjectLayer {
     // R23 recovery: preserve R22 cooperative loading, but restore the verified
     // R15.11-R15.15 physical transport chain lost in an earlier integration.
     const webglMultiDraw = !!this.gameScene?.renderer?.extensions?.has?.('WEBGL_multi_draw');
+    // M136: M75 staticBatch wall time includes transport construction, while
+    // M88/M91 measure its earlier partition/bake/instance-fill owners. Isolate
+    // multi-draw packing versus CPU regional merge to identify the dominant
+    // staticBatch subowner in physical World1/World11 captures. No scheduling,
+    // renderer, upload, placement or transport decision is changed.
+    const m136TransportT0 = performance.now();
     const transportStats = compactStaticInstancedTransport(this.root, this._instancedMeshes, { multiDrawSupported: webglMultiDraw });
+    const m136BatchMs = performance.now() - m136TransportT0;
     this._batchedMeshes = transportStats.batches || [];
-    const fallbackMergeStats = webglMultiDraw ? null : compactStaticInstancedFallbackMerge(this.root, this._instancedMeshes);
+    const m136FallbackT0 = performance.now();
+    // M143 diagnostic A/B: force the previous M140 packed-copy path without
+    // changing M75 phase boundaries, content, or renderer transport selection.
+    const fallbackMergeStats = webglMultiDraw ? null : compactStaticInstancedFallbackMerge(this.root, this._instancedMeshes, {
+      directMatrixViews: !(typeof window !== 'undefined' && window.__MU_DISABLE_MAP_DIRECT_MATRIX_VIEW === true),
+    });
+    const m136FallbackMs = webglMultiDraw ? 0 : performance.now() - m136FallbackT0;
     this._mergedTransportMeshes = fallbackMergeStats?.meshes || [];
+    if (fallbackMergeStats) {
+      transportStats.skippedUnsafeGeometry = fallbackMergeStats.skippedUnsafeGeometry;
+      transportStats.skippedCustomRenderOwner = fallbackMergeStats.skippedCustomRenderOwner;
+      transportStats.skippedAuthoredVertexColor = fallbackMergeStats.skippedAuthoredVertexColor;
+      transportStats.skippedOrderDependentMaterial = fallbackMergeStats.skippedOrderDependentMaterial;
+    }
     if (fallbackMergeStats?.sourceDraws) {
       transportStats.mode = 'cpu-merged-regional';
       transportStats.sourceDraws = fallbackMergeStats.sourceDraws;
@@ -1548,6 +2597,21 @@ export class TerrainObjectLayer {
       transportStats.packingSavedDraws = fallbackMergeStats.packingSavedDraws;
       transportStats.packingBins = fallbackMergeStats.packingBins;
       transportStats.singletonRemainder = fallbackMergeStats.singletonRemainder;
+      transportStats.uncoloredMergedBins = fallbackMergeStats.uncoloredMergedBins;
+      transportStats.coloredMergedBins = fallbackMergeStats.coloredMergedBins;
+      transportStats.avoidedColorUploadBytes = fallbackMergeStats.avoidedColorUploadBytes;
+      transportStats.avoidedColorObjects = fallbackMergeStats.avoidedColorObjects;
+      transportStats.matrixPackedBins = fallbackMergeStats.matrixPackedBins;
+      transportStats.avoidedMatrixObjects = fallbackMergeStats.avoidedMatrixObjects;
+      transportStats.packedMatrixBytes = fallbackMergeStats.packedMatrixBytes;
+      transportStats.bulkMatrixCopies = fallbackMergeStats.bulkMatrixCopies;
+      transportStats.bulkMatrixBytes = fallbackMergeStats.bulkMatrixBytes;
+      transportStats.avoidedGetMatrixAtCalls = fallbackMergeStats.avoidedGetMatrixAtCalls;
+      transportStats.directMatrixBins = fallbackMergeStats.directMatrixBins;
+      transportStats.directMatrixPlacements = fallbackMergeStats.directMatrixPlacements;
+      transportStats.avoidedPackedMatrixBytes = fallbackMergeStats.avoidedPackedMatrixBytes;
+      transportStats.avoidedBoundsRecomputes = fallbackMergeStats.avoidedBoundsRecomputes;
+      transportStats.avoidedBoundsVertexVisits = fallbackMergeStats.avoidedBoundsVertexVisits;
       transportStats.attemptedGroups = fallbackMergeStats.attemptedGroups;
       transportStats.mergedGroups = fallbackMergeStats.mergedGroups;
       transportStats.remainingEligibleDraws = Math.max(0, fallbackMergeStats.packingCandidates - fallbackMergeStats.packingSelected);
@@ -1556,6 +2620,7 @@ export class TerrainObjectLayer {
     }
     if (this._lastSpatialBatchStats) {
       this._lastSpatialBatchStats.transport = transportStats;
+      this._lastSpatialBatchStats.skippedUnsafeTemplateFusionGroups = m137UnsafeTemplateFusionGroups;
       this._lastSpatialBatchStats.effectiveStaticDraws =
         instancedDraws - transportStats.sourceDraws + transportStats.batchedDraws;
     }
@@ -1570,55 +2635,166 @@ export class TerrainObjectLayer {
     const logicalCores = Math.max(1, Number(globalThis?.navigator?.hardwareConcurrency) || 4);
     const placementBuildConcurrency = logicalCores >= 12 ? 6 : logicalCores >= 8 ? 5 : 4;
     this.root.userData.muMapPlacementBuildConcurrency = placementBuildConcurrency;
+    // M77: M75 proved placementBuild dominates World11 and is material in World1,
+    // but phase totals alone cannot identify which exact PC ObjectXX owners cause
+    // the long work. Profile per-serial placement cost without changing scheduling,
+    // renderer ownership, assets, visibility or quality. Start timing only AFTER the
+    // cooperative checkpoint so scheduler/yield wait is not charged to an object.
+    const placementCostBySerial = new Map();
+    // MAPS_ENGINE M121: retain M120 per-owner split, but also account every
+    // measured placement. M120's top-12 hotspot reduction was intentionally
+    // useful for ranking, yet it could not tell whether those owners represented
+    // most of placementBuild. These totals are diagnostic only.
+    let m121PlacementMeasuredMs = 0;
+    let m121ModelSetupMeasuredMs = 0;
+    let m121PlacementMeasuredCount = 0;
+    // MAPS_ENGINE M122: attribute modelSetup to template-clone versus fresh
+    // MUModelRenderer/BMD init. Diagnostic only; no renderer policy changes.
+    let m122TemplateSetupMs = 0, m122RendererSetupMs = 0;
+    let m122TemplateSetupCount = 0, m122RendererSetupCount = 0;
+    // MAPS_ENGINE M123: retain per-ObjectXX setup-kind cost so physical World1/World11
+    // captures identify the exact BMD/template owners behind modelSetup. Diagnostic only.
+    const m123ModelSetupBySerial = new Map();
+    // MAPS_ENGINE M126: five Matrix4 scratch values are private to THIS load.
+    // JS worker callbacks run synchronously between awaits, so they cannot
+    // overwrite one another mid-quaternion. Avoid per-placement matrix and
+    // temporary Quaternion allocation without changing rotation math.
+    const m126QuaternionScratch = {
+      rx: new THREE.Matrix4(), ry: new THREE.Matrix4(), rz: new THREE.Matrix4(),
+      rMu: new THREE.Matrix4(), rThree: new THREE.Matrix4(),
+    };
+    let m126ScratchQuaternionWrites = 0;
+    // M141: placementBuild is the measured cold-entry bottleneck in FIX80.
+    // Consecutive authored objects frequently reuse an exact rotation triple.
+    // Keep a ONE-entry load-local quaternion MRU, with Object.is comparisons
+    // (including -0), so identical angles copy the already-normalized result
+    // rather than rebuilding five matrices and trig. Cache state is synchronous
+    // and never crosses map generations or renderer/animation owners.
+    const m141RotationMru = { valid:false, x:0, y:0, z:0, quaternion:new THREE.Quaternion() };
+    let m141RotationMruHits = 0, m141RotationMruMisses = 0;
+    // MUModelRenderer.setBodyLight copies its input into renderer-owned color and
+    // material values synchronously. Reuse one per-load sampling Color, never
+    // exposing this mutable scratch to a renderer or asynchronous visual owner.
+    const m126BodyLightScratch = new THREE.Color();
+    let m126BodyLightScratchSamples = 0;
+    // The local per-serial AABB is immutable. Reuse the temporary world-space
+    // Box3, but keep each placement's returned culling Sphere independently.
+    const m126BoundsScratch = new THREE.Box3();
+    let m126BoundsScratchWrites = 0;
+    // MAPS_ENGINE M124: separate cooperative browser-yield wall time from active
+    // placement work. M75 boundaries remain untouched; diagnostic only.
+    let m124PlacementCooperateMs = 0, m124PlacementCooperateCount = 0;
+    // MAPS_ENGINE M125/M126: placement elapsed time includes awaited renderer/
+    // visual-owner work, so these buckets are await-inclusive WALL times, NOT
+    // proof of a single synchronous 4/8/16/32ms long task. Preserve counters
+    // and expose this measurement limitation explicitly in the profile.
+    let m125Over4 = 0, m125Over8 = 0, m125Over16 = 0, m125Over32 = 0;
+    let m125MaxPlacementMs = 0, m125MaxPlacementObject = 0, m125MaxPlacementIndex = -1;
     await mapLimit(parsed.objects, placementBuildConcurrency, async (obj, index) => {
       assertContinue();
       if (this._disposed || instancedSerials.has(obj.serial) || sourceHiddenNoRendererSerials.has(obj.serial)) return;
-      if ((index & 7) === 0) await cooperate();
+      // M76 physical World1/World11 profile: placementBuild is the dominant
+      // active-transition phase (World11 370/435ms; World1 232/617ms), while
+      // the same captures show one-frame stalls in the hundreds of ms.  The
+      // cooperative budget above was only consulted once per 8 placements,
+      // so expensive MUModelRenderer/BMD setup could overrun its 8ms slice by
+      // several placements before the next checkpoint.  During active map
+      // transitions (sliceMs > 0), consult the shared budget before EVERY
+      // placement; checkpoint() only yields when the elapsed budget expires.
+      // Keep the historical idle-callback cadence for sliceMs==0 scenes.
+      if (cooperativeSliceMs > 0 || (index & 7) === 0) {
+        const m124CooperateT0 = performance.now();
+        await cooperate();
+        m124PlacementCooperateMs += performance.now() - m124CooperateT0;
+        m124PlacementCooperateCount++;
+      }
       assertContinue();
       if (this._disposed) return;
+      const placementProfileT0 = performance.now();
       const data = modelCache.get(obj.serial);
       if (!data) { missing++; bumpMissingSerial(obj.serial); return; }
       let renderer = null;
+      // M128: keep uncommitted owners in scope for deterministic rollback if
+      // any awaited asset/FX operation fails or the map is superseded.
+      let outer = null, pcVisualSprite = null, pcParticleOwner = null;
+      let pcLorenciaVisualOwner = null, pcLorenciaBoneVisualOwner = null;
+      let pcMapBoneVisualOwner = null, pcMapParticleOwner = null;
+      let m120ModelSetupMs = 0;
+      let m122ModelSetupKind = null;
       try {
+        const m120ModelSetupT0 = performance.now();
         const template = templates.get(obj.serial);
         let inner;
         if (template) {
+          m122ModelSetupKind = 'templateClone';
           // Fallback diagnóstico: clone raso com skeleton compartilhado.
           inner = new THREE.Group();
-          for (const child of template.group.children) {
-            if (child.isSkinnedMesh || child.isMesh) {
-              const clone = child.clone();
-              clone.bindMode = 'detached';
-              clone.frustumCulled = true;
-              if (clone.isSkinnedMesh && !clone.boundingSphere && clone.computeBoundingSphere) {
-                try { clone.computeBoundingSphere(); } catch (_) {}
-              }
-              inner.add(clone);
-            }
+          // M142: identical authored child order and per-placement clone owner;
+          // only repeated eligibility scans are eliminated. The static probe
+          // group is frozen structurally for the duration of this load.
+          let m142CloneSources = m142CloneChildrenByGroup.get(template.group);
+          if (!m142CloneSources) {
+            m142CloneSources = template.group.children.filter(child => child.isSkinnedMesh || child.isMesh);
+            m142CloneChildrenByGroup.set(template.group, m142CloneSources);
+            m142CloneListBuilds++;
+          } else {
+            m142CloneListHits++;
           }
+          for (const child of m142CloneSources) {
+            const clone = child.clone();
+            clone.bindMode = 'detached';
+            clone.frustumCulled = true;
+            if (clone.isSkinnedMesh && !clone.boundingSphere && clone.computeBoundingSphere) {
+              try { clone.computeBoundingSphere(); } catch (_) {}
+            }
+            inner.add(clone);
+          }
+          m142ClonedChildren += m142CloneSources.length;
           shared++;
         } else {
+          m122ModelSetupKind = 'rendererInit';
           renderer = new MUModelRenderer({
             scene: this.gameScene.scene,
             camera: this.gameScene.camera?.threeCamera,
           });
           await renderer.initFromBMD(data);
+          assertContinue(); // M128: renderer is still local, before any scene attachment.
           if (worldNum === 75) applyPcWorld75ObjectMaterialPresentation(renderer, obj.serial);
           inner = renderer.group;
         }
+        m120ModelSetupMs = performance.now() - m120ModelSetupT0;
+        if (m122ModelSetupKind === 'templateClone') { m122TemplateSetupMs += m120ModelSetupMs; m122TemplateSetupCount++; }
+        else if (m122ModelSetupKind === 'rendererInit') { m122RendererSetupMs += m120ModelSetupMs; m122RendererSetupCount++; }
+        if (m122ModelSetupKind) {
+          const m123Setup = m123ModelSetupBySerial.get(obj.serial) || { serial: obj.serial, templateCloneCount: 0, templateCloneMs: 0, rendererInitCount: 0, rendererInitMs: 0 };
+          if (m122ModelSetupKind === 'templateClone') { m123Setup.templateCloneCount++; m123Setup.templateCloneMs += m120ModelSetupMs; }
+          else { m123Setup.rendererInitCount++; m123Setup.rendererInitMs += m120ModelSetupMs; }
+          m123ModelSetupBySerial.set(obj.serial, m123Setup);
+        }
         applyMuUpAxis(inner);
-        const outer = new THREE.Group();
+        outer = new THREE.Group();
         outer.name = `World${worldNum}_Object${obj.serial + 1}_i${index}`;
         outer.add(inner);
         muObjectPositionToThree(obj, outer.position);
-        outer.quaternion.copy(muObjectQuaternion(obj));
+        if (m141RotationMru.valid && Object.is(obj.angleX, m141RotationMru.x) &&
+            Object.is(obj.angleY, m141RotationMru.y) && Object.is(obj.angleZ, m141RotationMru.z)) {
+          outer.quaternion.copy(m141RotationMru.quaternion);
+          m141RotationMruHits++;
+        } else {
+          muObjectQuaternion(obj, outer.quaternion, m126QuaternionScratch);
+          m141RotationMru.quaternion.copy(outer.quaternion);
+          m141RotationMru.x = obj.angleX; m141RotationMru.y = obj.angleY; m141RotationMru.z = obj.angleZ;
+          m141RotationMru.valid = true;
+          m141RotationMruMisses++;
+        }
+        m126ScratchQuaternionWrites++;
         outer.scale.setScalar(obj.scale);
         // World75 emitter objects 79/80 own an exact BITMAP_LIGHT sprite at
         // OBJECT::Position.  Keep it outside `outer` so object scale/rotation is
         // not applied twice: CreateSprite receives the already-scaled scalar.
-        let pcVisualSprite = null;
         if (worldNum === 75 && (obj.serial === 79 || obj.serial === 80)) {
           pcVisualSprite = await createPcWorld75VisualSprite(obj.serial, obj, outer.position);
+          assertContinue();
           if (pcVisualSprite) {
             this.root.add(pcVisualSprite);
             if (typeof pcVisualSprite.userData.update === 'function') this._registerUpdateOwner(pcVisualSprite);
@@ -1627,9 +2803,9 @@ export class TerrainObjectLayer {
         // R74: source-faithful World75 emitter children. The emitter BMD stays
         // hidden exactly as RenderObjectVisual intends; real bitmap particles
         // are separate world-space billboards using ZzzEffectParticle laws.
-        let pcParticleOwner = null;
         if (worldNum === 75 && PC_WORLD75_PARTICLE_SERIALS.includes(obj.serial)) {
           pcParticleOwner = await createPcWorld75ParticleOwner(obj.serial, obj, outer.position);
+          assertContinue();
           if (pcParticleOwner?.group) {
             this.root.add(pcParticleOwner.group);
             if (typeof pcParticleOwner.group.userData.update === 'function') this._registerUpdateOwner(pcParticleOwner.group);
@@ -1640,29 +2816,29 @@ export class TerrainObjectLayer {
         // DungeonGate, FireLight and Bonfire also call the same exact CreateFire
         // owner at authored offsets. Keep particle owner outside `outer` so
         // OBJECT scale never multiplies CreateFire's world-space offset.
-        let pcLorenciaVisualOwner = null;
         if (worldNum === 1 && PC_LORENCIA_RUNTIME_VISUAL_SERIALS.includes(obj.serial)) {
           pcLorenciaVisualOwner = await createPcLorenciaVisualOwner(obj.serial, obj, outer.position, {
             addTerrainLightMu: (muX, muY, light, range) => this.gameScene.addDynamicTerrainLightMu?.(muX, muY, light, range),
           });
+          assertContinue();
           if (pcLorenciaVisualOwner?.group) {
             this.root.add(pcLorenciaVisualOwner.group);
             if (typeof pcLorenciaVisualOwner.group.userData.update === 'function') this._registerUpdateOwner(pcLorenciaVisualOwner.group);
           }
         }
-        let pcLorenciaBoneVisualOwner = null;
         if (worldNum === 1 && renderer && (obj.serial === 56 || obj.serial === 105)) {
           pcLorenciaBoneVisualOwner = await createPcLorenciaBoneVisualOwner(obj.serial, renderer, obj);
+          assertContinue();
           if (pcLorenciaBoneVisualOwner?.group) this.root.add(pcLorenciaBoneVisualOwner.group);
         }
-        let pcMapBoneVisualOwner = null;
         if (renderer && hasPcMapBoneVisual(worldNum, obj.serial)) {
           pcMapBoneVisualOwner = await createPcMapBoneVisualOwner(worldNum, obj.serial, renderer, obj);
+          assertContinue();
           if (pcMapBoneVisualOwner?.group) this.root.add(pcMapBoneVisualOwner.group);
         }
-        let pcMapParticleOwner = null;
         if (renderer && hasPcMapParticleVisual(worldNum, obj.serial)) {
           pcMapParticleOwner = await createPcMapParticleOwner(worldNum, obj.serial, renderer, obj);
+          assertContinue();
           if (pcMapParticleOwner?.group) {
             this.root.add(pcMapParticleOwner.group);
             if (typeof pcMapParticleOwner.group.userData.update === 'function') this._registerUpdateOwner(pcMapParticleOwner.group);
@@ -1674,10 +2850,14 @@ export class TerrainObjectLayer {
         // owner before setBodyLight(), which could make animated BlendMeshLight
         // multiply stale white instead of the object's terrain light.
         if (renderer) {
-          const objectBodyLight = this._terrainLightAt(outer.position.x, outer.position.z, new THREE.Color());
+          const objectBodyLight = this._terrainLightAt(outer.position.x, outer.position.z, m126BodyLightScratch);
+          m126BodyLightScratchSamples++;
           if (objectBodyLight) renderer.setBodyLight(objectBodyLight);
         }
-        if (renderer && hasPcLoginObjectPresentation(worldNum,obj.serial)) await installPcLoginObjectPresentation(worldNum,obj.serial,renderer);
+        if (renderer && hasPcLoginObjectPresentation(worldNum,obj.serial)) {
+          await installPcLoginObjectPresentation(worldNum,obj.serial,renderer);
+          assertContinue();
+        }
         const pcMapRuntimePresentation = renderer ? installPcMapRuntimePresentation(worldNum, obj.serial, renderer, obj) : false;
         if (!renderer) {
           outer.updateMatrix();
@@ -1693,7 +2873,7 @@ export class TerrainObjectLayer {
           try {
             outer.updateMatrixWorld(true);
             const localBounds = localBoundsBySerial.get(obj.serial);
-            if (localBounds) { cullSphere = placementCullSphere(localBounds, inner.matrixWorld); boundReusePlacements++; }
+            if (localBounds) { cullSphere = placementCullSphere(localBounds, inner.matrixWorld, m126BoundsScratch); boundReusePlacements++; m126BoundsScratchWrites++; }
             else {
               boundFallbackPlacements++;
               const box = new THREE.Box3().setFromObject(outer);
@@ -1801,12 +2981,66 @@ export class TerrainObjectLayer {
         this.instances.push(slot);
         rendered++;
       } catch (e) {
+        // M128: async visual owners may have been attached before a later await
+        // was cancelled. Roll back ONLY this uncommitted placement, including
+        // scene callbacks; never touch previously committed map placements.
+        // M129: bone-space presentation groups are attached directly to root
+        // before the placement is committed. Their dispose() releases sprite
+        // resources but does NOT detach the group from the scene graph. Retire
+        // them with the other partial owners on stale-world or setup failure.
+        const partialOwners = [outer, pcVisualSprite, pcParticleOwner?.group,
+          pcLorenciaVisualOwner?.group, pcLorenciaBoneVisualOwner?.group,
+          pcMapBoneVisualOwner?.group, pcMapParticleOwner?.group].filter(Boolean);
+        if (partialOwners.length) {
+          const partialSet = new Set(partialOwners);
+          retireMapSceneObjectReferences(this.gameScene.objects, partialSet, [], []);
+          for (const owner of partialSet) {
+            this._ownedUpdateOwners.delete(owner);
+            this._pendingUpdateOwnerSet.delete(owner);
+            try { this.root.remove(owner); } catch (_) { /* best effort */ }
+          }
+          this._pendingUpdateOwners = this._pendingUpdateOwners.filter((owner) => !partialSet.has(owner));
+        }
+        try { pcVisualSprite?.material?.dispose?.(); } catch (_) { /* best effort */ }
+        for (const owner of [pcParticleOwner, pcLorenciaVisualOwner,
+          pcLorenciaBoneVisualOwner, pcMapBoneVisualOwner, pcMapParticleOwner]) {
+          try { owner?.dispose?.(); } catch (_) { /* best effort */ }
+        }
         try { renderer?.dispose?.(); } catch (_) { /* release partial geometry leases */ }
+        if (e?.code === 'MUWEB_STALE_WORLD_LOAD') throw e;
         missing++; bumpMissingSerial(obj.serial);
         console.warn(`[WorldObjects] placement ${index} Object${obj.serial + 1}: ${e.message}`);
       }
+      const placementMs = performance.now() - placementProfileT0;
+      m121PlacementMeasuredMs += placementMs;
+      m121ModelSetupMeasuredMs += m120ModelSetupMs;
+      m121PlacementMeasuredCount++;
+      if (placementMs >= 4) m125Over4++;
+      if (placementMs >= 8) m125Over8++;
+      if (placementMs >= 16) m125Over16++;
+      if (placementMs >= 32) m125Over32++;
+      if (placementMs > m125MaxPlacementMs) { m125MaxPlacementMs = placementMs; m125MaxPlacementObject = obj.serial + 1; m125MaxPlacementIndex = index; }
+      const prevCost = placementCostBySerial.get(obj.serial) || { serial: obj.serial, count: 0, totalMs: 0, maxMs: 0, modelSetupMs: 0 };
+      prevCost.count++;
+      prevCost.totalMs += placementMs;
+      prevCost.modelSetupMs += m120ModelSetupMs;
+      if (placementMs > prevCost.maxMs) prevCost.maxMs = placementMs;
+      placementCostBySerial.set(obj.serial, prevCost);
     });
+    assertContinue(); // M128: never finalize a superseded placement generation.
     _markProfile('placementBuild');
+    const placementHotspots = [...placementCostBySerial.values()]
+      .map(x => Object.freeze({ object: x.serial + 1, count: x.count, totalMs: x.totalMs, maxMs: x.maxMs, avgMs: x.count ? x.totalMs / x.count : 0, modelSetupMs: x.modelSetupMs || 0, postSetupMs: Math.max(0, x.totalMs - (x.modelSetupMs || 0)) }))
+      .sort((a, b) => b.totalMs - a.totalMs || b.maxMs - a.maxMs)
+      .slice(0, 12);
+    const staticBatchPhaseHotspots = [...staticBatchPhaseBySerial.values()]
+      .map(x => Object.freeze({ object: x.serial + 1, partitionMs: x.partitionMs, bakeMs: x.bakeMs, fillCpuMs: x.fillCpuMs, cooperativeWaitMs: x.cooperativeWaitMs, finalizeMs: x.finalizeMs, cpuMs: x.cpuMs }))
+      .sort((a, b) => b.cpuMs - a.cpuMs)
+      .slice(0, 12);
+    const staticBatchHotspots = [...staticBatchCostBySerial.values()]
+      .map(x => Object.freeze({ object: x.serial + 1, count: x.count, totalMs: x.totalMs, maxMs: x.maxMs, avgMs: x.count ? x.totalMs / x.count : 0 }))
+      .sort((a, b) => b.totalMs - a.totalMs || b.maxMs - a.maxMs)
+      .slice(0, 12);
     this._templateRenderers = [...templates.values()];
     if (shared > 0) {
       const sb = this._lastSpatialBatchStats || { chunkTiles: 0, spatialClusters: 0 };
@@ -1833,9 +3067,6 @@ export class TerrainObjectLayer {
     if(worldNum===1){
       const rows=[];
       for(const serial of [...LORENCIA_ARCHITECTURE_AUDIT_SERIALS].sort((a,b)=>a-b)){
-        // FIX81: FIX69 used an out-of-scope `slots` identifier here.  The
-        // authoritative placement collection in this phase is `this.instances`;
-        // keep this block diagnostic-only and never let telemetry abort map load.
         const ss=this.instances.filter(x=>(x.obj?.serial|0)===serial);
         const authored=parsed.objects.filter(x=>(x.serial|0)===serial).length;
         if(!authored)continue;
@@ -1849,32 +3080,246 @@ export class TerrainObjectLayer {
     // This distinguishes "model absent" from "source-hidden controller" and
     // "owner installed but visually wrong", which the old aggregate PASS could not.
     const serialAudit={};
+    // M142: FIX42's diagnostic previously rescanned all live placements once
+    // for EVERY ObjectXX serial, then filtered the same slots six more times.
+    // Count the exact same truthy owner fields in one pass; keep sorted serial
+    // output, path labels, missing counts and authored placement totals intact.
+    const m142AuditOwnerCountsBySerial = new Map();
+    let m142AuditSlotsVisited = 0;
     if (worldNum===1 || worldNum===11) {
+      for (const slot of this.instances) {
+        m142AuditSlotsVisited++;
+        if (!slot?.obj) continue;
+        const serial = slot.obj.serial;
+        let counts = m142AuditOwnerCountsBySerial.get(serial);
+        if (!counts) {
+          counts = { renderer:0, lorenciaVisual:0, lorenciaBone:0, mapBone:0, mapParticle:0, runtime:0 };
+          m142AuditOwnerCountsBySerial.set(serial, counts);
+        }
+        if (slot.renderer) counts.renderer++;
+        if (slot.pcLorenciaVisualOwner) counts.lorenciaVisual++;
+        if (slot.pcLorenciaBoneVisualOwner) counts.lorenciaBone++;
+        if (slot.pcMapBoneVisualOwner) counts.mapBone++;
+        if (slot.pcMapParticleOwner) counts.mapParticle++;
+        if (slot.pcMapRuntimePresentation) counts.runtime++;
+      }
       for (const [serial, placements] of [...placementsBySerial.entries()].sort((a,b)=>a[0]-b[0])) {
-        const slots=this.instances.filter(slot=>slot?.obj?.serial===serial);
-        const counts={
-          renderer:slots.filter(x=>!!x.renderer).length,
-          lorenciaVisual:slots.filter(x=>!!x.pcLorenciaVisualOwner).length,
-          lorenciaBone:slots.filter(x=>!!x.pcLorenciaBoneVisualOwner).length,
-          mapBone:slots.filter(x=>!!x.pcMapBoneVisualOwner).length,
-          mapParticle:slots.filter(x=>!!x.pcMapParticleOwner).length,
-          runtime:slots.filter(x=>!!x.pcMapRuntimePresentation).length,
-        };
+        const counts = m142AuditOwnerCountsBySerial.get(serial) ||
+          { renderer:0, lorenciaVisual:0, lorenciaBone:0, mapBone:0, mapParticle:0, runtime:0 };
         const path=sourceHiddenNoRendererSerials.has(serial)?'source-hidden-no-renderer':instancedSerials.has(serial)?'instanced':animatedSerials.has(serial)?'animated':'clone/static';
         const rec={object:serial+1,placements:placements.length,model:modelCache.get(serial)?'ok':'missing',path,sourceHidden:pcMapHideBaseBmd(worldNum,serial),missing:missingBySerial.get(serial)||0,owners:counts};
         serialAudit[serial+1]=rec;
-        console.info(`[WorldObjects AUDIT FIX42] W${worldNum} Object${serial+1} placements=${rec.placements} model=${rec.model} path=${path} hidden=${rec.sourceHidden?1:0} missing=${rec.missing} owners=renderer:${counts.renderer},lorencia:${counts.lorenciaVisual},lorenciaBone:${counts.lorenciaBone},mapBone:${counts.mapBone},particle:${counts.mapParticle},runtime:${counts.runtime}`);
+        // FIX151: retain complete audit in the profile, but only print every
+        // object in opt-in verbose mode. Hundreds of synchronous console calls
+        // can jank the main thread, especially with DevTools open.
+        if (globalThis.MUWEB_VERBOSE_OBJECT_AUDIT === true || rec.missing > 0 || (rec.model === 'missing' && !rec.sourceHidden)) {
+          console.info(`[WorldObjects AUDIT FIX42] W${worldNum} Object${serial+1} placements=${rec.placements} model=${rec.model} path=${path} hidden=${rec.sourceHidden?1:0} missing=${rec.missing} owners=renderer:${counts.renderer},lorencia:${counts.lorenciaVisual},lorenciaBone:${counts.lorenciaBone},mapBone:${counts.mapBone},particle:${counts.mapParticle},runtime:${counts.runtime}`);
+        }
       }
     }
     _markProfile('finalize');
     _profile.totalMs = performance.now() - _profileT0;
     _profile.placements = parsed.count|0; _profile.rendered = rendered|0; _profile.missing = missing|0;
+    _profile.serialAuditScan = Object.freeze({ visitedSlots:m142AuditSlotsVisited,
+      auditedSerials:(worldNum===1||worldNum===11)?placementsBySerial.size:0,
+      avoidedRepeatedSlotVisits:(worldNum===1||worldNum===11)
+        ? Math.max(0, (placementsBySerial.size-1)*this.instances.length) : 0 });
+    // M142: MuTerrain already records genuinely missing tile slots. Snapshot
+    // the current staged terrain owner in M75, so a physical World1/World11
+    // capture can distinguish missing official Data from bad BMD placement or
+    // material blending. Never substitute tiles or mutate the terrain mesh.
+    const m142MissingTerrainSlots = this._terrainLightMesh?.userData?.missingTerrainTileSlots;
+    _profile.terrainTileAudit = Object.freeze({ available:Array.isArray(m142MissingTerrainSlots),
+      missingSlots:Object.freeze(Array.isArray(m142MissingTerrainSlots) ? m142MissingTerrainSlots.slice() : []) });
     _profile.modelStageConcurrency = modelStageConcurrency; _profile.placementBuildConcurrency = placementBuildConcurrency;
+    _profile.placementHotspots = Object.freeze(placementHotspots);
+    // MAPS_ENGINE M120: split placementBuild hotspots into model/template setup
+    // versus post-setup world/material/visual-owner work. Diagnostic only.
+    const m121HotspotMeasuredMs = placementHotspots.reduce((sum, x) => sum + x.totalMs, 0);
+    const placementBreakdown = Object.freeze({
+      // M121 authoritative all-placement measured totals.
+      measuredCount: m121PlacementMeasuredCount,
+      measuredMs: m121PlacementMeasuredMs,
+      modelSetupMs: m121ModelSetupMeasuredMs,
+      postSetupMs: Math.max(0, m121PlacementMeasuredMs - m121ModelSetupMeasuredMs),
+      modelSetupSharePct: m121PlacementMeasuredMs > 0 ? m121ModelSetupMeasuredMs * 100 / m121PlacementMeasuredMs : 0,
+      hotspotCoveragePct: m121PlacementMeasuredMs > 0 ? m121HotspotMeasuredMs * 100 / m121PlacementMeasuredMs : 0,
+      modelSetupKind: Object.freeze({ templateClone: Object.freeze({ count:m122TemplateSetupCount, ms:m122TemplateSetupMs }), rendererInit: Object.freeze({ count:m122RendererSetupCount, ms:m122RendererSetupMs }) }),
+      hotspots: Object.freeze(placementHotspots.map(x => Object.freeze({ object:x.object, modelSetupMs:x.modelSetupMs, postSetupMs:x.postSetupMs, totalMs:x.totalMs }))),
+    });
+    const m123ModelSetupHotspots = Object.freeze([...m123ModelSetupBySerial.values()]
+      .map(x => Object.freeze({ object:x.serial+1, totalMs:x.templateCloneMs+x.rendererInitMs, templateClone:Object.freeze({count:x.templateCloneCount, ms:x.templateCloneMs}), rendererInit:Object.freeze({count:x.rendererInitCount, ms:x.rendererInitMs}) }))
+      .sort((a,b)=>b.totalMs-a.totalMs || a.object-b.object).slice(0,12));
+    _profile.modelSetupHotspots = m123ModelSetupHotspots;
+    const m124PlacementWallMs = Number(_profile.phases.placementBuild) || 0;
+    const m124AverageCooperateMs = m124PlacementCooperateCount > 0 ? m124PlacementCooperateMs / m124PlacementCooperateCount : 0;
+    _profile.placementScheduling = Object.freeze({ wallMs:m124PlacementWallMs, cooperativeWorkerWaitSumMs:m124PlacementCooperateMs, cooperativeChecks:m124PlacementCooperateCount, averageCooperateMs:m124AverageCooperateMs });
+    _profile.placementFramePacing = Object.freeze({ measurementType:'awaitInclusiveWall', measuredCount:m121PlacementMeasuredCount, over4ms:m125Over4, over8ms:m125Over8, over16ms:m125Over16, over32ms:m125Over32, maxMs:m125MaxPlacementMs, maxObject:m125MaxPlacementObject, maxIndex:m125MaxPlacementIndex });
+    _profile.placementQuaternionScratch = Object.freeze({ writes:m126ScratchQuaternionWrites, matrixScratchObjects:5, perPlacementMatrixAllocations:0, perPlacementQuaternionAllocations:0, bodyLightSamples:m126BodyLightScratchSamples, perSampleColorAllocations:0, boundsWrites:m126BoundsScratchWrites, perBoundsTemporaryBoxAllocations:0,
+      // M141 counts are actual reuse decisions, not physical FPS gains.
+      rotationMruHits:m141RotationMruHits, rotationMruMisses:m141RotationMruMisses, rotationMruEntries:m141RotationMru.valid ? 1 : 0, scratchCalculations:m141RotationMruMisses });
+    // M142 counters describe CPU eligibility scans avoided; they are NOT
+    // physical GPU uploads, renderer submissions or measured FPS improvements.
+    _profile.templateCloneScan = Object.freeze({ sourceListsBuilt:m142CloneListBuilds,
+      sourceListHits:m142CloneListHits, clonedChildren:m142ClonedChildren,
+      avoidedChildEligibilityScans:m142CloneListHits });
+    _profile.placementBreakdown = placementBreakdown;
+    _profile.staticBatchHotspots = Object.freeze(staticBatchHotspots);
+    _profile.staticBatchPhaseHotspots = Object.freeze(staticBatchPhaseHotspots);
+    _profile.staticBatchBreakdown = Object.freeze({ ...staticBatchBreakdown });
+    const staticUploadHotspots = Object.freeze([...staticUploadBySerial.values()]
+      .sort((a,b)=>b.gpuUploadBytes-a.gpuUploadBytes || a.serial-b.serial).slice(0, 12)
+      .map(x=>Object.freeze({ object:x.serial+1, matrixUploadBytes:x.matrixUploadBytes, colorUploadBytes:x.colorUploadBytes, gpuUploadBytes:x.gpuUploadBytes, maxClusterUploadBytes:x.maxClusterUploadBytes })));
+    _profile.staticUploadHotspots = staticUploadHotspots;
+    // M116: sort by avoidable scale writes first. This is diagnostic only and does
+    // not reorder authored placements or static batches.
+    const staticScaleHotspots = Object.freeze([...staticScaleBySerial.values()]
+      .map(x => {
+        const total = x.scaleMruHits + x.scaleWrites;
+        return Object.freeze({ object: x.serial + 1, scaleMruHits: x.scaleMruHits, scaleWrites: x.scaleWrites, hitPct: total > 0 ? x.scaleMruHits * 100 / total : 0 });
+      })
+      .sort((a,b) => b.scaleWrites - a.scaleWrites || a.object - b.object).slice(0, 12));
+    _profile.staticScaleHotspots = staticScaleHotspots;
+    // MAPS_ENGINE M117: correlate the already-measured CPU owner, scale locality,
+    // and immutable GPU upload bytes by ObjectXX in one physical-capture table.
+    // Diagnostic only: no placement, batching, material, terrain or upload policy changes.
+    const staticOwnerCorrelation = Object.freeze([...staticBatchPhaseBySerial.values()]
+      .map(phase => {
+        const scale = staticScaleBySerial.get(phase.serial);
+        const upload = staticUploadBySerial.get(phase.serial);
+        const scaleTotal = (scale?.scaleMruHits || 0) + (scale?.scaleWrites || 0);
+        return Object.freeze({
+          object: phase.serial + 1, cpuMs: phase.cpuMs, fillCpuMs: phase.fillCpuMs,
+          scaleWrites: scale?.scaleWrites || 0, scaleHitPct: scaleTotal > 0 ? (scale.scaleMruHits * 100 / scaleTotal) : 0,
+          gpuUploadBytes: upload?.gpuUploadBytes || 0, maxClusterUploadBytes: upload?.maxClusterUploadBytes || 0,
+        });
+      })
+      .sort((a,b) => b.fillCpuMs - a.fillCpuMs || b.cpuMs - a.cpuMs || a.object - b.object).slice(0, 12));
+    _profile.staticOwnerCorrelation = staticOwnerCorrelation;
+    // MAPS_ENGINE M119: turn the existing M75 physical stage timings into an
+    // explicit dominant-phase signal. Diagnostic only; M75 measurement points
+    // and all render/build behavior remain unchanged.
+    const m119PhaseEntries = Object.entries(_profile.phases).filter(([, ms]) => Number.isFinite(ms));
+    const m119DominantPhase = m119PhaseEntries.reduce((best, cur) => (!best || cur[1] > best[1]) ? cur : best, null);
+    const m119MeasuredPhaseMs = m119PhaseEntries.reduce((sum, [, ms]) => sum + ms, 0);
+    const dominantStage = Object.freeze({
+      phase: m119DominantPhase?.[0] || 'none',
+      ms: m119DominantPhase?.[1] || 0,
+      measuredPhaseMs: m119MeasuredPhaseMs,
+      sharePct: m119DominantPhase && m119MeasuredPhaseMs > 0 ? (m119DominantPhase[1] * 100 / m119MeasuredPhaseMs) : 0,
+      staticFillSharePct: staticBatchBreakdown.instanceFillMs > 0 && (_profile.phases.staticBatch || 0) > 0
+        ? (staticBatchBreakdown.instanceFillMs * 100 / _profile.phases.staticBatch) : 0,
+    });
+    _profile.dominantStage = dominantStage;
+    // M78: expose the already-computed static transport result in the physical
+    // M75 snapshot. No batching/merge decision changes here.
+    const transportProfile = Object.freeze({
+      mode: transportStats.mode || 'none',
+      multiDrawSupported: !!transportStats.multiDrawSupported,
+      // M136: separate transport CPU wall from M88 instance-fill CPU and M75
+      // aggregate staticBatch. These are load-time JS wall timings, not GPU timers.
+      transportBuildMs: m136BatchMs + m136FallbackMs,
+      multiDrawBuildMs: m136BatchMs,
+      cpuFallbackBuildMs: m136FallbackMs,
+      sourceDraws: transportStats.sourceDraws|0,
+      outputDraws: transportStats.batchedDraws|0,
+      savedDraws: Math.max(0, (transportStats.sourceDraws|0) - (transportStats.batchedDraws|0)),
+      sourceInstances: transportStats.sourceInstances|0,
+      expandedVertices: transportStats.expandedVertices|0,
+      expandedIndices: transportStats.expandedIndices|0,
+      skippedBudget: transportStats.skippedBudget|0,
+      // M136: count exact source owners kept because expansion would change
+      // geometry drawRange/groups/morphs or suppress a render/shadow hook.
+      skippedUnsafeGeometry: transportStats.skippedUnsafeGeometry|0,
+      skippedCustomRenderOwner: transportStats.skippedCustomRenderOwner|0,
+      // M137: actual content owners retained by the pre-transport fusion gate
+      // and the CPU/r160 authored vertex-color safety gate.
+      skippedUnsafeTemplateFusionGroups: m137UnsafeTemplateFusionGroups|0,
+      skippedTemplateFusionByObject: Object.freeze([...m137UnsafeFusionBySerial]
+        .map(([serial, groups]) => Object.freeze({ object: serial + 1, groups }))
+        .sort((a, b) => b.groups - a.groups || a.object - b.object).slice(0, 12)),
+      templateMaterialKeyHits: m137TemplateMaterialKeyHits|0,
+      templateMaterialKeyMisses: m137TemplateMaterialKeyMisses|0,
+      skippedAuthoredVertexColor: transportStats.skippedAuthoredVertexColor|0,
+      skippedOrderDependentMaterial: transportStats.skippedOrderDependentMaterial|0,
+      packingCandidates: transportStats.packingCandidates|0,
+      packingSelected: transportStats.packingSelected|0,
+      packingBins: transportStats.packingBins|0,
+      singletonRemainder: transportStats.singletonRemainder|0,
+      // M138: expected savings relative to old unconditional white-color
+      // expansion, not WebGL instrumentation. Source/placement counts intact.
+      uncoloredMergedBins: transportStats.uncoloredMergedBins|0,
+      coloredMergedBins: transportStats.coloredMergedBins|0,
+      avoidedColorUploadBytes: transportStats.avoidedColorUploadBytes || 0,
+      avoidedColorObjects: transportStats.avoidedColorObjects || 0,
+      matrixPackedBins: transportStats.matrixPackedBins|0,
+      avoidedMatrixObjects: transportStats.avoidedMatrixObjects || 0,
+      packedMatrixBytes: transportStats.packedMatrixBytes || 0,
+      bulkMatrixCopies: transportStats.bulkMatrixCopies|0,
+      bulkMatrixBytes: transportStats.bulkMatrixBytes || 0,
+      avoidedGetMatrixAtCalls: transportStats.avoidedGetMatrixAtCalls|0,
+      directMatrixBins: transportStats.directMatrixBins|0,
+      directMatrixPlacements: transportStats.directMatrixPlacements|0,
+      avoidedPackedMatrixBytes: transportStats.avoidedPackedMatrixBytes|0,
+      // M141: CPU fallback only; no M75 stage boundary, GPU buffer or
+      // culling behavior changed. Zero when multi-draw/CPU merge not used.
+      avoidedBoundsRecomputes: transportStats.avoidedBoundsRecomputes|0,
+      avoidedBoundsVertexVisits: transportStats.avoidedBoundsVertexVisits|0,
+      remainingEligibleDraws: transportStats.remainingEligibleDraws|0,
+      effectiveStaticDraws: this._lastSpatialBatchStats?.effectiveStaticDraws|0,
+      instancedDraws: instancedDraws|0,
+      spatialClusters: this._lastSpatialBatchStats?.spatialClusters|0,
+    });
+    _profile.staticTransport = transportProfile;
     const frozenProfile = Object.freeze({ ..._profile, phases: Object.freeze({ ..._profile.phases }) });
     this.root.userData.muMapObjectStageProfile = frozenProfile;
     this.gameScene.scene.userData.muMapObjectStageProfile = frozenProfile;
     globalThis.__MUWEB_MAP_OBJECT_STAGE_PROFILE__ = frozenProfile;
     console.info(`[PERF M75] World${worldNum} object-stage total=${Math.round(frozenProfile.totalMs)}ms | ` + Object.entries(frozenProfile.phases).map(([k,v])=>`${k}=${Math.round(v)}`).join(' | '));
+    if (placementHotspots.length) console.info(`[PERF M77] World${worldNum} placement hotspots ` + placementHotspots.map(x=>`Object${x.object}:${x.totalMs.toFixed(1)}ms/${x.count} max=${x.maxMs.toFixed(1)}`).join(' | '));
+    console.info(`[PERF M88] World${worldNum} staticBatch breakdown partition=${staticBatchBreakdown.partitionMs.toFixed(1)}ms bake=${staticBatchBreakdown.templateBakeMs.toFixed(1)}ms fillCpu=${staticBatchBreakdown.instanceFillMs.toFixed(1)}ms coopWait=${staticBatchBreakdown.cooperativeWaitMs.toFixed(1)}ms finalize=${staticBatchBreakdown.finalizeMs.toFixed(1)}ms clusters=${staticBatchBreakdown.clusters} instances=${staticBatchBreakdown.instances}`);
+    console.info(`[PERF M89] World${worldNum} staticBatch cpu/wait fillCpu=${staticBatchBreakdown.instanceFillMs.toFixed(1)}ms cooperativeWait=${staticBatchBreakdown.cooperativeWaitMs.toFixed(1)}ms`);
+    if (staticBatchHotspots.length) console.info(`[PERF M81] World${worldNum} staticBatch CPU hotspots ` + staticBatchHotspots.map(x=>`Object${x.object}:${x.totalMs.toFixed(1)}ms/${x.count} max=${x.maxMs.toFixed(1)}`).join(' | '));
+    console.info(`[PERF M90] World${worldNum} staticBatch hotspot attribution excludes cooperative scheduler wait`);
+    if (staticBatchPhaseHotspots.length) console.info(`[PERF M92] World${worldNum} static rotation cache entries=${staticBatchBreakdown.rotationCacheEntries} instances=${staticBatchBreakdown.instances}`);
+    console.info(`[PERF M94] World${worldNum} rotation MRU hits=${staticBatchBreakdown.rotationMruHits} mapHits=${staticBatchBreakdown.rotationMapHits} misses=${staticBatchBreakdown.rotationMisses}`);
+    // MAPS_ENGINE M115: physical evidence for the M114 uniform-scale MRU.
+    // hits+writes equals transformed static placements; hit ratio shows whether
+    // scale Vector3 writes are materially removed in World1/World11 captures.
+    const m115ScaleTotal = staticBatchBreakdown.scaleMruHits + staticBatchBreakdown.scaleWrites;
+    const m115ScaleHitPct = m115ScaleTotal > 0 ? (staticBatchBreakdown.scaleMruHits * 100 / m115ScaleTotal) : 0;
+    console.info(`[PERF M115] World${worldNum} scale MRU hits=${staticBatchBreakdown.scaleMruHits} writes=${staticBatchBreakdown.scaleWrites} hitPct=${m115ScaleHitPct.toFixed(1)}%`);
+    if (staticScaleHotspots.length) console.info(`[PERF M116] World${worldNum} scale write hotspots ` + staticScaleHotspots.map(x=>`Object${x.object}:writes=${x.scaleWrites},hits=${x.scaleMruHits},hitPct=${x.hitPct.toFixed(1)}%`).join(' | '));
+    if (staticOwnerCorrelation.length) console.info(`[PERF M117] World${worldNum} static owner correlation ` + staticOwnerCorrelation.map(x=>`Object${x.object}:fill=${x.fillCpuMs.toFixed(1)}ms,cpu=${x.cpuMs.toFixed(1)}ms,scaleWrites=${x.scaleWrites},scaleHit=${x.scaleHitPct.toFixed(1)}%,upload=${x.gpuUploadBytes}B,maxCluster=${x.maxClusterUploadBytes}B`).join(' | '));
+    if (placementHotspots.length) console.info(`[PERF M120] World${worldNum} placement owner split ` + placementHotspots.map(x=>`Object${x.object}:modelSetup=${x.modelSetupMs.toFixed(1)}ms,postSetup=${x.postSetupMs.toFixed(1)}ms,total=${x.totalMs.toFixed(1)}ms`).join(' | '));
+    console.info(`[PERF M121] World${worldNum} placement measured=${placementBreakdown.measuredMs.toFixed(1)}ms/${placementBreakdown.measuredCount} modelSetup=${placementBreakdown.modelSetupMs.toFixed(1)}ms (${placementBreakdown.modelSetupSharePct.toFixed(1)}%) postSetup=${placementBreakdown.postSetupMs.toFixed(1)}ms top12Coverage=${placementBreakdown.hotspotCoveragePct.toFixed(1)}%`);
+    console.info(`[PERF M122] World${worldNum} modelSetup templateClone=${m122TemplateSetupMs.toFixed(1)}ms/${m122TemplateSetupCount} rendererInit=${m122RendererSetupMs.toFixed(1)}ms/${m122RendererSetupCount}`);
+    console.info(`[PERF M123] World${worldNum} modelSetupHotspots ` + m123ModelSetupHotspots.map(x=>`Object${x.object}:total=${x.totalMs.toFixed(1)}ms clone=${x.templateClone.ms.toFixed(1)}ms/${x.templateClone.count} init=${x.rendererInit.ms.toFixed(1)}ms/${x.rendererInit.count}`).join(' | '));
+    console.info(`[PERF M124] World${worldNum} placement wall=${m124PlacementWallMs.toFixed(1)}ms cooperativeWorkerWaitSum=${m124PlacementCooperateMs.toFixed(1)}ms checks=${m124PlacementCooperateCount} avg=${m124AverageCooperateMs.toFixed(3)}ms`);
+    console.info(`[PERF M125] World${worldNum} placement await-inclusive wall measured=${m121PlacementMeasuredCount} >=4ms=${m125Over4} >=8ms=${m125Over8} >=16ms=${m125Over16} >=32ms=${m125Over32} max=${m125MaxPlacementMs.toFixed(1)}ms Object${m125MaxPlacementObject} index=${m125MaxPlacementIndex}`);
+    console.info(`[PERF M126] World${worldNum} placement scratch rotations=${m126ScratchQuaternionWrites} bodyLightSamples=${m126BodyLightScratchSamples} boundsWrites=${m126BoundsScratchWrites} matrixAllocPerRotation=0 tempQuaternionAllocPerRotation=0 colorAllocPerSample=0 tempBoxAllocPerBounds=0`);
+    console.info(`[PERF M119] World${worldNum} dominant=${dominantStage.phase} ${dominantStage.ms.toFixed(1)}ms share=${dominantStage.sharePct.toFixed(1)}% staticFillShare=${dominantStage.staticFillSharePct.toFixed(1)}%`);
+    console.info(`[PERF M98] World${worldNum} static GPU upload matrix=${staticBatchBreakdown.matrixUploadBytes}B color=${staticBatchBreakdown.colorUploadBytes}B total=${staticBatchBreakdown.gpuUploadBytes}B maxCluster=${staticBatchBreakdown.maxClusterUploadBytes}B`);
+    console.info(`[PERF M100] World${worldNum} terrain color direct=${staticBatchBreakdown.directTerrainColorWrites} fallback=${staticBatchBreakdown.fallbackTerrainColorWrites}`);
+    console.info(`[PERF M103] World${worldNum} static fill cooperative cadence=chunk32 branchless-inner instances=${staticBatchBreakdown.instances}`);
+    console.info(`[PERF M106] World${worldNum} static fill chunk boundary=add-compare instances=${staticBatchBreakdown.instances}`);
+    console.info(`[PERF M107] World${worldNum} static placement rotation angles=single-read instances=${staticBatchBreakdown.instances}`);
+    console.info(`[PERF M104] World${worldNum} static fill placementXY snapshot=single-read instances=${staticBatchBreakdown.instances}`);
+    if (staticUploadHotspots.length) console.info(`[PERF M99] World${worldNum} static GPU upload hotspots ` + staticUploadHotspots.map(x=>`Object${x.object}:${x.gpuUploadBytes}B(matrix=${x.matrixUploadBytes},color=${x.colorUploadBytes},maxCluster=${x.maxClusterUploadBytes})`).join(' | '));
+    console.info(`[PERF M91] World${worldNum} staticBatch owner hotspots ` + staticBatchPhaseHotspots.map(x=>`Object${x.object}:cpu=${x.cpuMs.toFixed(1)} partition=${x.partitionMs.toFixed(1)} bake=${x.bakeMs.toFixed(1)} fill=${x.fillCpuMs.toFixed(1)} finalize=${x.finalizeMs.toFixed(1)} wait=${x.cooperativeWaitMs.toFixed(1)}`).join(' | '));
+    console.info(`[PERF M78] World${worldNum} static transport mode=${transportProfile.mode} draws=${transportProfile.sourceDraws}->${transportProfile.outputDraws} saved=${transportProfile.savedDraws} effective=${transportProfile.effectiveStaticDraws} expandedV=${transportProfile.expandedVertices} skipped=${transportProfile.skippedBudget}`);
+    console.info(`[PERF M136] World${worldNum} static transport build=${transportProfile.transportBuildMs.toFixed(1)}ms multiDraw=${transportProfile.multiDrawBuildMs.toFixed(1)}ms cpuFallback=${transportProfile.cpuFallbackBuildMs.toFixed(1)}ms keptGeometry=${transportProfile.skippedUnsafeGeometry} keptRenderHooks=${transportProfile.skippedCustomRenderOwner}`);
+    console.info(`[PERF M137] World${worldNum} templateFusionKept=${m137UnsafeTemplateFusionGroups} authoredVertexColorsKept=${transportStats.skippedAuthoredVertexColor || 0} templateMaterialKeyHits=${m137TemplateMaterialKeyHits} misses=${m137TemplateMaterialKeyMisses} orderDependentKept=${transportStats.skippedOrderDependentMaterial || 0}`);
+    console.info(`[PERF M138] World${worldNum} CPU-merge uncoloredBins=${transportProfile.uncoloredMergedBins} coloredBins=${transportProfile.coloredMergedBins} avoidedSyntheticColorBytes=${transportProfile.avoidedColorUploadBytes} avoidedColorObjects=${transportProfile.avoidedColorObjects} (estimates; not measured GPU upload)`);
+    console.info(`[PERF M139] World${worldNum} CPU-merge packedMatrixBins=${transportProfile.matrixPackedBins} avoidedMatrixObjects=${transportProfile.avoidedMatrixObjects} packedMatrixBytes=${transportProfile.packedMatrixBytes} (allocation estimates; not FPS/GPU measurements)`);
+    console.info(`[PERF M140] World${worldNum} CPU-merge bulkMatrixCopies=${transportProfile.bulkMatrixCopies} bulkMatrixBytes=${transportProfile.bulkMatrixBytes} avoidedGetMatrixAtCalls=${transportProfile.avoidedGetMatrixAtCalls} (CPU counters; not physical FPS/GPU upload)`);
+    console.info(`[PERF M141] World${worldNum} CPU-merge avoidedBoundsRecomputes=${transportProfile.avoidedBoundsRecomputes} avoidedBoundsVertexVisits=${transportProfile.avoidedBoundsVertexVisits} (duplicate CPU bounds passes avoided; not GPU/FPS measurement)`);
+    console.info(`[PERF M141] World${worldNum} placementRotationMru hits=${m141RotationMruHits} misses=${m141RotationMruMisses} (exact-angle quaternion reuse; not physical FPS measurement)`);
+    console.info(`[PERF M142] World${worldNum} templateClone sourceLists=${m142CloneListBuilds} reused=${m142CloneListHits} clonedChildren=${m142ClonedChildren} (CPU eligibility scans; no measured FPS)`);
+    console.info(`[PERF M142] World${worldNum} staticTerrain RGB scratch requests=${staticBatchBreakdown.reusableTerrainRgbSamples} (native sampler reuses output; custom samplers may ignore it)`);
+    console.info(`[PERF M143] World${worldNum} CPU-merge directMatrixBins=${transportProfile.directMatrixBins} directPlacements=${transportProfile.directMatrixPlacements} avoidedPackedCpuBytes=${transportProfile.avoidedPackedMatrixBytes} (large immutable bins; CPU allocations/copies only, not measured FPS/GPU upload)`);
+    console.info(`[PERF M142] World${worldNum} serialAudit onePassSlots=${m142AuditSlotsVisited} serials=${_profile.serialAuditScan.auditedSerials} avoidedRepeatedVisits=${_profile.serialAuditScan.avoidedRepeatedSlotVisits} (CPU diagnostic only)`);
+    if (worldNum===1 || worldNum===11) console.info(`[PERF M142] World${worldNum} terrain tile audit available=${_profile.terrainTileAudit.available?1:0} missingSlots=${_profile.terrainTileAudit.missingSlots.join(',') || 'none'} (read-only; no replacement)`);
     console.info(`[WorldObjects] World${worldNum}: rendered=${rendered} missing=${missing}` +
       (missingSerials.length ? ` missingModels=${missingSerials.join(',')}` : ''));
     return { ...parsed, rendered, missing, histogram: Object.fromEntries(histogram), missingSerials, serialAudit, stageProfile: frozenProfile };
@@ -1883,6 +3328,19 @@ export class TerrainObjectLayer {
   updateVisibility(camera) {
     if (this._disposed || !camera) return;
     camera.updateMatrixWorld?.();
+    // M130: camera matrices and authored placement count are the complete inputs
+    // to this static-sphere frustum pass. The 48-value comparison is cheaper
+    // than rebuilding the frustum and visiting every animated ObjectXX while
+    // the camera is still. Moving/rotating/zooming cameras retain the original
+    // per-frame behavior, and load/activate invalidate explicitly.
+    if (pcMapFrustumPoseUnchanged(camera, this._viewCullPose, this.instances.length)) {
+      this._viewCullProfile.skippedUnchanged++;
+      return;
+    }
+    // M131: sampling the CPU scan every 64 real scans avoids two high-res
+    // timer reads on every moving-camera frame. Counters remain exact.
+    const m131TimeScan = (this._viewCullProfile.scans & 63) === 0;
+    const m130ScanStart = m131TimeScan ? performance.now() : 0;
     this._viewProjection.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
     this._viewFrustum.setFromProjectionMatrix(this._viewProjection);
     let visible = 0, total = 0;
@@ -1910,104 +3368,110 @@ export class TerrainObjectLayer {
     }
     this._visibleAnimated = visible;
     this._totalAnimated = total;
+    // Only a completed scan can be cached. Non-finite camera matrices remain
+    // fail-closed and will be rescanned on the next frame.
+    pcMapRememberFrustumPose(camera, this._viewCullPose, this.instances.length);
+    this._viewCullProfile.scans++;
+    this._viewCullProfile.testedSlots += total;
+    this._viewCullProfile.visible = visible;
+    this._viewCullProfile.total = total;
+    if (m131TimeScan) this._viewCullProfile.lastScanMs = performance.now() - m130ScanStart;
   }
 
   dispose() {
+    if (this._viewCullPose) this._viewCullPose.valid = false;
+    // M127: physical transition measurement, separate owner-array sweep from
+    // renderer/material/BMD/visual resource teardown (which can dominate).
+    const m127DisposeStart = performance.now();
+    const m127SlotCount = this.instances.length;
+    const m127RegisteredCount = this._ownedUpdateOwners.size;
     this._disposed = true;
     this._pendingUpdateOwners.length = 0;
     this._pendingUpdateOwnerSet.clear();
-    // Retire thousands of map callbacks in one pass, preserving the shared
-    // array identity and every non-map owner (hero, pets, UI, effects).
-    const owners = this.gameScene.objects;
-    let write = 0;
-    for (let read = 0; read < owners.length; read++) {
-      if (!this._ownedUpdateOwners.has(owners[read])) owners[write++] = owners[read];
-    }
-    owners.length = write;
+    // M127: remove registered callbacks AND the historical slot/environment
+    // fallbacks in a single stable compaction. All subsequent resource dispose
+    // and scene-root removal calls remain in their original order.
+    const m127SceneRetirement = retireMapSceneObjectReferences(this.gameScene.objects, this._ownedUpdateOwners, this.instances, [
+      this._lorenciaEnvironmentOwner?.group, this._lorenciaFishOwner?.group,
+      this._lorenciaFaunaOwner?.group, this._icarusEnvironmentOwner?.group,
+      this._icarusBoidsOwner?.group, this._mapWorldVisualOwner?.group,
+      this._dynamicTerrainLightOwner,
+    ]);
+    const m127ReferenceSweepMs = performance.now() - m127DisposeStart;
     this._ownedUpdateOwners.clear();
+    // M144: detaching a visual group can throw (custom scene graph / stale
+    // transition). Resource release MUST still run, or its sprite materials,
+    // textures and GPU buffers survive into the next World1/World11 map.
+    // Keep the successful release order exactly as before; do not dispose
+    // template-shared resources per placement.
+    let m144DetachFailures = 0, m144DisposeFailures = 0;
+    let m144SceneDetachFailures = 0, m144RootClearFailures = 0;
+    const m144Detach = (group) => {
+      try { this.root.remove(group); } catch (_) { m144DetachFailures++; }
+    };
+    const m144Dispose = (resource) => {
+      try { resource?.dispose?.(); } catch (_) { m144DisposeFailures++; }
+    };
     for (const s of this.instances) {
-      const i = this.gameScene.objects.indexOf(s.outer);
-      if (i >= 0) this.gameScene.objects.splice(i, 1);
       s.outer.userData.update = null;
       if (s.pcVisualSprite) {
-        const vi = this.gameScene.objects.indexOf(s.pcVisualSprite);
-        if (vi >= 0) this.gameScene.objects.splice(vi, 1);
-        try { this.root.remove(s.pcVisualSprite); s.pcVisualSprite.material?.dispose?.(); } catch (_) { /* best effort */ }
+        m144Detach(s.pcVisualSprite);
+        m144Dispose(s.pcVisualSprite.material);
       }
-      if (s.pcParticleOwner?.group) {
-        const pi = this.gameScene.objects.indexOf(s.pcParticleOwner.group);
-        if (pi >= 0) this.gameScene.objects.splice(pi, 1);
-        try { s.pcParticleOwner.dispose?.(); } catch (_) { /* best effort */ }
-      }
+      // Particle owners retain their original disposal order and ownership.
+      // The final root.clear() detaches their groups after release.
+      if (s.pcParticleOwner?.group) m144Dispose(s.pcParticleOwner);
       if (s.pcLorenciaVisualOwner?.group) {
-        const li = this.gameScene.objects.indexOf(s.pcLorenciaVisualOwner.group);
-        if (li >= 0) this.gameScene.objects.splice(li, 1);
-        try { this.root.remove(s.pcLorenciaVisualOwner.group); s.pcLorenciaVisualOwner.dispose?.(); } catch (_) { /* best effort */ }
+        m144Detach(s.pcLorenciaVisualOwner.group);
+        m144Dispose(s.pcLorenciaVisualOwner);
       }
       if (s.pcLorenciaBoneVisualOwner?.group) {
-        try { this.root.remove(s.pcLorenciaBoneVisualOwner.group); s.pcLorenciaBoneVisualOwner.dispose?.(); } catch (_) { /* best effort */ }
+        m144Detach(s.pcLorenciaBoneVisualOwner.group);
+        m144Dispose(s.pcLorenciaBoneVisualOwner);
       }
       if (s.pcMapBoneVisualOwner?.group) {
-        try { this.root.remove(s.pcMapBoneVisualOwner.group); s.pcMapBoneVisualOwner.dispose?.(); } catch (_) { /* best effort */ }
+        m144Detach(s.pcMapBoneVisualOwner.group);
+        m144Dispose(s.pcMapBoneVisualOwner);
       }
       if (s.pcMapParticleOwner?.group) {
-        const pi = this.gameScene.objects.indexOf(s.pcMapParticleOwner.group);
-        if (pi >= 0) this.gameScene.objects.splice(pi, 1);
-        try { this.root.remove(s.pcMapParticleOwner.group); s.pcMapParticleOwner.dispose?.(); } catch (_) { /* best effort */ }
+        m144Detach(s.pcMapParticleOwner.group);
+        m144Dispose(s.pcMapParticleOwner);
       }
-      // slot.renderer é null nos placements estáticos (compartilham o
-      // template); apenas os animados têm renderer próprio.
-      if (s.renderer) { try { s.renderer.dispose(); } catch (_) { /* best effort */ } }
+      // Static placements share the template; only animated placements own
+      // an independent renderer. Never double-dispose a static BMD renderer.
+      if (s.renderer) m144Dispose(s.renderer);
     }
     if (this._lorenciaEnvironmentOwner?.group) {
-      const lei = this.gameScene.objects.indexOf(this._lorenciaEnvironmentOwner.group);
-      if (lei >= 0) this.gameScene.objects.splice(lei, 1);
-      try { this.root.remove(this._lorenciaEnvironmentOwner.group); this._lorenciaEnvironmentOwner.dispose?.(); } catch (_) { /* best effort */ }
+      m144Detach(this._lorenciaEnvironmentOwner.group);
+      m144Dispose(this._lorenciaEnvironmentOwner);
       this._lorenciaEnvironmentOwner = null;
     }
     if (this._lorenciaFishOwner?.group) {
-      const fi = this.gameScene.objects.indexOf(this._lorenciaFishOwner.group);
-      if (fi >= 0) this.gameScene.objects.splice(fi, 1);
-      try { this.root.remove(this._lorenciaFishOwner.group); this._lorenciaFishOwner.dispose?.(); } catch (_) { /* best effort */ }
+      m144Detach(this._lorenciaFishOwner.group);
+      m144Dispose(this._lorenciaFishOwner);
       this._lorenciaFishOwner = null;
     }
     if (this._lorenciaFaunaOwner?.group) {
-      const li = this.gameScene.objects.indexOf(this._lorenciaFaunaOwner.group);
-      if (li >= 0) this.gameScene.objects.splice(li, 1);
-      try { this.root.remove(this._lorenciaFaunaOwner.group); this._lorenciaFaunaOwner.dispose?.(); } catch (_) { /* best effort */ }
+      m144Detach(this._lorenciaFaunaOwner.group);
+      m144Dispose(this._lorenciaFaunaOwner);
       this._lorenciaFaunaOwner = null;
     }
     if (this._icarusEnvironmentOwner?.group) {
-      const ii = this.gameScene.objects.indexOf(this._icarusEnvironmentOwner.group);
-      if (ii >= 0) this.gameScene.objects.splice(ii, 1);
-      try { this.root.remove(this._icarusEnvironmentOwner.group); this._icarusEnvironmentOwner.dispose?.(); } catch (_) { /* best effort */ }
+      m144Detach(this._icarusEnvironmentOwner.group);
+      m144Dispose(this._icarusEnvironmentOwner);
       this._icarusEnvironmentOwner = null;
     }
-    for (const owner of this._standalonePcMapParticleOwners || []) {
-      try { if (owner?.group) this.root.remove(owner.group); owner?.dispose?.(); } catch (_) { /* best effort */ }
-    }
-    this._standalonePcMapParticleOwners = [];
-    if (this._icarusCloudFieldOwner?.group) {
-      const ci = this.gameScene.objects.indexOf(this._icarusCloudFieldOwner.group);
-      if (ci >= 0) this.gameScene.objects.splice(ci,1);
-      try { this.root.remove(this._icarusCloudFieldOwner.group); this._icarusCloudFieldOwner.dispose?.(); } catch (_) {}
-      this._icarusCloudFieldOwner = null;
-    }
     if (this._icarusBoidsOwner?.group) {
-      const ib = this.gameScene.objects.indexOf(this._icarusBoidsOwner.group);
-      if (ib >= 0) this.gameScene.objects.splice(ib, 1);
-      try { this.root.remove(this._icarusBoidsOwner.group); this._icarusBoidsOwner.dispose?.(); } catch (_) { /* best effort */ }
+      m144Detach(this._icarusBoidsOwner.group);
+      m144Dispose(this._icarusBoidsOwner);
       this._icarusBoidsOwner = null;
     }
     if (this._mapWorldVisualOwner?.group) {
-      const wi = this.gameScene.objects.indexOf(this._mapWorldVisualOwner.group);
-      if (wi >= 0) this.gameScene.objects.splice(wi, 1);
-      try { this.root.remove(this._mapWorldVisualOwner.group); this._mapWorldVisualOwner.dispose?.(); } catch (_) { /* best effort */ }
+      m144Detach(this._mapWorldVisualOwner.group);
+      m144Dispose(this._mapWorldVisualOwner);
       this._mapWorldVisualOwner = null;
     }
     if (this._dynamicTerrainLightOwner) {
-      const di = this.gameScene.objects.indexOf(this._dynamicTerrainLightOwner);
-      if (di >= 0) this.gameScene.objects.splice(di, 1);
       this._dynamicTerrainLightOwner.userData.update = null;
       this._dynamicTerrainLightOwner = null;
     }
@@ -2019,24 +3483,47 @@ export class TerrainObjectLayer {
     // continuam pertencendo aos templates/_instancedGeometries e são liberados
     // pelos owners existentes abaixo.
     for (const batch of this._batchedMeshes || []) {
-      try { this.root.remove(batch); batch.dispose?.(); if (batch.userData?.__muOwnedMaterial) batch.material?.dispose?.(); } catch (_) { /* best effort */ }
+      m135ReleaseTransportResources(this.root, batch, { batched: true });
     }
     this._batchedMeshes = [];
     for (const mesh of this._mergedTransportMeshes || []) {
-      try { this.root.remove(mesh); mesh.geometry?.dispose?.(); if (mesh.userData?.__muOwnedMaterial) mesh.material?.dispose?.(); } catch (_) { /* best effort */ }
+      m135ReleaseTransportResources(this.root, mesh, { geometry: true });
     }
     this._mergedTransportMeshes = [];
-    for (const geo of this._instancedGeometries || []) {
-      try { geo?.dispose?.(); } catch (_) { /* best effort */ }
-    }
+    for (const geo of this._instancedGeometries || []) m144Dispose(geo);
     this._instancedGeometries?.clear?.();
     // Templates estáticos: descartar UMA vez (material/skeleton compartilhado).
-    for (const tpl of this._templateRenderers || []) {
-      try { tpl.dispose(); } catch (_) { /* best effort */ }
-    }
+    for (const tpl of this._templateRenderers || []) m144Dispose(tpl);
     this._templateRenderers = [];
     this.instances = [];
-    this.gameScene.scene.remove(this.root);
-    this.root.clear();
+    // A scene detach failure must not suppress root.clear() or the physical
+    // teardown profile. Both are best-effort and independently accounted for.
+    try { this.gameScene.scene.remove(this.root); } catch (_) { m144SceneDetachFailures++; }
+    try { this.root.clear(); } catch (_) { m144RootClearFailures++; }
+    this._terrainLightMesh = null; // do not retain previous map terrain owner
+    const m127TotalDisposeMs = performance.now() - m127DisposeStart;
+    const m127DisposeProfile = Object.freeze({
+      version: 'M127', world: this.worldNum, slots: m127SlotCount,
+      registeredOwners: m127RegisteredCount,
+      sceneOwnersRemoved: m127SceneRetirement.removed,
+      sceneOwnersRetained: m127SceneRetirement.retained,
+      referenceSweepMs: m127ReferenceSweepMs,
+      resourceReleaseMs: m127TotalDisposeMs - m127ReferenceSweepMs,
+      totalMs: m127TotalDisposeMs,
+    });
+    globalThis.__MUWEB_MAP_DISPOSE_PROFILE__ = m127DisposeProfile;
+    // Separate the failure categories from M127's timing-only profile so
+    // World1/World11 transition captures can distinguish resource leaks from
+    // a merely expensive teardown. Counts are diagnostic, not FPS claims.
+    globalThis.__MUWEB_MAP_RELEASE_PROFILE__ = Object.freeze({
+      version:'M144', world:this.worldNum, slots:m127SlotCount,
+      detachFailures:m144DetachFailures, disposeFailures:m144DisposeFailures,
+      // m135 transport release catches errors internally and is not included
+      // in disposeFailures; this profile does not claim GPU release success.
+      transportErrorsObserved:false,
+      sceneDetachFailures:m144SceneDetachFailures, rootClearFailures:m144RootClearFailures,
+    });
+    console.info(`[PERF M144] World${this.worldNum} release detachFailures=${m144DetachFailures} disposeFailures=${m144DisposeFailures} sceneDetachFailures=${m144SceneDetachFailures} rootClearFailures=${m144RootClearFailures}`);
+    console.info(`[PERF M127] World${this.worldNum} map dispose total=${m127TotalDisposeMs.toFixed(1)}ms referenceSweep=${m127ReferenceSweepMs.toFixed(1)}ms resourceRelease=${m127DisposeProfile.resourceReleaseMs.toFixed(1)}ms slots=${m127SlotCount} sceneRemoved=${m127SceneRetirement.removed} retained=${m127SceneRetirement.retained}`);
   }
 }

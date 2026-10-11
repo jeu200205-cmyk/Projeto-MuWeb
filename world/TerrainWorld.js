@@ -94,7 +94,7 @@ export function parseAtt(raw) {
   const walls = new Uint16Array(CELL_COUNT);
   for (let i = 0; i < CELL_COUNT; i++) {
     walls[i] = isExt
-      ? ((dec[4 + i * 2] | (dec[4 + i * 2 + 1] << 8)) & 0xFF)
+      ? (dec[4 + i * 2] | (dec[4 + i * 2 + 1] << 8))
       : (dec[4 + i] & 0xFF);
   }
   return { mapNumber: dec[1], walls };

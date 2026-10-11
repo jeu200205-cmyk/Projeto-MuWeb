@@ -15,7 +15,6 @@ import * as THREE from 'three';
 import { GameTimer } from './Timer.js';
 import { Input } from './Input.js';
 import { Sound } from '../audio/SoundManager.js';
-import { MUSounds } from '../assets/MUSoundManager.js';
 import { RemoteAssets } from '../data/RemoteAssets.js';
 import { MUAssets } from '../assets/MUAssetLoader.js';
 import { RealMUProtocol } from '../protocol/RealMUProtocol.js';
@@ -59,15 +58,13 @@ import { SkillEffects } from '../game/SkillEffects.js';
 import { StorageWindow } from '../ui2/StorageWindow.js';
 import { NpcShop } from '../ui2/NpcShop.js';
 import { CharacterPreview } from '../graphics/CharacterPreview.js';
+import { createPcCharacterCapeFrame, updatePcWorldHeroCapes } from '../graphics/PcCharacterCapeFrame.js';
 import { serverClassToClientClass, serverClassToName, clientClassToLocalBase } from '../data/CharacterClassMap.js';
 import { AT_SKILL, skillTypeName } from '../data/SkillNames.js';
-import { magicFinishBuffState } from '../data/MagicFinishBuffMap.js';
+import { magicFinishBuffState, PC_BUFF_STATE } from '../data/MagicFinishBuffMap.js';
 import { MuHelper } from '../game/MuHelper.js';
 import { GameOptions } from '../game/GameOptions.js';
 import { playLevelUp, preloadLevelUpTextures } from '../effects2/LevelUpFX.js';
-import { playDisplayShieldCrash } from '../effects2/DisplayEffectFX.js';
-import { playDisplayPotionEffect } from '../effects2/DisplayPotionFX.js';
-import { pcWorldActiveFromAssetWorld, pcInChaosCastle } from '../game/PcMapContext.js';
 import { onPlayerDeath, onRespawn, createBlood } from '../effects2/DeathFX.js';
 import { playCrit } from '../effects2/CritFX.js';
 import { NotificationCenter } from '../ui2/NotificationCenter.js';
@@ -101,7 +98,7 @@ import { loadCustomBowLua, customBowType } from '../data/CustomBowLua.js';
 import { loadCurrentClientLuaAuthority } from '../data/CurrentClientLuaAuthority.js';
 import { loadPcCharacterLuaEffects } from '../data/PcCharacterLuaEffects.js';
 import { loadPcCustomCapeLua } from '../data/PcCustomCapeLua.js';
-import { PLAYER_ACTIONS, isFemaleClass } from '../graphics/PlayerComposer.js';
+import { PLAYER_ACTIONS } from '../graphics/PlayerComposer.js';
 import { MUSprites } from '../ui/MUSprites.js';
 
 // Identidade explícita da source servida. Se este marcador NÃO aparecer no
@@ -120,7 +117,7 @@ export const MUWEB_SOURCE_PARENT_REVISION = 'MUWEB_R28_FURY_CORE_BMD_2026-09-27_
 export const MUWEB_R90_FIX15_REVISION = 'MUWEB_R90_FIX15_BMD_INFLIGHT_MAP_CANCEL_2026-10-03_A';
 export const MUWEB_R90_FIX46_REVISION = 'MUWEB_R90_FIX46_DARKSPIRIT_MONSTER_LUA_CONTRACTS_2026-10-04_A';
 export const MUWEB_R90_FIX47_REVISION = 'MUWEB_R90_FIX47_CHARACTER_LUA_MONSTER_PRESENTATION_2026-10-04_A';
-export const MUWEB_SOURCE_REVISION = 'MUWEB_R90_FIX99_EFFECT_RUNTIME_MAP_POOL_2026-10-06';
+export const MUWEB_SOURCE_REVISION = 'MUWEB_FIX154_MODELS_COMPANIONS_LAUNCHER_2026-10-11';
 export const MUWEB_PREVIOUS_SOURCE_REVISION = 'MUWEB_R78_ITEMVIEW_WORLDENTRY_ANIMATION_CHARSELECT_RECOVERY_2026-09-30_A';
 export const MUWEB_R77_BASE_REVISION = 'MUWEB_R77_CANONICAL_WORLD_ROUTING_CUSTOMMOVE_PREFETCH_UTF8_2026-09-30_A';
 
@@ -748,19 +745,6 @@ export class GameApp {
                 // sem geometria inventada aqui).
                 this._weatherFlag = w;
             },
-            onWTTimeLeft: (msg) => {
-                this._pcWTTimeLeft = Object.freeze({ type:msg.type&0xff, time:msg.time&0xffff, at:Date.now() });
-                console.info(`[MU] F3:22 WT time-left real: type=${msg.type} time=${msg.time}`);
-            },
-            onSoccerScore: (msg) => {
-                this._pcSoccerScore = Object.freeze({ name1:msg.name1, score1:msg.score1&0xff, name2:msg.name2, score2:msg.score2&0xff, at:Date.now() });
-                console.info(`[MU] F3:23 soccer score real: ${msg.team1} ${msg.score1} x ${msg.score2} ${msg.team2}`);
-            },
-            onWTMatchResult: (msg) => {
-                this._pcWTMatchResult = Object.freeze({ type:msg.type&0xff, team1:msg.team1, score1:msg.score1&0xffff, team2:msg.team2, score2:msg.score2&0xffff, at:Date.now() });
-                console.info(`[MU] F3:24 WT match result real: type=${msg.type} ${msg.team1} ${msg.score1} x ${msg.score2} ${msg.team2}`);
-            },
-            onDisplayEffect: (msg) => this._handleServerDisplayEffect(msg),
             onCharacterCard: ({ characterCard, enable }) => {
                 // ReceiveCharacterCard_New: classes habilitadas p/ criação
                 this.chatInfo(`CharacterCard real: DL=${enable.darkLord}, SUM=${enable.summoner}, MG=${enable.dark}.`);
@@ -905,10 +889,29 @@ export class GameApp {
             // Antes da R14 estes heads não eram roteados: o cast saía para o
             // GS, mas animação/VFX de herói, co-players e monstros nunca era
             // acionado pelo retorno autoritativo do servidor.
-            onMagic: (msg) => this._handleServerMagic(msg),
-            onMagicPosition: (msg) => this._handleServerMagicPosition(msg),
-            onMagicContinue: (msg) => this._handleServerMagicContinue(msg),
-            onMagicFinish: (msg) => this._handleServerMagicFinish(msg),
+            onMagic: (msg) => this._dispatchServerMagicEvent('magic', msg),
+            onMagicPosition: (msg) => this._dispatchServerMagicEvent('position', msg),
+            onMagicContinue: (msg) => this._dispatchServerMagicEvent('continue', msg),
+            onMagicFinish: (msg) => this._dispatchServerMagicEvent('finish', msg),
+
+            // 0x48 DISPLAYEREFFECT_NOTIFYINFO — FIX79 closed the exact 3-byte
+            // wire. FIX95 restores only the proven Main 5.2 consumer boundary:
+            // resolve an existing player by server key; never create an actor or
+            // substitute generic FX. Type 0x02 is an exact desktop no-op.
+            onDisplayEffect: (msg) => {
+                if (!this._handleServerDisplayEffect(msg) && (this.state !== 'world' || this._playerViewportAdmission)) {
+                    const rawKey = Number(msg?.key);
+                    if (Number.isInteger(rawKey)) {
+                        const k = rawKey & 0x7FFF;
+                        // 0x48 is a server event stream, not replaceable state.
+                        // Web world construction is asynchronous whereas the PC
+                        // viewport consumer is synchronous; preserve wire order
+                        // only until the matching 0x12 actor can materialize.
+                        this._pendingDisplayEffects ||= [];
+                        this._pendingDisplayEffects.push({ ...msg, key: k });
+                    }
+                }
+            },
 
             // 0x1C ReceiveTeleport (WSclient.cpp:1759) — spawn/movimentação do
             // herói pelo SERVIDOR. PRECEIVE_TELEPORT_POSITION: Flag WORD, Map,
@@ -932,12 +935,21 @@ export class GameApp {
             // (attachPlayerCharacter(spawnPos) hook) — fail-closed: sem match,
             // mantém erro no chat, NUNCA spawn fake.
             onPlayerViewport: ({ count, players }) => {
-                if (this.state !== 'world' || !this.playerChar) {
+                // Capture the delete generation at wire receipt for BOTH loading
+                // and live admissions. The first world-entry drain is not the last
+                // possible 0x12: packets can arrive during async UI/GPU awaits.
+                this._viewportDeleteGeneration ||= new Map();
+                const admittedPlayers = (players || []).map((entry) => ({
+                    ...entry,
+                    _muAdmissionGeneration: this._viewportDeleteGeneration.get(Number(entry?.key) & 0x7FFF) || 0,
+                    _muWorldEpoch: this._viewportWorldEpoch || 0,
+                }));
+                if (this.state !== 'world' || !this.playerChar || this._pendingPlayerViewport?.length) {
                     console.info(`[MU] 0x12: ${count} player(s) ANTES do world — buffer`);
-                    this._pendingPlayerViewport = players;
+                    this._pendingPlayerViewport = (this._pendingPlayerViewport || []).concat(admittedPlayers);
                     return;
                 }
-                this._applyPlayerViewport(players);
+                void this._queuePlayerViewportAdmission(admittedPlayers);
             },
             onViewportEnter: (name, payload) =>
                 console.info(`[MU] ${name}: entidade no viewport (${payload?.length ?? 0}B) — integração viewport P2`),
@@ -970,11 +982,108 @@ export class GameApp {
             },
             // 0x14 DeleteViewport — remoção por key (PC DeleteCharacter)
             onViewportDelete: ({ count, keys }) => {
-                if (this.state === 'world' && this.monsters) {
-                    const removed = this.monsters.removeByServerKeys(keys);
-                    const rp = this.playerViewport?.removeByServerKeys(keys) ?? 0;
-                    if (removed + rp > 0) console.info(`[MU] 0x14: ${removed}+${rp}/${count} entidade(s) removida(s) do viewport`);
+                // 0x14 é autoritativo também durante loading. Se CREATE 0x12/0x13
+                // já foi buffered, invalida a mesma key 15-bit antes do flush para
+                // impedir ressuscitar actor removido pelo GS ao entrar no world.
+                const deleted = new Set((keys || []).map((entry) => Number(entry?.key) & 0x7FFF));
+                if (deleted.size) {
+                    this._viewportDeleteGeneration ||= new Map();
+                    for (const key of deleted) {
+                        this._viewportDeleteGeneration.set(key, (this._viewportDeleteGeneration.get(key) || 0) + 1);
+                    }
+                    // 0x14 revokes a hero viewport binding even when the server
+                    // reuses the same 15-bit key in this world. Only a fresh 0x12
+                    // may bind it again; preserve the hero's rendered state.
+                    if (Number.isInteger(this._heroServerKey) && deleted.has(this._heroServerKey & 0x7FFF)) {
+                        this._heroServerKey = null;
+                        // 0x14 revokes the authoritative 0x12 hero identity and its
+                        // movement/attack tile. Do not emit stale D4/attack/skill TX
+                        // until the GS supplies a fresh 0x12 or 0x1C snapshot.
+                        this._heroServerTile = null;
+                        this._netMovePending = null;
+                        this._netMoveUnacked = [];
+                        if (this._pendingPcSkillCast) this._cancelPendingPcMovementSkill?.('hero-viewport-deleted');
+                        this._pendingPcSkillCast = null;
+                        if (this.playerChar) {
+                            this.playerChar.targetPos = null;
+                            this.playerChar.velocity?.set?.(0, 0, 0);
+                        }
+                    }
+                    if (this._pendingViewportActions?.size) {
+                        for (const key of deleted) this._pendingViewportActions.delete(key);
+                    }
+                    if (this._pendingViewportMotion?.size) {
+                        for (const key of deleted) this._pendingViewportMotion.delete(key);
+                    }
+                    if (this._pendingViewportPk?.size) {
+                        for (const key of deleted) this._pendingViewportPk.delete(key);
+                    }
+                    if (this._pendingViewportAppearance?.length) {
+                        this._pendingViewportAppearance = this._pendingViewportAppearance.filter((entry) =>
+                            !deleted.has(Number(entry?.msg?.key) & 0x7FFF));
+                    }
+                    if (this._pendingViewportAttacks?.length) {
+                        this._pendingViewportAttacks = this._pendingViewportAttacks.filter((entry) => !deleted.has(Number(entry?.key) & 0x7FFF));
+                    }
+                    if (this._pendingDisplayEffects?.length) {
+                        this._pendingDisplayEffects = this._pendingDisplayEffects.filter((entry) => !deleted.has(Number(entry?.key) & 0x7FFF));
+                    }
+
+                    if (this._pendingServerMagicEvents?.length) {
+                        // Fence only identities that own each ReceiveMagic event.
+                        // 0x1A targetKeys are a target-list snapshot; the source owns
+                        // the caster action/ground event. Deleting one listed target
+                        // must not erase the whole still-valid server event. Keep the
+                        // event when its source survives and prune only deleted targets.
+                        // 0x19 owns source+single target, 0x1E owns source, 0x1B owns
+                        // target. This mirrors the existing physical consumers below
+                        // instead of treating every referenced key as event ownership.
+                        const keptMagic = [];
+                        for (const entry of this._pendingServerMagicEvents) {
+                            const msg = entry?.msg || {};
+                            const sourceKey = Number.isInteger(msg.sourceKey) ? (msg.sourceKey & 0x7FFF) : null;
+                            const targetKey = Number.isInteger(msg.targetKey) ? (msg.targetKey & 0x7FFF) : null;
+                            if (entry?.kind === 'position') {
+                                if (sourceKey != null && deleted.has(sourceKey)) continue;
+                                const targetKeys = Array.isArray(msg.targetKeys)
+                                    ? msg.targetKeys.filter((key) => Number.isInteger(key) && !deleted.has(key & 0x7FFF))
+                                    : msg.targetKeys;
+                                keptMagic.push({ ...entry, msg: { ...msg, targetKeys } });
+                                continue;
+                            }
+                            if (entry?.kind === 'continue') {
+                                if (sourceKey != null && deleted.has(sourceKey)) continue;
+                                keptMagic.push(entry);
+                                continue;
+                            }
+                            if (entry?.kind === 'finish') {
+                                if (targetKey != null && deleted.has(targetKey)) continue;
+                                keptMagic.push(entry);
+                                continue;
+                            }
+                            // 0x19 / unknown retained family: both resolved actors are
+                            // required by _handleServerMagic, so either delete fences it.
+                            if ((sourceKey != null && deleted.has(sourceKey)) || (targetKey != null && deleted.has(targetKey))) continue;
+                            keptMagic.push(entry);
+                        }
+                        this._pendingServerMagicEvents = keptMagic;
+                    }
+                    if (this._pendingPlayerViewport?.length) {
+                        this._pendingPlayerViewport = this._pendingPlayerViewport.filter((entry) => !deleted.has(Number(entry?.key) & 0x7FFF));
+                    }
+                    if (this._pendingMonsterViewport?.length) {
+                        this._pendingMonsterViewport = this._pendingMonsterViewport.filter((entry) => !deleted.has(Number(entry?.key) & 0x7FFF));
+                    }
                 }
+                // A registry can already contain an actor while _buildWorld is
+                // still awaiting UI/object/shader work and state remains 'loading'.
+                // 0x14 owns that actor's lifetime regardless of scene visibility;
+                // restricting deletion to state='world' resurrected a stale 0x13
+                // actor (or 0x12 peer) when the loading screen finally closed.
+                // Registries are independent and optional during construction.
+                const removed = this.monsters?.removeByServerKeys(keys) ?? 0;
+                const rp = this.playerViewport?.removeByServerKeys(keys) ?? 0;
+                if (removed + rp > 0) console.info(`[MU] 0x14: ${removed}+${rp}/${count} entidade(s) removida(s) do viewport`);
             },
             onViewportLeave: (name) => console.info(`[MU] ${name}: entidade saiu do viewport`),
             onGroundItemsCreate: (msg) => {
@@ -1123,13 +1232,26 @@ export class GameApp {
             },
             onInventoryModify: ({ index, item }) => {
                 this.serverInventory.applyModify({ index, item });
-                this._syncInventoryCacheFromMirror();
+                this._scheduleInventoryCompatibilitySync();
                 console.info(`[MU] F3:14 inventory modify: slot=${index} ItemInfo[12] aplicado`);
             },
             onInventoryDelete: ({ index, flag }) => {
+                // FIX153: the authoritative mirror changes immediately. The
+                // legacy compatibility Map/Array (256-slot full scan) has no
+                // packet authority and is rebuilt once per browser microtask.
                 this.serverInventory.applyDelete({ index, flag });
-                this._syncInventoryCacheFromMirror();
-                console.info(`[MU] 0x28 inventory delete: slot=${index} flag=${flag}`);
+                this._scheduleInventoryCompatibilitySync();
+                const batch=(this._inventoryDeleteBatch ??= []);
+                batch.push({index,flag});
+                if (!this._inventoryDeleteLogPending) {
+                    this._inventoryDeleteLogPending=true;
+                    queueMicrotask(()=>{
+                        this._inventoryDeleteLogPending=false;
+                        const events=this._inventoryDeleteBatch || [];
+                        this._inventoryDeleteBatch=[];
+                        if(events.length)console.info(`[MU] 0x28 inventory delete batch count=${events.length} slots=${events.map(e=>e.index).join(',')} flags=${[...new Set(events.map(e=>e.flag))].join(',')}`);
+                    });
+                }
             },
             // F3:11 magicList real: skills do char vindas do servidor (resolve o
             // "[Skills] 0 skills" do console físico — só catálogo local era usado).
@@ -1205,12 +1327,33 @@ export class GameApp {
             // the exact 17-byte compact CharacterSet then transactionally rebuilds
             // real body/weapon/wing/helper BMDs. Hero continues to use F3:13.
             onChangeCharacter: (msg) => {
-                if (Number.isInteger(this._heroServerKey) && msg.key === this._heroServerKey) {
-                    console.info(`[MU] 0x25 hero key=0x${msg.key.toString(16)} ignorado; F3:13 permanece owner do snapshot local`);
+                // While an in-world 0x12 admission is physically publishing the actor,
+                // preserve 0x25 behind that same barrier instead of fail-closing early.
+                if (this._playerViewportAdmission) {
+                    const rawKey = Number(msg?.key);
+                    if (Number.isInteger(rawKey)) {
+                        this._pendingViewportAppearance ||= [];
+                        this._pendingViewportAppearance.push({
+                            kind:'change', msg:{ ...msg, key: rawKey & 0x7FFF },
+                            _muDeleteGeneration: this._viewportDeleteGeneration?.get(rawKey & 0x7FFF) || 0,
+                        });
+                    }
                     return;
                 }
-                this.playerViewport?.applyChangeCharacter?.(msg)
-                    ?.catch?.((err) => console.warn(`[MU] 0x25 remote appearance key=0x${msg.key.toString(16)} falhou: ${err?.message || err}`));
+                if (!this._applyServerChangeCharacter(msg) && this.state !== 'world') {
+                    const rawKey = Number(msg?.key);
+                    if (Number.isInteger(rawKey)) {
+                        // F3:13 snapshots and 0x25 deltas share one appearance
+                        // lifecycle. Preserve cross-family wire order: a later
+                        // F3:13 must replace an earlier 0x25 state, while a later
+                        // 0x25 must patch the snapshot. Never synthesize an actor.
+                        this._pendingViewportAppearance ||= [];
+                        this._pendingViewportAppearance.push({
+                            kind:'change', msg:{ ...msg, key: rawKey & 0x7FFF },
+                            _muDeleteGeneration: this._viewportDeleteGeneration?.get(rawKey & 0x7FFF) || 0,
+                        });
+                    }
+                }
             },
             // 0x24 ReceiveEquipmentItem real (auth WSclient.cpp:5820-5900,
             // dispatcher L13342-13348; PACKET_ITEM_LENGTH=12, SubCode 255=cancel).
@@ -1291,7 +1434,34 @@ export class GameApp {
             // Web: atualiza o charset visual do hero [class, ...eq17] e força o
             // re-attach das asas/wings que chegaram no equipamento.
             onEquipment: ({ key, classByte, equipment }) => {
-                if (!this.playerChar) return;
+                // Same in-world 0x12 publication barrier as 0x25 above. Do not let
+                // a valid F3:13 outrun PlayerViewportManager.spawnFromServer().
+                if (this._playerViewportAdmission) {
+                    const k = Number(key) & 0x7FFF;
+                    this._pendingViewportAppearance ||= [];
+                    this._pendingViewportAppearance.push({
+                        kind:'equipment',
+                        msg:{ key:k, classByte, equipment:Array.from(equipment || []) },
+                        _muDeleteGeneration: this._viewportDeleteGeneration?.get(k) || 0,
+                    });
+                    return;
+                }
+                // F3:13 is a full replaceable appearance snapshot. It may race
+                // the initial 0x12 while the Web world is still asynchronous.
+                // Until the hero's authoritative 0x12 binds a key in this
+                // WorldN, a remote F3:13 must not be mistaken for the hero's
+                // equipment merely because _heroServerKey was retired at 0x1C.
+                // Keep the real wire snapshot for the existing 0x12 barrier.
+                if (!this.playerChar || !Number.isInteger(this._heroServerKey)) {
+                    const k = Number(key) & 0x7FFF;
+                    this._pendingViewportAppearance ||= [];
+                    this._pendingViewportAppearance.push({
+                        kind:'equipment',
+                        msg:{ key:k, classByte, equipment:Array.from(equipment || []) },
+                        _muDeleteGeneration: this._viewportDeleteGeneration?.get(k) || 0,
+                    });
+                    return;
+                }
                 // PC ReceiveEquipment applies the snapshot to FindCharacterIndex(Key).
                 // R63 incorrectly applied EVERY nearby actor's F3:13 to the hero,
                 // which can make the hero lose wing/body when another player changes gear.
@@ -1355,16 +1525,19 @@ export class GameApp {
                     if (actor) { actor.serverPatent = rec.patent; actor.serverPatentType = rec.type; }
                 }
             },
-            onPkChange: ({ key, pk }) => {
-                // WSclient.cpp::ReceivePK mutates exactly the actor already in
-                // CharactersClient; never create a viewport placeholder.
-                if (key === this._heroServerKey && this.playerChar) {
-                    this.playerChar.pk = pk;
-                } else {
-                    const rp = this.playerViewport?.getByServerKey?.(key);
-                    if (rp) { rp.pk = pk; if (rp.outer?.userData) rp.outer.userData.pk = pk; }
+            onPkChange: (msg) => {
+                // F3:08 is actor state, not an event stream. During loading or live async
+                // 0x12 admission it can race Player.bmd publication, so retain only
+                // the newest authoritative PK value for the same 15-bit identity.
+                // 0x14 fences stale identities; no local PK state is synthesized.
+                if (!this._applyServerPkChange(msg) && (this.state !== 'world' || this._playerViewportAdmission)) {
+                    const rawKey = Number(msg?.key);
+                    if (Number.isInteger(rawKey)) {
+                        const key = rawKey & 0x7FFF;
+                        this._pendingViewportPk ||= new Map();
+                        this._pendingViewportPk.set(key, { ...msg, key });
+                    }
                 }
-                this.pkSystem?.setPkLevel?.(key, pk);
             },
             onDamageTaken: ({ damage, shieldDamage }) => {
                 this.hud?.damage?.(damage);
@@ -1376,137 +1549,61 @@ export class GameApp {
             // Clean PC ReceiveMoveCharacter usa PositionX/Y como destino final
             // e Path[0] high nibble como direção. Para o herói, a Web nunca
             // transforma WASD em posição local definitiva: D4 confirma o tile.
-            onMove: ({ key, x, y, dir }) => {
-                const a = this._resolveServerActor(key);
-                if (!a) return;
-                const tx = (x + 0.5) * 100 - 12800;
-                const tz = 12800 - (y + 0.5) * 100;
-                const ty = this.scene?.terrainHeightAt?.(tx, tz) ?? a.position?.y ?? 0;
-                const yaw = muDirectionToThreeYaw(dir);
-                if (a.kind === 'hero' && this.playerChar?.position) {
-                    const now = performance.now();
-                    const queue = (this._netMoveUnacked ??= []);
-                    const current = this._netMovePending;
-                    let matched = false;
-                    let sample = null;
-
-                    // Same owner used by the retained mobile PC-port: D4 is a
-                    // confirmation of an already-started local PC movement, not
-                    // permission to begin the next visual tile. One-node WASD
-                    // packets may therefore be in flight while the body keeps
-                    // consuming them at the authored 25-Hz movement cadence.
-                    if (current && current.x === x && current.y === y) {
-                        current.acked = true;
-                        current.ackAt = now;
-                        sample = Math.max(1, now - current.sentAt);
-                        // TCP/order + final D4 means every older one-node packet
-                        // in the prediction ledger was accepted as well.
-                        queue.length = 0;
-                        matched = true;
-                    } else {
-                        const idx = queue.findIndex((q) => q.x === x && q.y === y);
-                        if (idx >= 0) {
-                            sample = Math.max(1, now - queue[idx].sentAt);
-                            queue.splice(0, idx + 1);
-                            matched = true;
-                        }
+            onMove: (msg) => {
+                if (!this._applyServerViewportMove(msg) && (this.state !== 'world' || this._playerViewportAdmission)) {
+                    const rawKey = Number(msg?.key);
+                    if (Number.isInteger(rawKey)) {
+                        const k = rawKey & 0x7FFF;
+                        this._pendingViewportMotion ||= new Map();
+                        this._pendingViewportMotion.set(k, { kind: 'move', ...msg, key: k });
                     }
-
-                    if (sample != null) {
-                        const old = Number(this._netMoveRttEwmaMs || 180);
-                        const jitter = Number(this._netMoveJitterEwmaMs || 20);
-                        const err = Math.abs(sample - old);
-                        this._netMoveRttEwmaMs = Math.max(30, Math.min(4000, old * 0.875 + sample * 0.125));
-                        this._netMoveJitterEwmaMs = Math.max(0, Math.min(2000, jitter * 0.875 + err * 0.125));
-                    }
-
-                    this._heroServerTile = { x, y };
-                    this._netMoveFacing = dir;
-                    this.playerChar.rotation.y = yaw;
-                    if (!matched && !current && queue.length === 0) {
-                        // Movement from a different owner/server event.
-                        this.playerChar.position.set(tx, ty, tz);
-                    } else if (!matched) {
-                        // Explicit divergence from our predicted route: GS wins.
-                        this.playerChar.position.set(tx, ty, tz);
-                        this._netMovePending = null;
-                        queue.length = 0;
-                    }
-                } else if (a.kind === 'monster' && a.monster) {
-                    a.monster.serverTileX=x; a.monster.serverTileY=y;
-                    a.monster.position.set(tx, ty, tz);
-                    a.monster.rotation.y=yaw;
-                    a.root?.position?.copy?.(a.monster.position);
-                    if (a.root?.rotation) a.root.rotation.y=yaw;
-                } else if (a.kind === 'player' && this.playerViewport?.setMoveTarget?.(key, x, y, dir)) {
-                    // Remote D4 is an authoritative destination, not a visual
-                    // teleport. PlayerViewportManager owns the PC-rate one-step
-                    // interpolation and action/SafeZone re-evaluation.
-                } else if (a.root?.position) {
-                    a.root.position.set(tx, ty, tz);
-                    if (a.root.rotation) a.root.rotation.y=yaw;
                 }
             },
             // 0x15 PRECEIVE_MOVE_POSITION: correção autoritativa de tile.
-            onPosition: ({ key, x, y }) => {
-                const a = this._resolveServerActor(key);
-                if (!a?.root && a?.kind !== 'hero') return;
-                const tx = (x + 0.5) * 100 - 12800;
-                const tz = 12800 - (y + 0.5) * 100;
-                const ty = this.scene?.terrainHeightAt?.(tx, tz) ?? a.position?.y ?? 0;
-                if (a.kind === 'hero' && this.playerChar?.position) {
-                    this.playerChar.position.set(tx, ty, tz);
-                    this._heroServerTile = { x, y };
-                    this._netMovePending=null;
-                    this._netMoveUnacked = [];
-                } else if (a.kind === 'monster' && a.monster) {
-                    a.monster.serverTileX = x;
-                    a.monster.serverTileY = y;
-                    a.monster.position.set(tx, ty, tz);
-                    a.root?.position?.copy?.(a.monster.position);
-                } else if (a.kind === 'player' && this.playerViewport?.setPositionCorrection?.(key, x, y)) {
-                    // Explicit 0x15 correction snaps/retire path; ordinary D4
-                    // remains smoothly presented by the remote movement owner.
-                } else if (a.root?.position) {
-                    a.root.position.set(tx, ty, tz);
+            onPosition: (msg) => {
+                if (!this._applyServerViewportPosition(msg) && (this.state !== 'world' || this._playerViewportAdmission)) {
+                    const rawKey = Number(msg?.key);
+                    if (Number.isInteger(rawKey)) {
+                        const k = rawKey & 0x7FFF;
+                        // D4 and 0x15 are one server-owned motion lifecycle. Keeping
+                        // one slot per key preserves wire order across the two packet
+                        // families: whichever authoritative motion state arrived last
+                        // before materialization is the state replayed after 0x12/0x13.
+                        this._pendingViewportMotion ||= new Map();
+                        this._pendingViewportMotion.set(k, { kind: 'position', ...msg, key: k });
+                    }
                 }
             },
             // 0x11 PRECEIVE_ATTACK: dano/resultado vêm do GS; não calcula hit local.
-            onAttack: ({ key, success, damage, damageType, shieldDamage }) => {
-                const a = this._resolveServerActor(key);
-                if (!a) return;
-                if (a.kind === 'hero' && this.playerChar) {
-                    if (success) {
-                        this.playerChar.hp = Math.max(0, (this.playerChar.hp ?? 0) - damage);
-                        this.playerChar.sd = Math.max(0, (this.playerChar.sd ?? 0) - shieldDamage);
-                        if (damage > 0) this.hud?.damage?.(damage);
-                        this._refreshStatsHud();
+            onAttack: (msg) => {
+                if (!this._applyServerAttackResult(msg) && (this.state !== 'world' || this._playerViewportAdmission)) {
+                    const rawKey = Number(msg?.key);
+                    if (Number.isInteger(rawKey)) {
+                        const k = rawKey & 0x7FFF;
+                        // 0x11 is an event stream, not replaceable state. Preserve
+                        // every server result in wire order until 0x12/0x13 actors
+                        // materialize. During live 0x12 admission Player.bmd publication
+                        // is asynchronous, so keep the result behind the same physical
+                        // actor barrier. DeleteViewport fences stale identity above.
+                        this._pendingViewportAttacks ||= [];
+                        this._pendingViewportAttacks.push({ ...msg, key: k });
                     }
-                } else if (a.kind === 'monster' && a.monster) {
-                    // Dano/morte visual do monstro deriva SOMENTE do resultado 0x11
-                    // do GS. Não dispara drop/EXP/quest local; esses owners são
-                    // mantidos para modo offline e packets autoritativos próprios.
-                    if (success && damage > 0 && a.monster.isAlive()) {
-                        a.monster.takeDamage(damage, null);
-                    }
-                }
-                if (a.kind !== 'hero' && a.root?.userData) {
-                    a.root.userData.lastServerDamage = { success, damage, damageType, shieldDamage, at: Date.now() };
                 }
             },
             // 0x18 PRECEIVE_ACTION: action/yaw do actor vêm do GS.
-            onAction: ({ key, angle, action, targetKey }) => {
-                const a = this._resolveServerActor(key);
-                if (!a) return;
-                const yaw = muDirectionToThreeYaw(angle);
-                if (a.kind === 'hero' && this.playerChar?.rotation) this.playerChar.rotation.y = yaw;
-                else {
-                    if (a.kind === 'monster' && a.monster?.rotation) a.monster.rotation.y = yaw;
-                    if (a.root?.rotation) a.root.rotation.y = yaw;
+            onAction: (msg) => {
+                if (!this._applyServerViewportAction(msg) && (this.state !== 'world' || this._playerViewportAdmission)) {
+                    // 0x18 can race both initial world construction and live asynchronous
+                    // 0x12 Player.bmd publication. Preserve only the newest server-owned
+                    // state for that 15-bit viewport key until the physical actor exists;
+                    // no local action/timing is synthesized. DeleteViewport fences it below.
+                    const rawKey = Number(msg?.key);
+                    if (Number.isInteger(rawKey)) {
+                        const k = rawKey & 0x7FFF;
+                        this._pendingViewportActions ||= new Map();
+                        this._pendingViewportActions.set(k, { ...msg, key: k });
+                    }
                 }
-                a.renderer?.playAction?.(`action_${action}`);
-                if (a.root?.userData?.animationControl) a.root.userData.animationControl._current = `server:${action}`;
-                void targetKey;
             },
             onUnknown: (p) => { /* já logado pelo router */ void p; }
         });
@@ -1534,6 +1631,140 @@ export class GameApp {
         }
     }
 
+    _applyServerChangeCharacter(msg) {
+        const rawKey = Number(msg?.key);
+        if (!Number.isInteger(rawKey)) return false;
+        const key = rawKey & 0x7FFF;
+        if (Number.isInteger(this._heroServerKey) && key === (this._heroServerKey & 0x7FFF)) {
+            console.info(`[MU] 0x25 hero key=0x${key.toString(16)} ignorado; F3:13 permanece owner do snapshot local`);
+            return true;
+        }
+        const actor = this.playerViewport?.getByServerKey?.(key);
+        if (!actor) return false;
+        this.playerViewport?.applyChangeCharacter?.({ ...msg, key })
+            ?.catch?.((err) => console.warn(`[MU] 0x25 remote appearance key=0x${key.toString(16)} falhou: ${err?.message || err}`));
+        return true;
+    }
+
+    _retireServerViewportForMapChange() {
+        // 0x1C + F3:12 changes the viewport's world/identity namespace. The
+        // old map's buffered events cannot legally bind to a reused 15-bit key
+        // in the new map. This retires ONLY server viewport state; no new wire,
+        // FX, actor, skill or timing is synthesized.
+        this._viewportWorldEpoch = (this._viewportWorldEpoch || 0) + 1;
+        // 0x12 is the only authoritative binding of a hero to a 15-bit GS
+        // viewport key. The old key must not shadow a new map's remote player,
+        // monster or ReceiveMagic/0x48 consumer before the next 0x12 arrives.
+        // Do not reset it for Flag==0 same-map position correction.
+        this._heroServerKey = null;
+        this._pendingPlayerViewport = null;
+        this._pendingMonsterViewport = null;
+        this._pendingViewportAppearance = null;
+        this._pendingViewportMotion = null;
+        this._pendingViewportAttacks = null;
+        this._pendingServerMagicEvents = null;
+        this._pendingDisplayEffects = null;
+        this._pendingViewportPk = null;
+        this._pendingViewportActions = null;
+        this._viewportDeleteGeneration = new Map();
+        // Old 0x12 BMD loads remain guarded by the manager's clear()/epoch;
+        // do not serialize the new map's admissions behind those old loads.
+        this._playerViewportAdmission = null;
+    }
+
+    _flushPendingMonsterViewport() {
+        if (!this.monsters || !this._pendingMonsterViewport?.length) return;
+        const pending = this._pendingMonsterViewport;
+        this._pendingMonsterViewport = null;
+        const created = this.monsters.spawnFromServer(pending);
+        if (created > 0) this.chatInfo(`${created} actor(es) do servidor entraram no viewport.`);
+    }
+
+    _flushPendingServerMagicEvents() {
+        if (!this._pendingServerMagicEvents?.length) return;
+        const pendingMagic = this._pendingServerMagicEvents;
+        this._pendingServerMagicEvents = null;
+        for (const entry of pendingMagic) this._applyServerMagicEvent(entry.kind, entry.msg);
+    }
+
+    _flushPendingViewportAttacks() {
+        if (!this._pendingViewportAttacks?.length) return;
+        const pendingHits = this._pendingViewportAttacks;
+        this._pendingViewportAttacks = null;
+        for (const msg of pendingHits) this._applyServerAttackResult(msg);
+    }
+
+    _flushPendingDisplayEffects() {
+        if (!this._pendingDisplayEffects?.length) return;
+        const pendingDisplay = this._pendingDisplayEffects;
+        this._pendingDisplayEffects = null;
+        for (const msg of pendingDisplay) this._handleServerDisplayEffect(msg);
+    }
+
+    _flushPendingViewportPk() {
+        if (!this._pendingViewportPk?.size) return;
+        const pendingPk = [...this._pendingViewportPk.values()];
+        this._pendingViewportPk.clear();
+        for (const msg of pendingPk) this._applyServerPkChange(msg);
+    }
+
+    _flushPendingViewportActions() {
+        if (!this._pendingViewportActions?.size) return;
+        const pendingActions = [...this._pendingViewportActions.values()];
+        this._pendingViewportActions.clear();
+        for (const msg of pendingActions) this._applyServerViewportAction(msg);
+    }
+
+    _flushPendingViewportMotion() {
+        if (!this._pendingViewportMotion?.size) return;
+        const pendingMotion = [...this._pendingViewportMotion.values()];
+        this._pendingViewportMotion.clear();
+        for (const msg of pendingMotion) {
+            if (msg.kind === 'move') this._applyServerViewportMove(msg);
+            else if (msg.kind === 'position') this._applyServerViewportPosition(msg);
+        }
+    }
+
+    async _flushPendingViewportAppearance(expectedEpoch = this._viewportWorldEpoch || 0) {
+        // An old F3:13/0x25 async rebuild must not drain the NEW map's queue
+        // after a 0x1C commit. Every batch and each entry retain the world fence.
+        // F3:13 can await remote BMD/equipment work. Packets received during that
+        // await are appended to a fresh queue because admission remains active.
+        // Drain batches until quiescent so a valid F3:13/0x25 cannot be stranded
+        // merely because it arrived while an earlier snapshot was materializing.
+        while (this._pendingViewportAppearance?.length) {
+            if (expectedEpoch !== (this._viewportWorldEpoch || 0)) return;
+            const pendingAppearance = this._pendingViewportAppearance;
+            this._pendingViewportAppearance = null;
+            for (const entry of pendingAppearance) {
+                if (expectedEpoch !== (this._viewportWorldEpoch || 0)) return;
+                const msg = entry?.msg || {};
+                const key = Number(msg.key) & 0x7FFF;
+                // 0x14 can arrive while an earlier F3:13 awaits remote BMD.
+                // The batch was already detached from _pendingViewportAppearance,
+                // so filtering that queue alone cannot retire a later stale
+                // F3:13/0x25 for a 15-bit key reused by a fresh 0x12.
+                // Compare the wire-receipt delete generation at EACH replay.
+                if (Number.isInteger(entry?._muDeleteGeneration) &&
+                    entry._muDeleteGeneration !== (this._viewportDeleteGeneration?.get(key) || 0)) continue;
+                if (entry?.kind === 'equipment') {
+                    if (Number.isInteger(this._heroServerKey) && key === (this._heroServerKey & 0x7FFF)) {
+                        this.playerChar.classByte = msg.classByte;
+                        this.playerChar.visualClassId = serverClassToClientClass(msg.classByte);
+                        this.playerChar.charset = [msg.classByte, ...msg.equipment];
+                        if (typeof this._syncWings === 'function') this._syncWings();
+                        if (this.scene?.character?.refreshEquipment) this.scene.character.refreshEquipment();
+                        this._refreshStatsHud();
+                    } else {
+                        await this.playerViewport?.applyEquipmentSnapshot?.(key, msg.classByte, msg.equipment, { source:'F3:13-loading' });
+                    }
+                } else if (entry?.kind === 'change') {
+                    this._applyServerChangeCharacter(msg);
+                }
+            }
+        }
+    }
+
     onMUPacket(fn) {
         (this._muPacketHooks = this._muPacketHooks || []).push(fn);
         return () => { this._muPacketHooks = this._muPacketHooks.filter((f) => f !== fn); };
@@ -1546,24 +1777,72 @@ export class GameApp {
      * z=12800−(tileY+0.5)×100. Outros players (sem match) ficam para a
      * integração P2 — nada é criado sem decode/asset reais (0 fake).
      */
-    _applyPlayerViewport(players) {
+    _queuePlayerViewportAdmission(admittedPlayers) {
+        // The 0x1C map commit is a distinct viewport identity lifetime. An
+        // older asynchronous 0x12 cannot publish a peer/hero or replay its
+        // dependent events into the next WorldN, even if the 15-bit key recurs.
+        const worldEpoch = this._viewportWorldEpoch || 0;
+        const isCurrentWorld = () => worldEpoch === (this._viewportWorldEpoch || 0);
+        // One publication barrier for live 0x12 and the late loading-window
+        // drain. F3:13/0x25, motion, attack, magic, 0x48, PK and 0x18 may not
+        // overtake the async BMD actor publication. No local action is created.
+        const priorAdmission = this._playerViewportAdmission || Promise.resolve();
+        const admission = priorAdmission
+            .then(() => isCurrentWorld() && this._applyPlayerViewport(admittedPlayers))
+            .then(() => isCurrentWorld() && this._flushPendingViewportMotion())
+            .then(() => isCurrentWorld() && this._flushPendingViewportAppearance(worldEpoch))
+            .then(() => isCurrentWorld() && this._flushPendingViewportMotion())
+            .then(() => isCurrentWorld() && this._flushPendingViewportAttacks())
+            .then(() => isCurrentWorld() && this._flushPendingServerMagicEvents())
+            .then(() => isCurrentWorld() && this._flushPendingDisplayEffects())
+            .then(() => isCurrentWorld() && this._flushPendingViewportPk())
+            .then(() => isCurrentWorld() && this._flushPendingViewportActions())
+            .catch((err) => console.warn(`[MU] 0x12 viewport admission falhou (fail-closed): ${err?.message || err}`));
+        this._playerViewportAdmission = admission;
+        admission.finally(() => {
+            if (this._playerViewportAdmission === admission) this._playerViewportAdmission = null;
+        });
+        return admission;
+    }
+
+    async _applyPlayerViewport(players) {
         if (!this.playerChar || !Array.isArray(players)) return;
+        // A remote BMD load can finish after a 0x1C map commit. The manager
+        // fences its old publication; this GameApp consumer must also fence
+        // post-await preview rebinds against the new map's registry.
+        const admissionWorldEpoch = this._viewportWorldEpoch || 0;
+        // The 0x14 generation is captured at RECEIVE for loading and live 0x12.
+        // Check before publication, before each actor within a slow BMD batch,
+        // and again after the async remote pass before applying the hero entry.
+        const isCurrentAdmission = (entry) => {
+            if (Number.isInteger(entry?._muWorldEpoch) && entry._muWorldEpoch !== (this._viewportWorldEpoch || 0)) return false;
+            if (!Number.isInteger(entry?._muAdmissionGeneration)) return true;
+            const key = Number(entry?.key) & 0x7FFF;
+            return entry._muAdmissionGeneration === (this._viewportDeleteGeneration?.get(key) || 0);
+        };
+        players = players.filter(isCurrentAdmission);
+        if (!players.length) return;
         // R12.5 primeiro: co-players (não-herói) spawn com próprios classByte/
         // equipment (o herói é filtrado no manager por nome); pacotes sem herói
         // ainda spawnam co-players — ponto de entrada DEVE vir antes do return
         // de herói abaixo. Fail-closed, sem placeholder.
-        this.playerViewport?.spawnFromServer(players, this.playerChar?.name)
-            .then((r) => {
-                // F3:72 may arrive before OR after 0x12. Rebind the retained
-                // preview baseline after every viewport admission so ordering
-                // cannot drop protocol state for a newly-created actor.
-                this.playerViewport?.applyCustomPreviewState?.(this.serverCustomPreview);
-                if (r.created > 0 || r.updated > 0) {
-                    console.info(`[MU] 0x12 co-players: ${r.created} spawn(s) / ${r.updated} atualização(s) — mundo multiplayer visível`);
-                }
-            })
-            .catch((e) => console.warn('[World] playerViewport co-players falhou (fail-closed):', e.message));
-        const hero = players.find((p) =>
+        try {
+            const r = await this.playerViewport?.spawnFromServer(players, this.playerChar?.name, { acceptEntry: isCurrentAdmission });
+            if (r && (r.created > 0 || r.updated > 0)) {
+                console.info(`[MU] 0x12 co-players: ${r.created} spawn(s) / ${r.updated} atualização(s) — mundo multiplayer visível`);
+            }
+        } catch (e) {
+            console.warn('[World] playerViewport co-players falhou (fail-closed):', e.message);
+        }
+        // Never apply an old 0x12's preview to a newly committed WorldN.
+        // In particular, the new map may already have a fresh F3:72 mirror.
+        if (admissionWorldEpoch !== (this._viewportWorldEpoch || 0)) return;
+        // F3:72 may arrive before OR after 0x12. Rebind only while this
+        // admission still owns the committed world and its actor registry.
+        this.playerViewport?.applyCustomPreviewState?.(this.serverCustomPreview);
+        // 0x14 can arrive while the co-player BMDs are awaiting IO. A deleted
+        // hero key must never be re-applied after that await.
+        const hero = players.filter(isCurrentAdmission).find((p) =>
             p?.id && this.playerChar.name &&
             p.id.trim().toLowerCase() === this.playerChar.name.trim().toLowerCase()
         );
@@ -2562,21 +2841,53 @@ export class GameApp {
         if (this._pendingPlayerViewport?.length) {
             const pending = this._pendingPlayerViewport;
             this._pendingPlayerViewport = null;
-            this._applyPlayerViewport(pending);
+            // Remote 0x12 publication is asynchronous in Web. Wait for the
+            // physical actor registry before replaying F3:13/0x25 appearance;
+            // otherwise a valid packet can resolve no actor and be lost.
+            await this._applyPlayerViewport(pending);
         }
+
+        // F3:13 full snapshots and 0x25 incremental changes are one server-owned
+        // appearance stream. They can cross while world construction is async, so
+        // replay the exact wire order after 0x12 publishes players. This avoids the
+        // old artificial "all snapshots, then all deltas" reorder. 0x14 fences
+        // deleted identities above.
+        await this._flushPendingViewportAppearance();
 
         // 0x13 CREATE_MONSTER buffered ANTES do world (padrão do 0x12 acima):
         // a leva inicial do servidor chega durante o loading — flush aqui,
         // quando MonsterManager existe. spawnFromServer faz clearClientSide
         // na 1ª leva (servidor autoritativo, 0 simulação).
-        if (this._pendingMonsterViewport?.length) {
-            const pendingM = this._pendingMonsterViewport;
-            this._pendingMonsterViewport = null;
-            const created = this.monsters.spawnFromServer(pendingM);
-            if (created > 0) {
-                this.chatInfo(`${created} actor(es) do servidor entraram no viewport.`);
-            }
-        }
+        this._flushPendingMonsterViewport();
+
+        // D4/0x15 share one server-owned motion slot per viewport key.
+        // Replay only after the physical 0x12 publication boundary.
+        this._flushPendingViewportMotion();
+
+        // 0x11 is an ordered result stream: replay every result only after
+        // both viewport registries exist. Missing actors remain fail-closed.
+        this._flushPendingViewportAttacks();
+
+        // 0x19/0x1A/0x1E/0x1B are one ordered server skill event stream.
+        // During asynchronous Web world construction they can arrive before the
+        // matching 0x12/0x13 actors exist. Replay in original wire order only
+        // after both viewport registries have materialized; 0x14 fences stale
+        // identities while loading.
+        this._flushPendingServerMagicEvents();
+
+        // 0x48 DisplayEffect can race 0x12 while the Web world is still being
+        // built. Replay the ordered event stream only after player actors exist;
+        // _handleServerDisplayEffect keeps the PC KIND_PLAYER gate and exact
+        // type consumer. DeleteViewport already fenced stale identities above.
+        this._flushPendingDisplayEffects();
+
+        // F3:08 is replaceable actor state. Replay the newest value per key only
+        // after 0x12 actors exist; 0x14 already fences deleted identities.
+        this._flushPendingViewportPk();
+
+        // 0x18 received during loading is replayed only after both viewport
+        // registries exist. Entries whose actor never materialized stay dropped.
+        this._flushPendingViewportActions();
 
         // 0x1C pode chegar durante o loading. Reaplica somente quando player/map
         // reais já existem; generation fencing dentro do handler descarta resultado
@@ -2589,7 +2900,7 @@ export class GameApp {
 
         // Pet/helper: sistema preparado, porém NÃO invoca Dark Raven fake.
         // O visual só deve nascer de equipamento/viewport autoritativo do servidor.
-        this.pets = new PetSystem(this.scene.scene, { terrainHeightAt: (x,z) => this.scene.terrainHeightAt(x,z) });
+        this.pets = new PetSystem(this.scene.scene);
         // Rider ride-state (junction fenrir): PetSystem aplica as actions
         // PLAYER_FENRIR_* no renderer do herói enquanto montado — setter
         // fail-closed (null = ride-state no-op).
@@ -2731,6 +3042,14 @@ export class GameApp {
                 return Promise.resolve(true);
             }
 
+            // FIX153: physical BMD absences were rebuilding Player.bmd 65-80ms
+            // repeatedly for the same server CharSet (e.g. Male100 set).
+            // Memoize only confirmed incomplete graph keys for 30 seconds per
+            // Data authority; newly available files and other snapshots retry.
+            const failedGraphs = (this._heroMissingGraphUntil ??= new Map());
+            const missingGraphKey = `${RemoteAssets.authorityKey}|${key}`;
+            if ((failedGraphs.get(missingGraphKey) || 0) > performance.now()) return Promise.resolve(false);
+
             // Every authoritative F3:13 snapshot supersedes an older staged
             // visual build. ServerInventory/0x24 calls may also reach here, but
             // because they do not mutate CharSet they simply coalesce to the
@@ -2792,11 +3111,17 @@ export class GameApp {
                             if (!next) continue;
                             if (job.generation !== this._heroEquipVisualGeneration) continue;
                             this.playerChar.mesh = next;
+                            failedGraphs.delete(`${RemoteAssets.authorityKey}|${job.key}`);
                             this._heroEquipKey = job.key;
                             this._heroEquipCharset = job.charset.slice();
                             this.pets?.setHeroRenderer?.(this.scene._playerRenderer || null);
                             await this._syncHeroPetCompanions({ announce: false });
                         } catch (e) {
+                            // No repeating the same expensive Player.bmd setup
+                            // for a missing physical part on every packet.
+                            if (/replacement assets incompletos.*(?:fetch-null|body-load-failed)/i.test(String(e?.message || ''))) {
+                                failedGraphs.set(`${RemoteAssets.authorityKey}|${job.key}`, performance.now()+30000);
+                            }
                             console.warn('[World R83] staged reattach de equipamento falhou; graph anterior permaneceu ativo:', e.message);
                             if (this.scene.mainObject) this.playerChar.mesh = this.scene.mainObject;
                             // If a newer snapshot arrived, keep draining it. If
@@ -2841,7 +3166,7 @@ export class GameApp {
             // Y=0 em vez de inventar sin/cos procedurais.
             Movement.setTerrainHeightFn((x, z) =>
                 this.scene.heights ? this.scene.terrainHeightAt(x, z) : 0);
-            Movement.setWalkableFn((x, z) => this.scene?.isWalkable?.(x, z) !== false);
+            Movement.setWalkableFn((x, z) => this.scene?.isWalkable?.(x, z) === true);
             Movement.setCollisionWorld(this.collisionWorld);
             this._attachClickMovement();
         } catch (e) { console.warn('[move]', e); }
@@ -2920,6 +3245,23 @@ export class GameApp {
         _worldPhases.firstFramePrime = 0;
 
         await this._gotoScene('world', {}, { fadeMs: 0 });
+        // Late 0x13 and 0x12 can both arrive after the first world-entry drains
+        // while async UI/object/shader work is still running. Publish the late
+        // monsters first; then await the same serialized 0x12 admission barrier
+        // used for live packets before releasing dependent server-owned events.
+        // 0x14 already fenced buffered and published keys during loading.
+        this._flushPendingMonsterViewport();
+        if (this._pendingPlayerViewport?.length) {
+            const pendingPlayers = this._pendingPlayerViewport;
+            this._pendingPlayerViewport = null;
+            await this._queuePlayerViewportAdmission(pendingPlayers);
+        }
+        this._flushPendingViewportMotion();
+        this._flushPendingViewportAttacks();
+        this._flushPendingServerMagicEvents();
+        this._flushPendingDisplayEffects();
+        this._flushPendingViewportPk();
+        this._flushPendingViewportActions();
         _markWorldPhase('sceneSwitch');
         this.chatInfo(`Bem-vindo a ${this.mapManager.getCurrentMap().name}, ${charData.name}!`);
         Sound.uiSuccess();
@@ -3464,106 +3806,6 @@ export class GameApp {
         return this._ctm;
     }
 
-    _pickPcOperateFromPointer(clientX, clientY, canvas) {
-        const ops=this.scene?.worldObjectLayer?.root?.userData?.pcOperatePlacements;
-        const camera=this.scene?.camera?.threeCamera;
-        if (!Array.isArray(ops) || !ops.length || !camera || !canvas) return null;
-        const rect=canvas.getBoundingClientRect();
-        const pointer=new THREE.Vector2(
-            ((clientX-rect.left)/Math.max(1,rect.width))*2-1,
-            -((clientY-rect.top)/Math.max(1,rect.height))*2+1,
-        );
-        const raycaster=this._operateRaycaster || (this._operateRaycaster=new THREE.Raycaster());
-        raycaster.setFromCamera(pointer,camera);
-        let best=null,bestDist=Infinity;
-        const localRay=new THREE.Ray(), hit=new THREE.Vector3();
-        for (const op of ops) {
-            const p=op?.position,q=op?.quaternion,b=op?.localBounds;
-            if(!p||!q||!b)continue;
-            const matrix=new THREE.Matrix4().compose(
-                new THREE.Vector3(p.x,p.y,p.z),
-                new THREE.Quaternion(q.x,q.y,q.z,q.w),
-                new THREE.Vector3(op.scale||1,op.scale||1,op.scale||1),
-            );
-            const inv=matrix.clone().invert();
-            localRay.copy(raycaster.ray).applyMatrix4(inv);
-            const box=new THREE.Box3(
-                new THREE.Vector3(b.min.x,b.min.y,b.min.z),
-                new THREE.Vector3(b.max.x,b.max.y,b.max.z),
-            );
-            if(!localRay.intersectBox(box,hit))continue;
-            hit.applyMatrix4(matrix);
-            const d=raycaster.ray.origin.distanceTo(hit);
-            if(d<bestDist){bestDist=d;best=op;}
-        }
-        return best;
-    }
-
-    _startPcOperate(op) {
-        if(!op||!this.playerChar)return false;
-        const wx=(op.targetX+0.5)*100-12800, wz=12800-(op.targetY+0.5)*100;
-        const wy=this.scene?.terrainHeightAt?.(wx,wz) ?? this.playerChar.position.y;
-        this.playerChar.targetPos=new THREE.Vector3(wx,wy,wz);
-        this._pendingPcOperate={op,startedAt:performance.now(),sent:false};
-        console.info(`[OPERATE FIX92] World1 Object${op.objectNumber} ${op.kind} -> tile(${op.targetX},${op.targetY})`);
-        return true;
-    }
-
-    _updatePcOperateIntent() {
-        const pending=this._pendingPcOperate, char=this.playerChar;
-        if(!pending||!char||pending.sent)return;
-        const op=pending.op;
-        const tile=this._heroServerTile || {
-            x:Math.floor((char.position.x+12800)/100),
-            y:Math.floor((12800-char.position.z)/100),
-        };
-        if(Math.max(Math.abs(tile.x-op.targetX),Math.abs(tile.y-op.targetY))>1)return;
-        // Main 5.2 MOVEMENT_OPERATE: sitting is rejected outside SafeZone while
-        // stock helper ITEM_HELPER+2/+3/+4/+37 is equipped.  The Web equipment
-        // owner stores the item extType (13*512+index), so compare the exact helper
-        // index rather than guessing from the rendered pet species. Pose is not gated.
-        if (op.kind!=='pose') {
-            const safeZone=Boolean(this.scene?.terrainWallAt?.(char.position.x,char.position.z)&0x0001);
-            const eq=this.scene?.mainObject?.userData?.muMovementContext?.equipment || null;
-            const helperExt=Number(eq?.helper?.extType ?? eq?.customHelper?.itemType ?? eq?.darkSpirit?.itemType);
-            const helperIndex=Number.isInteger(helperExt)?((helperExt%512)+512)%512:-1;
-            if(!safeZone && [2,3,4,37].includes(helperIndex)){
-                char.targetPos=null; this._pendingPcOperate=null;
-                console.info(`[OPERATE FIX92] sit bloqueado pelo helper PC index=${helperIndex} fora da SafeZone`);
-                return;
-            }
-        }
-        pending.sent=true; char.targetPos=null;
-        let pcDeg;
-        if(op.kind==='pose'||op.kind==='sit-facing') pcDeg=Number(op.targetAngle)||0;
-        else pcDeg=THREE.MathUtils.radToDeg(Number(char.rotation?.y)||0);
-        const dir=((Math.floor((pcDeg+22.5)/45)+1)%8+8)%8;
-        const action=op.kind==='pose'?129:128; // OptionType: AT_SIT1=128, AT_POSE1=129.
-        // PC MOVEMENT_OPERATE calls SetAction locally before SendRequestAction.
-        // Keep that immediate presentation while the 0x18 packet remains authoritative.
-        const female=isFemaleClass(this.playerChar?.visualClassId ?? this.playerChar?.classId ?? 0);
-        const localAction=op.kind==='pose'
-            ? (female?PLAYER_ACTIONS.POSE_FEMALE1:PLAYER_ACTIONS.POSE1)
-            : (female?PLAYER_ACTIONS.SIT_FEMALE1:PLAYER_ACTIONS.SIT1);
-        const localRenderer=this.scene?._playerRenderer || this.playerChar?.renderer;
-        const operateClip=localRenderer?.playAction?.(`action_${localAction}`,0.04);
-        if(operateClip) this.playerChar._pcOperateAction=localAction;
-        const send=async()=>{
-            try{
-                // MOVEMENT_OPERATE source sends a one-node move to TargetX/Y
-                // immediately before SendRequestAction, even after path arrival.
-                await this.muProtocol?.requestPcFacingMove?.(op.targetX,op.targetY,dir);
-                await this.muProtocol?.requestAction?.(action,dir);
-                // MOVEMENT_OPERATE closes with PlayBuffer(SOUND_DROP_ITEM01,&Hero->Object).
-                // Main 5.2 maps it to Data/Sound/pDropItem.wav; MUSounds owns that exact asset.
-                MUSounds.play('ui.drop');
-                console.info(`[OPERATE FIX92] 0x18 action=${action} dir=${dir} enviado`);
-            }catch(e){console.warn('[OPERATE FIX92] envio fail-closed:',e?.message||e);}
-            finally{this._pendingPcOperate=null;}
-        };
-        void send();
-    }
-
     _bindWorldInput() {
         // R79: um único owner para o mouse do mundo. A versão anterior tinha
         // dois listeners independentes: ClickToMove consumia mousedown e depois
@@ -3618,16 +3860,6 @@ export class GameApp {
                         return;
                     }
                     if (actor.isAttackable?.()) this._playerAttack(actor);
-                    return;
-                }
-
-                // Main 5.2 selection priority reaches SelectOperate only after
-                // item/character/NPC selection. Use the exact CreateObject OBB
-                // registry; PoseBox remains source-hidden and is still pickable.
-                const operate=this._pickPcOperateFromPointer(e.clientX,e.clientY,canvas);
-                if(operate){
-                    e.preventDefault();
-                    this._startPcOperate(operate);
                     return;
                 }
 
@@ -3962,7 +4194,13 @@ export class GameApp {
         const wx=(x+0.5)*100-12800, wz=12800-(y+0.5)*100;
         let walkable=true;
         if(Movement.walkableFn){try{walkable=!!Movement.walkableFn(wx,wz);}catch{walkable=false;}}
-        if(!walkable||(Movement.collisionWorld&&Movement.collisionWorld.isBlocked?.({x:wx,z:wz}))){
+        // The real GameServer and its ATT grid are authoritative for movement.
+        // CollisionWorld.syncFromMap() also builds approximate circular colliders
+        // from decorative MapManager meshes; those circles are NOT PC MapATT
+        // collision and can block valid paths through bridges/archways/props.
+        // Do not let a decorative visual circle veto BOTH_MOVE on the real MU
+        // lane. GS will reject invalid steps and D4/0x15 reconciliation remains.
+        if(!walkable){
             if(intent.clickToMove)char.targetPos=null;
             return true;
         }
@@ -4040,67 +4278,6 @@ export class GameApp {
         }
     }
 
-    _handleServerDisplayEffect({ key, type }) {
-        const actor = this._resolveServerActor((Number(key) || 0) & 0x7fff);
-        if (!actor || (actor.kind !== 'hero' && actor.kind !== 'player')) return false;
-        const t = Number(type) & 0xff;
-        // Main 5.2 ReceiveDisplayEffectViewport type 0x02 has an intentionally
-        // empty MP-up branch. Consuming it is the complete visual contract.
-        if (t === 0x02) return true;
-        // Type 0x10 (ReceiveDisplayEffectViewport): PC distinguishes master
-        // by CharacterAttribute->Level>=401 AND third-class bit (0x10) on the
-        // displayed player's class. It also plays SOUND_LEVEL_UP.
-        if (t === 0x10 && actor.root && this.scene?.scene) {
-            const rawClass = Number(actor.classByte ?? this.playerChar?.classByte ?? 0) & 0xff;
-            const masterLevel = Number(this.playerChar?.level || 0) >= 401 && (rawClass & 0x10) !== 0;
-            const fx = playLevelUp(actor.root, this.scene.scene, this.scene.camera?.threeCamera || null, {
-                effectManager: this.effects, sound: Sound, masterLevel, heroLight: [1,1,1]
-            });
-            if (fx) {
-                this._activeLevelFx = this._activeLevelFx || [];
-                this._activeLevelFx.push(fx);
-            }
-            return Boolean(fx);
-        }
-        // Type 0x11: exact PC MODEL_SHIELD_CRASH owner. Chaos Castle suppresses
-        // both model effect and sound in the supplied Main 5.2 branch.
-        if (t === 0x11) {
-            const wa = pcWorldActiveFromAssetWorld(this.scene?.mapIndex);
-            if (pcInChaosCastle(wa)) return true;
-            if (!actor.root || !this.scene?.scene) return false;
-            const fx = playDisplayShieldCrash(actor.root, this.scene.scene);
-            if (fx) {
-                this._activeLevelFx = this._activeLevelFx || [];
-                this._activeLevelFx.push(fx);
-            }
-            // ZzzOpenData.cpp: SOUND_SHIELDCLASH = Data\Sound\shieldclash.wav.
-            try {
-                if (Sound?.buffers?.has?.('sfx-shieldclash-pc')) Sound.play?.('sfx-shieldclash-pc');
-                else if (typeof Sound?.loadWav === 'function') {
-                    Sound.loadWav('sfx-shieldclash-pc', 'shieldclash.wav')
-                        .then((buf) => { if (buf) Sound.play?.('sfx-shieldclash-pc'); })
-                        .catch(() => {});
-                }
-            } catch { /* audio degrada sem substituir asset */ }
-            return Boolean(fx);
-        }
-        // 0x01/0x03: exact PC BITMAP_MAGIC+1 subtype 5 owner. MoveEffect
-        // runs CreateHealing once per authored 25-Hz tick; each call emits
-        // 3 BITMAP_JOINT_HEALING subtype-11 tails with the ZzzEffectJoint
-        // constructor/motion contract. 0x01 remains build-gated by the PC's
-        // ENABLE_POTION_EFFECT; the Web lane enables the same visual owner.
-        if (t === 0x01 || t === 0x03) {
-            if (!actor.root || !this.scene?.scene) return false;
-            const fx = playDisplayPotionEffect(actor.root, this.scene.scene);
-            if (fx) {
-                this._activeLevelFx = this._activeLevelFx || [];
-                this._activeLevelFx.push(fx);
-            }
-            return Boolean(fx);
-        }
-        return false;
-    }
-
     /**
      * Resolve key do GameServer -> ator visual real já existente no viewport.
      * Retorna apenas actors autoritativos; nunca cria placeholder.
@@ -4115,7 +4292,6 @@ export class GameApp {
                 renderer: this.scene?._playerRenderer || null,
                 root: this.scene?.mainObject || null,
                 classId: this.playerChar.classId,
-                classByte: this.playerChar.classByte,
                 weaponRightSpec: this.scene?._playerWeaponRightSpec || null,
                 fenrir: this.scene?._playerFenrir || null,
                 buffContainer: this.playerChar.buffContainer || null,
@@ -4130,7 +4306,6 @@ export class GameApp {
                 renderer: rp.renderer || null,
                 root: rp.outer || null,
                 classId: rp.classId,
-                classByte: rp.classByte,
                 weaponRightSpec: rp.weaponRightSpec || null,
                 fenrir: rp.equipment?.fenrir || null,
                 buffContainer: rp.buffContainer || rp.outer?.userData?.buffContainer || null,
@@ -4245,24 +4420,93 @@ export class GameApp {
     }
 
     _playServerSkillAnimation(actor, wireType) {
-        if (!actor || actor.kind === 'monster' || !actor.renderer) return;
+        if (!actor || actor.kind === 'monster' || !actor.renderer ||
+            !Number.isInteger(actor.key) || !actor.root?.userData) return;
         const actionIndex = this._pcPlayerActionForSkill(wireType, actor);
         if (!Number.isInteger(actionIndex)) return;
-        const action = actor.renderer.playAction?.(`action_${actionIndex}`, 0.06);
+        const action = actor.renderer.playAction?.(`action_${actionIndex}`, 0);
         if (!action) return;
-        // Skills/attacks do PC são ações one-shot; depois volta para idle.
+        // Main 5.2 owns the action selection; the BMD clip owns its duration.
+        // Do not synthesize a Web fade or an arbitrary 180..1800 ms idle timer.
         action.loop = THREE.LoopOnce;
         action.clampWhenFinished = true;
-        const ms = Math.max(180, Math.min(1800, ((action.clip?.duration || 0.55) * 1000) + 30));
         const root = actor.root;
         const token = (root.userData._serverSkillAnimToken || 0) + 1;
         root.userData._serverSkillAnimToken = token;
-        setTimeout(() => {
-            if (!root?.userData || root.userData._serverSkillAnimToken !== token) return;
-            // buildAnimationControl já conhece o idle correto por classe.
+        const worldEpoch = this._viewportWorldEpoch || 0;
+        // MUAnimationAction marks _finished exactly when clip.time reaches
+        // clip.duration. Poll that state on presentation frames instead of
+        // deriving a millisecond timeout from guessed constants.
+        const waitForClipEnd = () => {
+            if (!root?.userData || root.userData._serverSkillAnimToken !== token ||
+                (this._viewportWorldEpoch || 0) !== worldEpoch) return;
+            // 0x14 retires the actor, 0x1C retires the world, and F3:13/0x25
+            // can replace a BMD graph while reusing the same 15-bit key. A
+            // detached clip will never finish updating; do not keep polling it
+            // or let its eventual completion reset a newer actor to idle.
+            const live = this._resolveServerActor(actor.key);
+            if (!live || live.root !== root || live.renderer !== actor.renderer) return;
+            // D4 locomotion or a later server action can replace this clip
+            // without changing the actor/key. The retired one-shot may finish
+            // its fade asynchronously; it must not force the newer action idle.
+            // The physical MUModelRenderer exposes currentAction. Keep legacy
+            // minimal renderer adapters without that property fail-closed.
+            if ('currentAction' in actor.renderer && actor.renderer.currentAction !== action) return;
+            if (!action._finished) { requestAnimationFrame(waitForClipEnd); return; }
             root.userData.animationControl?._current && (root.userData.animationControl._current = null);
             root.userData.animationControl?.play?.('idle');
-        }, ms);
+        };
+        requestAnimationFrame(waitForClipEnd);
+    }
+
+    _applyServerAttackResult({ key, success, damage, damageType, shieldDamage }) {
+        const a = this._resolveServerActor(key);
+        if (!a) return false;
+        if (a.kind === 'hero' && this.playerChar) {
+            if (success) {
+                this.playerChar.hp = Math.max(0, (this.playerChar.hp ?? 0) - damage);
+                this.playerChar.sd = Math.max(0, (this.playerChar.sd ?? 0) - shieldDamage);
+                if (damage > 0) this.hud?.damage?.(damage);
+                this._refreshStatsHud();
+            }
+        } else if (a.kind === 'monster' && a.monster) {
+            // Damage/death remains exclusively GS-owned by 0x11. No local
+            // hit/drop/EXP/quest synthesis is introduced by the loading replay.
+            if (success && damage > 0 && a.monster.isAlive()) {
+                a.monster.takeDamage(damage, null);
+            }
+        }
+        if (a.kind !== 'hero' && a.root?.userData) {
+            a.root.userData.lastServerDamage = { success, damage, damageType, shieldDamage, at: Date.now() };
+        }
+        return true;
+    }
+
+    _handleServerDisplayEffect({ key, type }) {
+        // Main 5.2 ReceiveDisplayEffectViewport: FindCharacterIndex(key), then
+        // require OBJECT::Kind == KIND_PLAYER before the by-Type switch.
+        const actor = this._resolveServerActor((key | 0) & 0x7fff);
+        if (!actor || (actor.kind !== 'hero' && actor.kind !== 'player')) return false;
+
+        // Type 0x02 (MP up) is intentionally empty in the desktop consumer.
+        if (type === 0x02) return true;
+
+        // 0x01/0x03/0x10 have known desktop visual families, but this lane does
+        // not yet have an equivalent BITMAP_MAGIC+1 / BITMAP_FLARE lifecycle
+        // owner. Record the exact debt and stay fail-closed: no generic sprite,
+        // particle, joint, lifetime, bone or timing is invented.
+        if (type === 0x01 || type === 0x03 || type === 0x10) {
+            if (actor.root?.userData) {
+                actor.root.userData.pcDisplayEffectPending = Object.freeze({ key: actor.key, type });
+            }
+            this._missingDisplayEffectVfx = this._missingDisplayEffectVfx || new Set();
+            if (!this._missingDisplayEffectVfx.has(type)) {
+                this._missingDisplayEffectVfx.add(type);
+                console.info(`[DisplayEffect] 0x48 type 0x${type.toString(16)} consumed for player ${actor.key}; exact PC visual owner remains fail-closed.`);
+            }
+            return true;
+        }
+        return false;
     }
 
     _playServerSkillVfx(wireType, source, target, success = true) {
@@ -4400,6 +4644,178 @@ export class GameApp {
         }
     }
 
+    _applyServerViewportMove({ key, x, y, dir } = {}) {
+        const a = this._resolveServerActor(key);
+        if (!a) return false;
+        const tx = (x + 0.5) * 100 - 12800;
+        const tz = 12800 - (y + 0.5) * 100;
+        const ty = this.scene?.terrainHeightAt?.(tx, tz) ?? a.position?.y ?? 0;
+        const yaw = muDirectionToThreeYaw(dir);
+        if (a.kind === 'hero' && this.playerChar?.position) {
+            const now = performance.now();
+            const queue = (this._netMoveUnacked ??= []);
+            const current = this._netMovePending;
+            let matched = false;
+            let sample = null;
+            if (current && current.x === x && current.y === y) {
+                current.acked = true;
+                current.ackAt = now;
+                sample = Math.max(1, now - current.sentAt);
+                queue.length = 0;
+                matched = true;
+            } else {
+                const qidx = queue.findIndex((q) => q.x === x && q.y === y);
+                if (qidx >= 0) {
+                    sample = Math.max(1, now - queue[qidx].sentAt);
+                    queue.splice(0, qidx + 1);
+                    matched = true;
+                }
+            }
+            if (sample != null) {
+                const old = Number(this._netMoveRttEwmaMs || 180);
+                const jitter = Number(this._netMoveJitterEwmaMs || 20);
+                const err = Math.abs(sample - old);
+                this._netMoveRttEwmaMs = Math.max(30, Math.min(4000, old * 0.875 + sample * 0.125));
+                this._netMoveJitterEwmaMs = Math.max(0, Math.min(2000, jitter * 0.875 + err * 0.125));
+            }
+            if (!matched && (current || queue.length)) {
+                const record = {
+                    packet:'D4', at:Date.now(), server:{x,y},
+                    predicted:current ? {x:current.x,y:current.y} : null,
+                    lastAck:this._heroServerTile ? {...this._heroServerTile} : null,
+                    unacked:queue.length, att:this.scene?.terrainWallAt?.(tx,tz) ?? null,
+                };
+                this._lastMovementReconcile=record;
+                if (now - Number(this._lastMovementCorrectionLogAt || 0) > 1000) {
+                    this._lastMovementCorrectionLogAt=now;
+                    console.warn('[MOVE DIAG] GS D4 divergiu da trajetória predita:',record);
+                }
+            }
+            this._heroServerTile = { x, y };
+            this._netMoveFacing = dir;
+            this.playerChar.rotation.y = yaw;
+            if (!matched && !current && queue.length === 0) {
+                this.playerChar.position.set(tx, ty, tz);
+            } else if (!matched) {
+                this.playerChar.position.set(tx, ty, tz);
+                this._netMovePending = null;
+                queue.length = 0;
+            }
+        } else if (a.kind === 'monster' && a.monster) {
+            a.monster.serverTileX=x; a.monster.serverTileY=y;
+            a.monster.position.set(tx, ty, tz);
+            a.monster.rotation.y=yaw;
+            a.root?.position?.copy?.(a.monster.position);
+            if (a.root?.rotation) a.root.rotation.y=yaw;
+        } else if (a.kind === 'player' && this.playerViewport?.setMoveTarget?.(key, x, y, dir)) {
+            // PlayerViewportManager owns remote PC-rate interpolation.
+        } else if (a.root?.position) {
+            a.root.position.set(tx, ty, tz);
+            if (a.root.rotation) a.root.rotation.y=yaw;
+        }
+        return true;
+    }
+
+    _applyServerViewportPosition({ key, x, y } = {}) {
+        const a = this._resolveServerActor(key);
+        if (!a?.root && a?.kind !== 'hero') return false;
+        const tx = (x + 0.5) * 100 - 12800;
+        const tz = 12800 - (y + 0.5) * 100;
+        const ty = this.scene?.terrainHeightAt?.(tx, tz) ?? a.position?.y ?? 0;
+        if (a.kind === 'hero' && this.playerChar?.position) {
+            const previous = this._heroServerTile ? {...this._heroServerTile} : null;
+            const corrected = Math.hypot(this.playerChar.position.x-tx, this.playerChar.position.z-tz);
+            if (corrected > 25 || this._netMovePending || this._netMoveUnacked?.length) {
+                this._lastMovementReconcile={packet:'0x15',at:Date.now(),server:{x,y},previous,
+                    visualDelta:Math.round(corrected),unacked:this._netMoveUnacked?.length || 0,
+                    att:this.scene?.terrainWallAt?.(tx,tz) ?? null};
+                if (performance.now()-Number(this._lastMovementCorrectionLogAt||0)>1000) {
+                    this._lastMovementCorrectionLogAt=performance.now();
+                    console.warn('[MOVE DIAG] GS 0x15 corrigiu posição:',this._lastMovementReconcile);
+                }
+            }
+            this.playerChar.position.set(tx, ty, tz);
+            this._heroServerTile = { x, y };
+            this._netMovePending = null;
+            this._netMoveUnacked = [];
+        } else if (a.kind === 'monster' && a.monster) {
+            a.monster.serverTileX = x;
+            a.monster.serverTileY = y;
+            a.monster.position.set(tx, ty, tz);
+            a.root?.position?.copy?.(a.monster.position);
+        } else if (a.kind === 'player') {
+            this.playerViewport?.setPositionCorrection?.(key, x, y);
+        } else if (a.root?.position) {
+            a.root.position.set(tx, ty, tz);
+        }
+        return true;
+    }
+
+    _applyServerPkChange({ key, pk } = {}) {
+        const rawKey = Number(key);
+        if (!Number.isInteger(rawKey)) return false;
+        const serverKey = rawKey & 0x7FFF;
+        if (serverKey === this._heroServerKey && this.playerChar) {
+            this.playerChar.pk = pk;
+        } else {
+            const rp = this.playerViewport?.getByServerKey?.(serverKey);
+            if (!rp) return false;
+            rp.pk = pk;
+            if (rp.outer?.userData) rp.outer.userData.pk = pk;
+        }
+        this.pkSystem?.setPkLevel?.(serverKey, pk);
+        return true;
+    }
+
+    _applyServerViewportAction({ key, angle, action, targetKey } = {}) {
+        const a = this._resolveServerActor(key);
+        if (!a) return false;
+        const yaw = muDirectionToThreeYaw(angle);
+        if (a.kind === 'hero' && this.playerChar?.rotation) this.playerChar.rotation.y = yaw;
+        else {
+            if (a.kind === 'monster' && a.monster?.rotation) a.monster.rotation.y = yaw;
+            if (a.root?.rotation) a.root.rotation.y = yaw;
+        }
+        // Monster/NPC action stays owned by MonsterModel (including its exact
+        // source-derived PlaySpeed table); players keep the Player.bmd owner.
+        if (a.kind === 'monster' && a.monster?.setServerAction) {
+            a.monster.setServerAction(action);
+        } else {
+            // 0x18 is newer GS-owned action truth. Retire an earlier 0x19
+            // skill-clip idle callback so it cannot overwrite this action.
+            if (a.root?.userData) {
+                a.root.userData._serverSkillAnimToken = (a.root.userData._serverSkillAnimToken || 0) + 1;
+            }
+            a.renderer?.playAction?.(`action_${action}`);
+        }
+        if (a.root?.userData?.animationControl) a.root.userData.animationControl._current = `server:${action}`;
+        void targetKey;
+        return true;
+    }
+
+    _dispatchServerMagicEvent(kind, msg) {
+        if (this.state !== 'world' || this._playerViewportAdmission) {
+            // 0x12 publication is asynchronous on Web. A valid 0x19/0x1A/0x1E/0x1B
+            // immediately following 0x12 must not fail actor lookup merely because
+            // the Player.bmd actor has not reached the registry yet. Preserve the
+            // existing ordered magic stream until the admission barrier resolves.
+            this._pendingServerMagicEvents ||= [];
+            this._pendingServerMagicEvents.push({ kind, msg: { ...msg } });
+            return;
+        }
+        this._applyServerMagicEvent(kind, msg);
+    }
+
+    _applyServerMagicEvent(kind, msg) {
+        switch (kind) {
+            case 'magic': return this._handleServerMagic(msg);
+            case 'position': return this._handleServerMagicPosition(msg);
+            case 'continue': return this._handleServerMagicContinue(msg);
+            case 'finish': return this._handleServerMagicFinish(msg);
+            default: return undefined;
+        }
+    }
+
     _handleServerMagic({ magicNumber, sourceKey, targetKey, success }) {
         const source = this._resolveServerActor(sourceKey);
         const target = this._resolveServerActor(targetKey);
@@ -4431,6 +4847,13 @@ export class GameApp {
         if (source.kind !== 'hero' || magicNumber === AT_SKILL.VITALITY) {
             this._playServerSkillAnimation(source, magicNumber);
         }
+        // Main 5.2 ReceiveMagic owns HpRecovery immediately on the target for
+        // Vitality and all five master Life-Up ids. Presence is authoritative
+        // here; duration remains owned by a later 0x2D and removal by 0x1B.
+        const isLifeUp = Number.isInteger(magicNumber) && magicNumber >= AT_SKILL.LIFE_UP && magicNumber <= AT_SKILL.LIFE_UP + 4;
+        if (magicNumber === AT_SKILL.VITALITY || isLifeUp) {
+            target.buffContainer?.ensureServerBuffState?.(PC_BUFF_STATE.HP_RECOVERY, 'receive-magic');
+        }
         this._playServerSkillVfx(magicNumber, source, target, success);
     }
 
@@ -4442,8 +4865,19 @@ export class GameApp {
         // os TargetKey para shock/damage text. Ainda não há owner Web exato de
         // CreateMagicShiny, então anima a action real e deixa VFX fail-closed.
         if (source.renderer) {
-            const a = source.renderer.playAction?.(`action_${PLAYER_ACTIONS.SKILL_HELL}`, 0.06);
-            if (a) { a.loop = THREE.LoopOnce; a.clampWhenFinished = true; }
+            // 0x1A ReceiveMagicPosition selects PLAYER_SKILL_HELL in the PC.
+            // It is a newer server-owned action than a prior 0x19 skill clip.
+            // Retire only that prior Player.bmd completion callback, exactly
+            // as the existing 0x18 action consumer does. Otherwise the old
+            // clip may finish after 0x1A and force this newer action to idle.
+            // Monster/boss action ownership remains unchanged (no guessed FX).
+            const a = source.renderer.playAction?.(`action_${PLAYER_ACTIONS.SKILL_HELL}`, 0);
+            if (a) {
+                if ((source.kind === 'hero' || source.kind === 'player') && source.root?.userData) {
+                    source.root.userData._serverSkillAnimToken = (source.root.userData._serverSkillAnimToken || 0) + 1;
+                }
+                a.loop = THREE.LoopOnce; a.clampWhenFinished = true;
+            }
         }
         source.root?.userData && (source.root.userData.lastMagicPosition = { magicNumber, x, y, targetKeys: [...(targetKeys || [])] });
     }
@@ -4915,7 +5349,10 @@ export class GameApp {
         // autoritativo decide qual spec existe; nenhuma preferência local.
         const rider = this.scene._playerRider;
         const fenrir = this.scene._playerFenrir;
-        const safeZone = this.scene.mainObject?.userData?.muMovementContext?.safeZone;
+        const safeZone = () => {
+            const value = this.scene?.mainObject?.userData?.muMovementContext?.safeZone;
+            return typeof value === 'function' ? Boolean(value()) : Boolean(value);
+        };
         if (rider?.petModelPath && this.pets?.summonMount) {
             const mount = await this.pets.summonMount(this.playerChar, { ...rider, safeZone });
             if (announce && mount) this.chatInfo?.(`${rider.species} invocado (modelo real ${rider.petModelPath}).`);
@@ -5095,6 +5532,10 @@ export class GameApp {
                 // loading, so a missing tile left the player on the old visual map
                 // with every NPC/monster/drop already erased.
                 await this.mapManager.loadMap(worldDesc.serverMap);
+                // Retire the OLD map's 0x12/0x13 and dependent queued events
+                // before clearing registries and sending the new F3:12 ACK.
+                // This also fences in-flight 0x12/appearance awaits by epoch.
+                this._retireServerViewportForMapChange();
                 this._heroServerTile = null;
                 this.groundItemLayer?.clear?.();
                 this.groundItems.reset();
@@ -5188,6 +5629,15 @@ export class GameApp {
             console.warn(`[MU] 0x23 drop TX falhou slot=${inventoryIndex}:`, e.message);
             return false;
         }
+    }
+
+    _scheduleInventoryCompatibilitySync() {
+        if (this._inventoryCompatibilitySyncPending) return;
+        this._inventoryCompatibilitySyncPending = true;
+        queueMicrotask(() => {
+            this._inventoryCompatibilitySyncPending = false;
+            this._syncInventoryCacheFromMirror();
+        });
     }
 
     _syncInventoryCacheFromMirror() {
@@ -5470,7 +5920,6 @@ export class GameApp {
             this._updatePendingPcMovementSkill?.();
             if (this.scene.cameraMode === 'game') {
                 networkOwned=this._updateAuthoritativeMovement(dt);
-                this._updatePcOperateIntent();
                 if(!networkOwned)Movement.integrate(p, this.scene.camera.threeCamera, dt);
             }
             // Character.update owns only offline click-to-move integration. On a
@@ -5494,7 +5943,40 @@ export class GameApp {
             MuHelper?.update?.(dt);
             // Câmera orbital segue o herói (target = posição do playerChar)
             this.scene.camera.setTarget(p.position.x, p.position.y + 150, p.position.z);
+            // ITEMS/LUA FIX127: publish one immutable, scene-frame live clock
+            // BEFORE Scene.update, so remote viewport BMD owners sample the same
+            // WorldTime/GetDoubleRender frame as the hero. No synthetic clock.
+            // ITEMS/LUA FIX122: Main 5.2 LuaObject.cpp exact live owners for
+            // dynamic CharacterCreateCape RenderCapeModel. GameTimer.elapsed is
+            // the scene's monotonic render elapsed owner; Main WorldTime is ms.
+            // GetDoubleRender is evaluated from the SAME frame WorldTime sample.
+            // FIX126: the dynamic RenderCapeModel runner belongs to the separate
+            // wing/cape BMD accessory, not the Player.bmd hero renderer.
+            // Scene publishes those bone-parented owners in _playerExtras.
+            const worldTime=Math.fround(Number(elapsed)*1000.0);
+            const getDoubleRender=(a1,a2)=>{
+                    const A1=Math.fround(Number(a1)), A2=Math.fround(Number(a2));
+                    if (!Number.isFinite(A1) || !Number.isFinite(A2) || A1===0) {
+                        throw Error('GetDoubleRender requires finite non-zero a1 and finite a2');
+                    }
+                    const phaseBase=Math.fround(Math.fround(Math.fround(A2*Math.fround(0.01745))*Math.fround(1000.0))/A1);
+                    const phaseInt=(Math.trunc(Math.fround(phaseBase+worldTime))|0);
+                    const periodInt=(Math.trunc(Math.fround(Math.fround(6283.185546875)/A1))|0);
+                    if (periodInt===0) throw Error('GetDoubleRender period collapsed to zero');
+                    const init=Math.fround(Math.fround(phaseInt%periodInt)*Math.fround(0.001)*A1);
+                    const wave=init>=Math.fround(3.14) ? Math.cos(init) : -Math.cos(init);
+                    return Math.fround(Math.fround(wave+Math.fround(1.0))*Math.fround(0.5));
+            };
+            const capeLiveFrame=this.scene?.cameraMode==='game' && Number.isFinite(worldTime)
+                ? Object.freeze({worldTime,getDoubleRender}) : null;
+            this.scene._capeLiveFrame=capeLiveFrame;
             this.scene.update(dt, elapsed);
+            // ITEMS/LUA FIX135: every committed hero accessory owns its own BMD
+            // RenderCapeModel runner. The old .find() advanced only the first
+            // cape/wing, and evaluated it at 60 Hz even though its bones advance
+            // on the authored 40 ms visual cadence. The helper samples each
+            // live renderer at 25 Hz, without a second clock or GPU queue.
+            updatePcWorldHeroCapes(this.scene,capeLiveFrame);
             { const _r0 = performance.now(); this.scene.render(); _perfRenderMs += performance.now() - _r0; }
             // Efeitos 2/2 com update próprio (LevelUp flares, Death blood):
             // mesmo contrato do skillFx.update — remove quando update()==false.
@@ -5512,6 +5994,16 @@ export class GameApp {
         } else {
             this.scenes.update(dt);
             if (this.scene) this.scene.update(dt, 0); // câmera cinematográfica (tour)
+            // ITEMS/LUA FIX128: CharSelect has its own real BMD wing/cape
+            // renderers. Sample the existing GameTimer.elapsed only AFTER
+            // Scene.update advances the current preview bones and BodyLight.
+            // Do not leak a game-world cape frame into CharacterScene or run
+            // against an obsolete preview during asynchronous scene switches.
+            if (this.scene?.cameraMode==='char' && this.scenes?.currentName==='char-select' &&
+                this.charPreview?.gameScene===this.scene && !this.charPreview._disposed) {
+                const capeFrame=createPcCharacterCapeFrame(elapsed);
+                this.charPreview.updateDynamicCustomCapes(capeFrame);
+            }
             if (this.scene) { const _r0 = performance.now(); this.scene.render(); _perfRenderMs += performance.now() - _r0; }
         }
 

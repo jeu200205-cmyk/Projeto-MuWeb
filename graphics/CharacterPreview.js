@@ -43,6 +43,7 @@ import { MUModelRenderer } from '../assets/MUModelRenderer.js';
 import { MUAssets } from '../assets/MUAssetLoader.js';
 import { RemoteAssets } from '../data/RemoteAssets.js';
 import { MAP_SIZE } from '../world/TerrainWorld.js';
+import { updatePcCharacterPreviewCapes } from './PcCharacterCapeFrame.js';
 
 // Posições oficiais (CharacterList.lua SetCharacterPosition/ChangeCharacterView)
 const SEL_POS = [8590, 18785, 75];     // foreground (slot 0 / clicado)
@@ -64,7 +65,7 @@ function muToThree(v, out) {
 }
 
 // io do composeCharacter: esqueleto via MUAssets (render-data com bones/actions),
-// Player.bmd via MUAssets; peças base via fetchBinary + parseBMD bruto para remap ao esqueleto Player
+// peças via fetchBinary + parseBMD puro (PlayerComposer.js:92 contrato)
 const composerIO = {
     loadBMD: (p) => MUAssets.loadBMD(p),
     fetchBinary: (p) => RemoteAssets.fetchBinary(p),
@@ -317,7 +318,7 @@ export class CharacterPreview {
                         const previewOwner = { position: outer.position, mesh: outer, isAlive: () => true };
                         const mount = new MountCompanion(
                             previewOwner, this.gameScene.scene, previewMount.petModelPath, previewMount.option,
-                            { safeZone: () => false, species: previewMount.species, behaviorSpecies: previewMount.behaviorSpecies, presentation: previewMount.presentation || null, scale: previewMount.sizeCharList ?? previewMount.size },
+                            { safeZone: () => false },
                         );
                         await mount.init();
                         slot.mount = mount;
@@ -428,6 +429,12 @@ export class CharacterPreview {
         this._selectedSlot = 0;
         this._layout(0);
         return true;
+    }
+
+    // ITEMS/LUA FIX128: CharacterScene has separate BMD accessories, not
+    // GameScene._playerExtras. GameApp supplies the same live frame after pose.
+    updateDynamicCustomCapes(frame) {
+        return updatePcCharacterPreviewCapes(this,frame);
     }
 
     _regUpdate(slot) {

@@ -103,13 +103,145 @@
         }
 
         window.logDebug = logDebug;
+        // FIX149: diagnostic ring buffer; does not intercept packets or alter rendering.
+        const muDiagEntries = [];
+        const muDiagCounts = new Map();
+        const muDiagLimit = 1200;
+        const muDiagOriginal = {log:console.log.bind(console),info:console.info.bind(console),warn:console.warn.bind(console),error:console.error.bind(console)};
+        const muDiagString = value => {
+            if (value instanceof Error) return value.stack || value.message;
+            if (typeof value === 'string') return value;
+            try { return JSON.stringify(value); } catch { return String(value); }
+        };
+        function muDiagClassify(message, level) {
+            if (/\bslots is not defined\b|\bspatialClusters is not defined\b|_publishMapEntryProfile is not defined|World\d+.*FAIL|staged load FAIL/i.test(message)) return 'MAP_CRITICAL';
+            if (/fetch-null:|body-load-failed:|equipamento ausente|BMD.*(?:ausente|failed)/i.test(message)) return 'MODEL_MISSING';
+            if (/\[MOVE DIAG\]|prediction hard-timeout|MOVE R58/i.test(message)) return 'MOVEMENT_RECONCILE';
+            if (/\[ItemIcon\]|\[PERF ITEM_ICON\]|\[Inventory\]/i.test(message)) return 'INVENTORY_RENDER';
+            if (/OpenFolder|LuaAuthority|CharacterLuaFX|CustomCapeLua/i.test(message)) return 'LUA_OWNER';
+            if (/envelope inválido|ECONNRESET|join recusado|MU Protocol.*Erro/i.test(message)) return 'NETWORK_PROTOCOL';
+            if (/\[PERF|LOOP VIVO|FPS/i.test(message)) return 'PERFORMANCE';
+            if (/\[ASSET|Carregando|World\d+/i.test(message)) return 'LOADING';
+            return level === 'error' ? 'RUNTIME_ERROR' : level === 'warn' ? 'WARNING' : 'GENERAL';
+        }
+        function muDiagRecord(level, args) {
+            const msg = args.map(muDiagString).join(' ');
+            const category = muDiagClassify(msg,level);
+            const signature = category + ':' + msg.replace(/\d+(?:\.\d+)?ms/g,'<ms>').slice(0,200);
+            const count = (muDiagCounts.get(signature)||0)+1;
+            muDiagCounts.set(signature,count);
+            muDiagEntries.push({time:new Date().toISOString(),level,category,message:msg,repeat:count});
+            if (muDiagEntries.length>muDiagLimit) muDiagEntries.shift();
+        }
+        for (const level of ['log','info','warn','error']) {
+            console[level] = (...args) => {
+                try { muDiagRecord(level,args); } catch (_) { /* diagnostic never blocks game */ }
+                muDiagOriginal[level](...args);
+            };
+        }
+        window.MUWEB_DIAG = Object.freeze({
+            version:'FIX154',
+            summary:() => {
+                const category = {},severity={};
+                for (const e of muDiagEntries) {category[e.category]=(category[e.category]||0)+1;severity[e.level]=(severity[e.level]||0)+1;}
+                return {version:'FIX154',entries:muDiagEntries.length,category,severity,uniqueSignatures:muDiagCounts.size};
+            },
+            list:(category=null)=>muDiagEntries.filter(x=>!category||x.category===category).map(x=>({...x})),
+            movement:()=>{
+                const a=window.muApp;
+                return {
+                    serverTile:a?._heroServerTile || null,
+                    latestCorrection:a?._lastMovementReconcile || null,
+                    pending:a?._netMovePending ? {x:a._netMovePending.x,y:a._netMovePending.y,dir:a._netMovePending.dir,acked:a._netMovePending.acked} : null,
+                    unacked:a?._netMoveUnacked?.map(q=>({x:q.x,y:q.y,ageMs:Math.max(0,Math.round(performance.now()-q.sentAt))})) || [],
+                    rttMs:a?._netMoveRttEwmaMs || null,jitterMs:a?._netMoveJitterEwmaMs || null,
+                    inventoryPaint:a?._ui?.inventoryWin?._lastPaintCounts || null,
+                };
+            },
+            tile:(x,y)=>{
+                const ix=Number(x),iy=Number(y),scene=window.muApp?.scene;
+                if(!Number.isInteger(ix)||!Number.isInteger(iy)||ix<0||iy<0||ix>=256||iy>=256) return {valid:false,reason:'tile outside 0..255'};
+                if(!scene?.walls) return {valid:false,reason:'ATT real not loaded'};
+                const index=iy*256+ix,raw=Number(scene.walls[index]||0);
+                const worldX=(ix+0.5)*100-12800,worldZ=12800-(iy+0.5)*100;
+                return {valid:true,world:scene.mapIndex,tile:{x:ix,y:iy},flags:raw,
+                    NO_MOVE:!!(raw&4),NO_GROUND:!!(raw&8),HEIGHT:!!(raw&64),
+                    SAFE_ZONE:!!(raw&1),NO_ATTACK:!!(raw&256),
+                    walkable:scene.isWalkable?.(worldX,worldZ)===true,
+                    sampledHeight:scene.terrainHeightAt?.(worldX,worldZ)??null,
+                    vertexHeight:scene.heights?.[index]??null};
+            },
+            // Read-only author-height inspection: bridge structures retain their
+            // PC authored Z, not a synthetic terrain height. Report BOTH for
+            // physical comparison without moving any vertex/model in runtime.
+            viewportMissing:()=>window.muApp?.playerViewport?.missingEquipmentReport?.() || [],
+            viewportPose:()=>window.muApp?.playerViewport?.poseCullingReport?.() || null,
+            structures:()=>{
+                const scene=window.muApp?.scene;
+                const slots=scene?.worldObjectLayer?.instances || [];
+                return slots.filter(s=>s?.obj && (s.obj.serial===80||s.obj.serial===85)).map(s=>({
+                    object:s.obj.serial+1,sourceSerial:s.obj.serial,
+                    muPosition:{x:s.obj.x,y:s.obj.y,z:s.obj.z},
+                    authoredWorldY:s.outer?.position?.y??null,
+                    worldX:s.outer?.position?.x??null,
+                    worldZ:s.outer?.position?.z??null,
+                    terrainHeight:s.outer?.position&&scene?.terrainHeightAt?.(s.outer.position.x,s.outer.position.z),
+                    scale:s.obj.scale,
+                    angles:[s.obj.angleX,s.obj.angleY,s.obj.angleZ],
+                    renderer:!!s.renderer
+                }));
+            },
+            companions:async()=>{
+                const m=await import('./game/CompanionLoadQueue.js');
+                return {hero:window.muApp?.pets?.companionDiagnostics?.() || [], remoteQueue:m.remoteCompanionQueue.snapshot()};
+            },
+            modelCoverage:async()=>{
+                const m=await import('./data/ModelPortabilityAudit.js');
+                return m.auditModelCoverage();
+            },
+            iconPipeline:async()=>{
+                const m=await import('./ui2/ItemIconRenderer.js');
+                return m.iconPipelineDiagnostics();
+            },
+            report:()=>JSON.stringify({
+                timestamp:new Date().toISOString(),url:location.origin+location.pathname,
+                summary:window.MUWEB_DIAG.summary(),
+                runtime:{
+                    source:window.muApp?.constructor?.name||null,
+                    currentMap:window.muApp?.scene?.mapIndex??null,
+                    appState:window.muApp?.sceneManager?.currentName??null,
+                    movement:window.MUWEB_DIAG.movement(),
+                    bridges:window.MUWEB_DIAG.structures(),
+                    viewportMissing:window.MUWEB_DIAG.viewportMissing(),
+                    viewportPose:window.MUWEB_DIAG.viewportPose(),
+
+                },entries:muDiagEntries
+            },null,2),
+            download:async()=>{
+                // Keep the synchronous report useful in the console, while the
+                // downloadable snapshot additionally captures the icon queue.
+                const base=JSON.parse(window.MUWEB_DIAG.report());
+                try { base.runtime.iconPipeline=await window.MUWEB_DIAG.iconPipeline(); }
+                catch(e) { base.runtime.iconPipelineError=String(e?.message||e); }
+                try { base.runtime.companions=await window.MUWEB_DIAG.companions(); }
+                catch(e) { base.runtime.companionsError=String(e?.message||e); }
+                try { base.runtime.modelCoverage=await window.MUWEB_DIAG.modelCoverage(); }
+                catch(e) { base.runtime.modelCoverageError=String(e?.message||e); }
+                const blob=new Blob([JSON.stringify(base,null,2)],{type:'application/json'});
+                const url=URL.createObjectURL(blob); const a=document.createElement('a');
+                a.href=url;a.download='MUWEB_FIX154_diagnostic.json';a.click();
+                setTimeout(()=>URL.revokeObjectURL(url),1000);
+            }
+        });
+        muDiagOriginal.info('[MUWEB DIAG FIX154] Use MUWEB_DIAG.summary(), .movement(), .tile(x,y), .structures(), .viewportMissing(), .viewportPose(), .iconPipeline(), .companions(), .modelCoverage(), .download()');
+
 
         // Erros globais → console visível
         window.addEventListener('error', (e) => {
-            logDebug('error', e.message || e.type);
+            logDebug('error', (e.filename ? e.filename + ':' + e.lineno + ':' + e.colno + ' ' : '') + (e.error?.stack || e.message || e.type));
         });
         window.addEventListener('unhandledrejection', (e) => {
-            logDebug('error', 'Promise rejection: ' + (e.reason?.message || e.reason));
+            logDebug('error', 'Promise rejection: ' + (e.reason?.stack || e.reason?.message || e.reason));
         });
 
         // Bloqueia file://

@@ -87,7 +87,46 @@ export class MonsterManager {
     let created = 0;
     for (const e of list) {
       if (!e || !Number.isInteger(e.key) || !Number.isInteger(e.type)) continue;
-      if (this._serverByKey.has(e.key)) continue; // dedup: viewport re-envia
+      const existing = this._serverByKey.get(e.key);
+      if (existing) {
+        // 0x13 is a server-owned viewport snapshot, not just a request to
+        // allocate another BMD. A repeated key can carry newer PosX/PosY,
+        // Path direction and BuffCount. Retain the same physical actor while
+        // applying those decoded fields; otherwise a duplicate silently
+        // leaves the monster/boss at its old tile and facing.
+        // A different class/kind for the same live key cannot be reinterpreted
+        // as an appearance update without the PC replacement contract: leave
+        // the current actor untouched (0x14 still owns its deletion).
+        const kind = classifyViewportActor(e.type, {
+          viewportKind: e.viewportKind ?? 0,
+          customType: e.customType ?? customMonsterType(e.type),
+        });
+        if (existing.typeId !== e.type || existing.semanticKind !== kind) {
+          console.warn(`[MonsterManager] 0x13 key=${e.key} class/kind conflict; awaiting 0x14 before replacement`);
+          continue;
+        }
+        if (!Number.isInteger(e.x) || !Number.isInteger(e.y)) continue;
+        const x = (e.x + 0.5) * 100 - 12800;
+        const z = 12800 - (e.y + 0.5) * 100;
+        const yaw = muDirectionToThreeYaw(e.dir ?? ((e.path >> 4) & 7));
+        existing.serverTileX = e.x;
+        existing.serverTileY = e.y;
+        // Keep the remaining physical PCREATE_MONSTER fields on the SAME
+        // live identity. 0x13 carries them even when no visual/motion consumer
+        // can safely interpret their semantics yet (0x14 owns replacement).
+        if (Number.isInteger(e.targetX)) existing.serverTargetTileX = e.targetX;
+        if (Number.isInteger(e.targetY)) existing.serverTargetTileY = e.targetY;
+        if (typeof e.createFlag === 'boolean') existing.serverCreateFlag = e.createFlag;
+        if (typeof e.teleportFlag === 'boolean') existing.serverTeleportFlag = e.teleportFlag;
+        if (typeof e.myMob === 'boolean') existing.serverMyMob = e.myMob;
+        if (Number.isInteger(e.buildTime)) existing.serverBuildTime = e.buildTime;
+        existing.position.set(x, existing.position.y, z);
+        existing.rotation.y = yaw;
+        existing.buffs = Array.isArray(e.buffs) ? e.buffs.slice() : [];
+        existing.mesh?.position?.copy?.(existing.position);
+        existing.mesh?.rotation?.set?.(0, yaw, 0);
+        continue;
+      }
       try {
         const pos = new THREE.Vector3(
             (e.x + 0.5) * 100 - 12800,
@@ -97,6 +136,9 @@ export class MonsterManager {
         const semanticKind = classifyViewportActor(e.type, { viewportKind: e.viewportKind ?? 0, customType: e.customType ?? customMonsterType(e.type) });
         const m = new Monster(e.type, pos, {
           serverDriven: true, serverKey: e.key, serverTileX: e.x, serverTileY: e.y,
+          serverTargetTileX: e.targetX, serverTargetTileY: e.targetY,
+          serverCreateFlag: e.createFlag, serverTeleportFlag: e.teleportFlag,
+          serverMyMob: e.myMob, serverBuildTime: e.buildTime,
           semanticKind, viewportKind: e.viewportKind ?? 0, ownerKey: e.ownerKey ?? null, buffs: e.buffs || [],
         });
         // Use the same Main-5.2 direction -> Three yaw owner as hero and
@@ -128,6 +170,7 @@ export class MonsterManager {
       const idx = this.monsters.indexOf(m);
       if (idx >= 0) this.monsters.splice(idx, 1);
       if (this.scene) this.scene.remove(m.mesh);
+      m.dispose?.();
       this._serverByKey.delete(key);
       removed++;
     }
@@ -139,6 +182,7 @@ export class MonsterManager {
     this.monsters = this.monsters.filter((m) => {
       if (m.serverDriven) return true;
       if (this.scene) this.scene.remove(m.mesh);
+      m.dispose?.();
       return false;
     });
   }
@@ -262,7 +306,14 @@ export class MonsterManager {
   aliveCount() { return this.monsters.filter((m) => m.isAlive()).length; }
 
   clear() {
-    for (const m of this.monsters) if (this.scene) this.scene.remove(m.mesh);
+    // Map/world teardown is also a viewport lifetime boundary. 0x13 actors may
+    // still be awaiting their async BMD/NPC visual here; dispose every actor so
+    // Monster._initRealModel()'s lifetime fence rejects late completions instead
+    // of retaining a detached visual after the registry is cleared.
+    for (const m of this.monsters) {
+      if (this.scene) this.scene.remove(m.mesh);
+      m.dispose?.();
+    }
     this.monsters = [];
     if (this._serverByKey) this._serverByKey.clear();
     this._serverAssumed = false;

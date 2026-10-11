@@ -13,11 +13,16 @@
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { createRequire } from 'node:module';
 
 const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const OUT_DIR = path.join(ROOT, 'data', 'generated');
 
-const DATA_ROOT = path.join('C:/clientepromax/Nova pasta/MuPromax 1.0.1/Data');
+const require = createRequire(import.meta.url);
+const authority = require('./verify-data-authority-r90.cjs');
+const { RECORD_COUNT, recordIdentity } = require('./official-item-index-r90.cjs');
+// Never accept a different root, including direct generator invocations.
+authority.canonicalRoot();
 
 const XOR3_KEY = [0xfc, 0xcf, 0xab]; // chave clássica MU p/ BMD de Local/
 
@@ -36,12 +41,15 @@ function cstr(buf, off, max) {
 
 // ---------------------------------------------------------------- ITENS
 function parseItems() {
-  const file = path.join(DATA_ROOT, 'Local/Por/item_por.bmd');
+  const file = authority.validateOfficialSource('Local/Por/item_por.bmd');
   const { buf, rawLen } = readXor3(file);
   const REC = 84;
   // validação de magic/estrutura: (rawLen - 4) % 84 === 0 e nome[32] ASCII no primeiro registro
   if ((rawLen - 4) % REC !== 0) throw new Error('item_por.bmd: layout inesperado len=' + rawLen);
   const count = (rawLen - 4) / REC;
+  // Main 5.2: 16 categories x 512 slots. A truncated or oversized
+  // official table must fail instead of producing plausible wrong indices.
+  if (count !== RECORD_COUNT) throw new Error('item_por.bmd oficial incompleto: '+count+' registros; esperado '+RECORD_COUNT);
   const first = cstr(buf, 0, 32);
   if (first !== 'Kris') throw new Error('item_por.bmd: primeiro item != Kris (' + first + ')');
 
@@ -57,11 +65,10 @@ function parseItems() {
     if (!name) continue; // slot vazio
     const nameOk = /^[\x20-\x7e\u00c0-\u00ff .,'+éÉáÁãÃçÇõÕíÍóÓúÚâÂêÊôÔüÜ()\-]+$/.test(name);
     if (!nameOk) continue; // lixo → slot inválido
+    const identity = recordIdentity(i);
     items.push({
-      index: i,                 // índice linear MU (category*16 + slot)
-      category: i >> 4,
-      slot: i & 15,
-      kind: SECTIONS[i >> 4] || 'misc',
+      ...identity,             // linear index = category * 512 + slot
+      kind: SECTIONS[identity.category],
       name,
       // NB: campos de stats dentro do struct84 não foram confirmados com segurança
       // (este cliente usa layout custom) — omitidos para não inventar dados.
@@ -72,7 +79,7 @@ function parseItems() {
 
 // ---------------------------------------------------------------- MONSTROS/NPCs
 function parseMonsters() {
-  const file = path.join(DATA_ROOT, 'Local/Por/Npcname_por.txt');
+  const file = authority.validateOfficialSource('Local/Por/Npcname_por.txt');
   const text = fs.readFileSync(file, 'latin1');
   const re = /^(\d{1,3})\s+\d+\s+"(.+)"\s*$/gm;
   const out = [];
@@ -85,7 +92,7 @@ function parseMonsters() {
 
 // ---------------------------------------------------------------- MAPAS
 function parseMaps() {
-  const file = path.join(DATA_ROOT, 'Local/Por/movereq_por.bmd');
+  const file = authority.validateOfficialSource('Local/Por/movereq_por.bmd');
   const raw = fs.readFileSync(file);
   const count = raw.readUInt32LE(0); // contador em plano (não-XOR)
   const { buf } = readXor3(file, 4); // corpo XOR3
@@ -117,24 +124,15 @@ const HEADER = (src) => `// GERADO AUTOMATICAMENTE por tools/generateRealData.mj
 
 fs.mkdirSync(OUT_DIR, { recursive: true });
 
-const report = { items: 0, monsters: 0, maps: 0, errors: [] };
-
-try {
-  const items = parseItems();
-  writeModule('RealItems.js', 'REAL_ITEMS', items, HEADER('Data/Local/Por/item_por.bmd (XOR3 FC CF AB)'));
-  report.items = items.length;
-} catch (e) { report.errors.push('items: ' + e.message); }
-
-try {
-  const monsters = parseMonsters();
-  writeModule('RealMonsters.js', 'REAL_MONSTERS', monsters, HEADER('Data/Local/Por/Npcname_por.txt (texto plano)'));
-  report.monsters = monsters.length;
-} catch (e) { report.errors.push('monsters: ' + e.message); }
-
-try {
-  const maps = parseMaps();
-  writeModule('RealMaps.js', 'REAL_MAPS', maps, HEADER('Data/Local/Por/movereq_por.bmd (count plano + XOR3)'));
-  report.maps = maps.length;
-} catch (e) { report.errors.push('maps: ' + e.message); }
-
-console.log(JSON.stringify(report, null, 1));
+// Parse and validate ALL official sources before writing any generated table.
+// The orchestrator snapshots/restores outputs if a later filesystem write fails.
+const items = parseItems();
+const monsters = parseMonsters();
+const maps = parseMaps();
+if (!items.length || !monsters.length || !maps.length) {
+  throw new Error('Data oficial incompleto: items/monsters/maps vazios; nenhuma tabela escrita.');
+}
+writeModule('RealItems.js', 'REAL_ITEMS', items, HEADER('Data/Local/Por/item_por.bmd (XOR3 FC CF AB)'));
+writeModule('RealMonsters.js', 'REAL_MONSTERS', monsters, HEADER('Data/Local/Por/Npcname_por.txt (texto plano)'));
+writeModule('RealMaps.js', 'REAL_MAPS', maps, HEADER('Data/Local/Por/movereq_por.bmd (count plano + XOR3)'));
+console.log(JSON.stringify({items:items.length,monsters:monsters.length,maps:maps.length,errors:[]},null,1));

@@ -25,7 +25,7 @@
 
 import * as THREE from 'three';
 import { muDirectionToThreeYaw } from './MUDirection.js';
-import { composeCharacter, buildEquipmentAttach, buildAccessoryRenderer, buildLinkedWeaponRenderer, buildAnimationControl, setLinkedWeaponSafeZonePresentation, mergeEquipmentBodyRenderData, applyBodyEquipmentPresentation, pcCharacterScale, getPcTextureSkinIndex, playerVisualLoadIssues, unresolvedClassParts, characterEquipmentVisualSignature } from '../graphics/PlayerComposer.js';
+import { composeCharacter, buildEquipmentAttach, buildAccessoryRenderer, buildLinkedWeaponRenderer, buildAnimationControl, setLinkedWeaponSafeZonePresentation, mergeEquipmentBodyRenderData, applyBodyEquipmentPresentation, pcCharacterScale, getPcTextureSkinIndex, playerVisualLoadIssues, unresolvedClassParts } from '../graphics/PlayerComposer.js';
 import { attachCapeCloth } from '../graphics/PcCapeCloth.js';
 import { applyMuUpAxis } from '../graphics/BmdAdapter.js';
 import { MUModelRenderer } from '../assets/MUModelRenderer.js';
@@ -36,6 +36,7 @@ import { BuffContainer } from './BuffSystem.js';
 import { Movement } from './Movement.js';
 import { pcWorldActiveFromAssetWorld, pcInBloodCastle, pcInChaosCastle, pcInSwimLocomotionWorld } from './PcMapContext.js';
 import { HelperCompanion, Pet, MountCompanion } from './PetSystem.js';
+import { remoteCompanionQueue } from './CompanionLoadQueue.js';
 import { resolveCustomPreviewElements } from '../data/CustomPreviewElements.js';
 
 
@@ -173,6 +174,17 @@ export class PlayerViewportManager {
         this._appearanceVersions = new Map();
         this._desiredAppearance = new Map();
         this._disposed = false;
+        this._missingEquipmentSignatures = new Map();
+    }
+
+    poseCullingReport() {
+        return { updated:this._poseBmdUpdated||0, skipped:this._poseBmdSkipped||0, retainedActors:this.byKey.size };
+    }
+
+    missingEquipmentReport() {
+        return [...this._missingEquipmentSignatures.entries()].map(([signature, row]) => ({
+            signature,count:row.count,examples:row.examples.slice(),firstAt:row.firstAt,lastAt:row.lastAt
+        }));
     }
 
     /** Verifica se a entrada já está enxergando o nosso herói (não re-spawn) */
@@ -185,14 +197,32 @@ export class PlayerViewportManager {
      * Spawna/atualiza players NÃO-herói do 0x12. Returns created count.
      * Entry: {key, id, classByte, equipment, x, y, dir | path}
      */
-    async spawnFromServer(list, heroName = null) {
+    async spawnFromServer(list, heroName = null, { acceptEntry = null } = {}) {
         const epoch = this._viewportEpoch;
         if (this._disposed) return { created:0, updated:0 };
         if (!Array.isArray(list) || list.length === 0) return { created: 0, updated: 0 };
         let created = 0, updated = 0;
+        // FIX154: network/IO for dozens of remote BMD models used to run
+        // sequentially, delaying the world join by the sum of all waits.
+        // A bounded pair prepares independent keys concurrently. If a packet
+        // repeats a key, the final snapshot for that SAME packet is authority.
+        // The outer GameApp admission barrier still serializes packet order,
+        // and each actor is fenced by epoch and 0x14 key-generation.
+        const byKeyInPacket = new Map();
         for (const e of list) {
+            if (e && Number.isInteger(e.key)) byKeyInPacket.set(e.key,e);
+        }
+        const uniqueEntries = [...byKeyInPacket.values()];
+        let cursor = 0;
+        const consume = async () => {
+          while (cursor < uniqueEntries.length) {
+            const e = uniqueEntries[cursor++];
             if (epoch !== this._viewportEpoch || this._disposed) break;
             if (!e || !Number.isInteger(e.key)) continue;
+            // A single 0x12 batch may await BMD for an earlier actor while a
+            // later actor in that SAME batch is deleted by 0x14. Recheck the
+            // wire-time generation immediately before each actor starts.
+            if (typeof acceptEntry === 'function' && !acceptEntry(e)) continue;
             if (this.isHeroEntry(e, heroName)) continue;
 
             const existing = this.byKey.get(e.key);
@@ -204,6 +234,11 @@ export class PlayerViewportManager {
                 const nz = 12800 - (e.y + 0.5) * 100;
                 existing.outer.position.set(nx, existing.outer.position.y, nz);
                 if (this.scene.terrainHeightAt) existing.outer.position.y = this.scene.terrainHeightAt(nx, nz);
+                // A fresh GS 0x12 position replaces any in-flight D4 visual
+                // destination. Otherwise the next render tick drags the actor
+                // back toward a superseded tile after the authoritative snap.
+                existing.moveTarget = null;
+                if (existing.motionChar) existing.motionChar._muRunProgress = 0;
                 existing.outer.rotation.y = muDirectionToThreeYaw(e.dir ?? ((e.path >> 4) & 7));
                 existing.buffContainer?.setServerBuffSnapshot?.(e.buffs || []);
                 existing.serverBuffSnapshot = Array.from(e.buffs || []);
@@ -228,7 +263,9 @@ export class PlayerViewportManager {
             } catch (err) {
                 console.error(`[PlayerViewport] spawn de ${e?.id ?? 'desconhecido'} (key=${e?.key}) FALHOU: ${err.message}`);
             }
-        }
+          }
+        };
+        await Promise.all(Array.from({length:Math.min(2,uniqueEntries.length)},()=>consume()));
         return { created, updated };
     }
 
@@ -259,6 +296,7 @@ export class PlayerViewportManager {
         this._equipmentJobs.clear();
         this._desiredAppearance.clear();
         this._pendingAppearanceChanges.clear();
+        this._missingEquipmentSignatures.clear();
         return this.removeByServerKeys([...this.byKey.keys()].map((key) => ({ key })));
     }
 
@@ -280,6 +318,11 @@ export class PlayerViewportManager {
         const wz = 12800 - (y + 0.5) * 100;
         const wy = this.scene?.terrainHeightAt?.(wx, wz) ?? entry.outer.position.y;
         entry.moveTarget = { x: wx, y: wy, z: wz, tileX: x, tileY: y, dir: dir & 7 };
+        // D4 already owns the destination tile. Keep the same authoritative
+        // tile in the actor snapshot used by later F3:13/0x25 BMD rebuilds.
+        entry.serverTileX = x;
+        entry.serverTileY = y;
+        entry.serverDir = dir & 7;
         entry.outer.rotation.y = muDirectionToThreeYaw(dir);
         return true;
     }
@@ -293,10 +336,55 @@ export class PlayerViewportManager {
         const wz = 12800 - (y + 0.5) * 100;
         const wy = this.scene?.terrainHeightAt?.(wx, wz) ?? entry.outer.position.y;
         entry.moveTarget = null;
+        // 0x15 is a newer GS-owned correction, not just a renderer snap.
+        // Retain its tile for subsequent equipment/preview reconstruction.
+        entry.serverTileX = x;
+        entry.serverTileY = y;
         entry.outer.position.set(wx, wy, wz);
         entry.motionChar._muRunProgress = 0;
-        entry.outer.userData.animationControl?.play?.('idle');
+        // 0x15 is a position-only GS correction, not an action packet.
+        // The next frame already resolves locomotion idle after a stopped D4;
+        // forcing idle here would interrupt a concurrent 0x19/0x1A Player.bmd
+        // LoopOnce before its authored animation reaches completion.
         return true;
+    }
+
+    /** FIX154 remote physical companions use the same CharSet owner after
+     * normal AND staged appearance publication. Non-publication never starts a
+     * companion; stale loads are discarded before modifying the live scene. */
+    _queueStockCompanions(entry, attach = entry?.equipment) {
+        if (!entry || entry.disposed || this._disposed) return;
+        const outer = entry.outer;
+        const key = entry.key;
+        const epoch = this._viewportEpoch;
+        const remoteOwner = {position:outer.position,mesh:outer,isAlive:()=>!entry.disposed};
+        const safeZone = () => Boolean(this.scene?.terrainWallAt?.(outer.position.x,outer.position.z)&1);
+        const stockCompanionSpecs=[];
+        if (attach?.darkSpirit?.petModelPath) stockCompanionSpecs.push({
+            kind:'dark-spirit',path:attach.darkSpirit.petModelPath,
+            make:()=>new Pet(remoteOwner,this.scene.scene,attach.darkSpirit.petModelPath) });
+        if (attach?.helperKind==='helper' && !attach?.customHelper) stockCompanionSpecs.push({
+            kind:'helper',path:'Player/Helper01.bmd',
+            make:()=>new HelperCompanion(remoteOwner,this.scene.scene,1.0,
+                {petModelPath:'Player/Helper01.bmd'}) });
+        const mountSpec = attach?.rider?.petModelPath ? attach.rider : attach?.fenrir;
+        if (mountSpec?.petModelPath) stockCompanionSpecs.push({
+            kind:'mount',path:mountSpec.petModelPath,
+            make:()=>new MountCompanion(remoteOwner,this.scene.scene,
+                mountSpec.petModelPath,mountSpec.option??0,{safeZone}) });
+        const valid=()=>!entry.disposed&&!this._disposed&&this._viewportEpoch===epoch&&
+            this.byKey.get(key)===entry;
+        for (const spec of stockCompanionSpecs) {
+            void remoteCompanionQueue.schedule(async()=>{
+                const c=spec.make();
+                try {await c.init();return c;}
+                catch(err){c.dispose?.();throw err;}
+            },valid).then(c=>{
+                if (!c) return;
+                if (!valid()) {c.dispose?.();return;}
+                entry.additionalCompanions.push(c);
+            });
+        }
     }
 
     _disposeEntry(entry) {
@@ -319,7 +407,7 @@ export class PlayerViewportManager {
         try { entry.renderer?.dispose?.(); } catch (_ignore) { /* noop */ }
         for (const wr of entry.extras || []) { try { wr.dispose?.(); } catch (_ignore) { /* noop */ } }
         try { entry.customHelperCompanion?.dispose?.(); } catch (_ignore) { /* noop */ }
-        try { entry.mountCompanion?.dispose?.(); } catch (_ignore) { /* noop */ }
+        for (const c of entry.additionalCompanions || []) { try { c?.dispose?.(); } catch (_) { /* noop */ } }
         try { entry.elementCompanions?.first?.dispose?.(); } catch (_ignore) { /* noop */ }
         try { entry.elementCompanions?.second?.dispose?.(); } catch (_ignore) { /* noop */ }
     }
@@ -355,15 +443,6 @@ export class PlayerViewportManager {
                 Number(requestedPreview?.element?.[1] || 0) !== Number(old.customPreview?.element?.[1] || 0)
             );
             if (!meta.forcePreview && !previewChanged && sig === old.appearanceSignature && playerVisualLoadIssues(old.renderer, old.extras, old.equipment).length === 0) return false;
-            // FIX87: remote F3:13/0x25 may churn wire option bytes that do not
-            // change any resolved BMD/material/helper/wing owner.  With many
-            // players this used to rebuild a complete Player graph per packet.
-            const nextVisualSignature = characterEquipmentVisualSignature([Number(classByte)&0xFF, ...eq], requestedPreview);
-            if (!meta.forcePreview && !previewChanged && nextVisualSignature && nextVisualSignature === old.visualSignature &&
-                playerVisualLoadIssues(old.renderer, old.extras, old.equipment).length === 0) {
-                old.classByte=Number(classByte)&0xFF; old.equipmentBytes=eq.slice(); old.appearanceSignature=sig;
-                return false;
-            }
             const spawnSpec = {
                 key, id: old.id, classByte: Number(classByte) & 0xFF, equipment: eq,
                 x: Number.isInteger(old.serverTileX) ? old.serverTileX : Math.max(0, Math.min(255, Math.floor((old.outer.position.x + 12800) / 100))),
@@ -381,6 +460,16 @@ export class PlayerViewportManager {
                 console.warn(`[PlayerViewport] appearance incomplete key=${key}; graph anterior preservado: ${issues.join(', ')}`);
                 return false;
             }
+            // F3:13/0x25 appearance IO is asynchronous. D4, 0x15 and 0x12
+            // can update the still-published actor while its replacement BMD
+            // loads. Transfer the newest GS-owned snapshot at the commit
+            // boundary, not the pre-await spawnSpec; visual rebuilding must
+            // never rewind authoritative position, facing or buff states.
+            fresh.serverTileX = old.serverTileX;
+            fresh.serverTileY = old.serverTileY;
+            fresh.serverDir = old.serverDir;
+            fresh.serverBuffSnapshot = Array.from(old.serverBuffSnapshot || []);
+            fresh.buffContainer?.setServerBuffSnapshot?.(fresh.serverBuffSnapshot);
             fresh.outer.position.copy(old.outer.position);
             fresh.outer.rotation.copy(old.outer.rotation);
             fresh.moveTarget = old.moveTarget ? { ...old.moveTarget } : null;
@@ -388,6 +477,7 @@ export class PlayerViewportManager {
             fresh.customPreview = requestedPreview;
             this.scene.addObject(fresh.outer);
             this.byKey.set(key, fresh);
+            this._queueStockCompanions(fresh, fresh.equipment);
             this._disposeEntry(old);
             console.info(`[PlayerViewport] appearance rebuild key=${key} source=${meta.source || 'snapshot'} class=0x${(Number(classByte)&0xFF).toString(16)}`);
             return true;
@@ -494,7 +584,19 @@ export class PlayerViewportManager {
         if (charset) {
             attach = await buildEquipmentAttach(charset, this.io, renderData.bones, renderData.bones.length, { customPreview: e.customPreview || null, classId });
             if (attach.missing.length || attach.bodyMissing?.length) {
-                console.info(`[PlayerViewport] ${e.id} equipamento ausente (fail-closed): ${JSON.stringify({ attachments:attach.missing, body:attach.bodyMissing || [] })}`);
+                // Hundreds of server bots can wear the same unavailable set.
+                // Keep full physical paths and per-key counts in the diagnostic,
+                // rather than printing one expensive JSON stack for each actor.
+                const missing={attachments:attach.missing,body:attach.bodyMissing||[]};
+                const signature=JSON.stringify(missing);
+                const reports=this._missingEquipmentSignatures;
+                const report=reports.get(signature)||{count:0,examples:[],firstAt:Date.now(),lastAt:Date.now()};
+                report.count++;report.lastAt=Date.now();
+                if(report.examples.length<16)report.examples.push({key:e.key,id:e.id});
+                reports.set(signature,report);
+                if(report.count===1 || report.count%25===0) {
+                    console.warn(`[PlayerViewport] equipamento ausente (fail-closed) group=${report.count}, example=${e.id}: ${signature}`);
+                }
             }
             renderData = mergeEquipmentBodyRenderData(renderData, attach);
             if (attach.weaponRenderMode !== 'render-link-object' && attach.meshes.length) {
@@ -590,23 +692,6 @@ export class PlayerViewportManager {
             }
         }
 
-        // FIX95: stock/custom rider lane is a physical CreateBug companion for
-        // remote players too. Previously only the local hero/character-select built it.
-        let mountCompanion = null;
-        const mountSpec = attach?.rider?.petModelPath ? attach.rider : attach?.fenrir?.petModelPath ? attach.fenrir : null;
-        if (mountSpec?.petModelPath) {
-            try {
-                const mountOwner = { position: outer.position, mesh: outer, isAlive: () => !mountCompanion?.disposed };
-                mountCompanion = new MountCompanion(mountOwner, this.scene.scene, mountSpec.petModelPath, mountSpec.option, {
-                    safeZone: () => Boolean(this.scene?.terrainWallAt?.(outer.position.x, outer.position.z) & 0x0001),
-                    terrainHeightAt: (x,z) => this.scene?.terrainHeightAt?.(x,z), species: mountSpec.species,
-                    behaviorSpecies: mountSpec.behaviorSpecies, presentation: mountSpec.presentation || null,
-                    scale: mountSpec.size,
-                });
-                await mountCompanion.init();
-            } catch (err) { mountCompanion?.dispose?.(); mountCompanion=null; console.warn(`[PlayerViewport] mount ${e.id} falhou (fail-closed): ${err?.message || err}`); }
-        }
-
         // FIX53: F3:72 Element[0]/Element[1] are physical companions in
         // ZzzCharacter.cpp, independent of PetIndex. Resolve only through the
         // real DarkSpirit.lua / CharacterHelper.lua registries.
@@ -615,13 +700,10 @@ export class PlayerViewportManager {
         const elementOwner = { position: outer.position, rotation: outer.rotation, isAlive: () => true, safeZone: () => Boolean(this.scene?.terrainWallAt?.(outer.position.x, outer.position.z) & 0x0001) };
         try {
             if (elementSpec.first?.kind === 'dark-spirit') {
-                elementCompanions.first = new Pet(elementOwner, this.scene.scene, elementSpec.first.petModelPath, elementSpec.first.presentation || elementSpec.first);
+                elementCompanions.first = new Pet(elementOwner, this.scene.scene, elementSpec.first.petModelPath);
                 await elementCompanions.first.init();
             } else if (elementSpec.first?.kind === 'helper') {
                 elementCompanions.first = new HelperCompanion(elementOwner, this.scene.scene, 1.0, elementSpec.first);
-                await elementCompanions.first.init();
-            } else if (elementSpec.first?.kind === 'mount') {
-                elementCompanions.first = new MountCompanion({...elementOwner,mesh:outer},this.scene.scene,elementSpec.first.petModelPath,0,{safeZone:elementOwner.safeZone,terrainHeightAt:(x,z)=>this.scene?.terrainHeightAt?.(x,z),species:elementSpec.first.species,behaviorSpecies:elementSpec.first.behaviorSpecies,presentation:elementSpec.first.presentation,scale:elementSpec.first.size});
                 await elementCompanions.first.init();
             }
         } catch (err) {
@@ -631,9 +713,6 @@ export class PlayerViewportManager {
         try {
             if (elementSpec.second?.kind === 'helper') {
                 elementCompanions.second = new HelperCompanion(elementOwner, this.scene.scene, 1.0, elementSpec.second);
-                await elementCompanions.second.init();
-            } else if (elementSpec.second?.kind === 'mount') {
-                elementCompanions.second = new MountCompanion({...elementOwner,mesh:outer},this.scene.scene,elementSpec.second.petModelPath,0,{safeZone:elementOwner.safeZone,terrainHeightAt:(x,z)=>this.scene?.terrainHeightAt?.(x,z),species:elementSpec.second.species,behaviorSpecies:elementSpec.second.behaviorSpecies,presentation:elementSpec.second.presentation,scale:elementSpec.second.size});
                 await elementCompanions.second.init();
             }
         } catch (err) {
@@ -668,14 +747,19 @@ export class PlayerViewportManager {
         const entry = {
             renderer, outer, extras, t: 0, poseAccumulator: 0, id: e.id, key: e.key, classId,
             classByte, equipmentBytes, appearanceSignature: equipmentSignature(classByte, equipmentBytes),
-            visualSignature: characterEquipmentVisualSignature([classByte, ...equipmentBytes], e.customPreview || null),
             serverTileX: e.x, serverTileY: e.y, serverDir: e.dir ?? ((e.path >> 4) & 7),
             serverBuffSnapshot: Array.from(e.buffs || []),
             customPreview: e.customPreview || null,
-            weaponRightSpec: attach?.weaponRightSpec || null, equipment: attach, customHelperCompanion, mountCompanion, elementCompanions,
+            weaponRightSpec: attach?.weaponRightSpec || null, equipment: attach, customHelperCompanion, elementCompanions, additionalCompanions:[],
             moveTarget: null,
             motionChar: { classId, _muRunProgress: 0, mesh: outer },
             bodyLightColor: new THREE.Color(1, 1, 1),
+            // Conservative 24-tile visibility margin: the scene's existing
+            // camera frustum decides whether a remote skeleton can affect the
+            // next frame. This Sphere references the live GS-interpolated
+            // position; no per-frame box/Vector allocations.
+            poseCullSphere: new THREE.Sphere(outer.position, 2400),
+            deferredPoseSeconds: 0,
         };
         // Remote player recebe o mesmo namespace srv_<eBuffState> do herói.
         // O viewport traz somente os estados presentes; não inventamos duração/stats.
@@ -686,6 +770,7 @@ export class PlayerViewportManager {
         if (initialBodyLight) {
             renderer.setBodyLight(initialBodyLight);
             for (const wr of extras) wr?.setBodyLight?.(initialBodyLight);
+            entry.lastBodyLightRGB = { r:initialBodyLight.r,g:initialBodyLight.g,b:initialBodyLight.b };
         }
         outer.userData.update = (dt) => {
             // Movement still caps a single presentation step to the authored 40 ms,
@@ -711,16 +796,35 @@ export class PlayerViewportManager {
                     outer.userData.animationControl?.play?.(locomotion.running ? 'run' : 'walk');
                 }
             } else {
-                // Re-evaluate SafeZone even while standing still so hand/back
-                // presentation cannot stay latched after a correction/teleport.
-                outer.userData.animationControl?.play?.('idle');
+                // A remote 0x19/0x1A player skill uses a real Player.bmd
+                // one-shot (LoopOnce). Reasserting locomotion idle every render
+                // frame used to replace that clip before the 25 Hz BMD clock
+                // could finish it. The physical mixer owns completion; do not
+                // invent a timer or block D4 movement (handled above).
+                const active = renderer.currentAction;
+                const bmdOneShotRunning = active?.loop === THREE.LoopOnce &&
+                    active.enabled !== false && active._finished !== true;
+                if (!bmdOneShotRunning) {
+                    // Still evaluate SafeZone via the existing locomotion owner
+                    // once the BMD clip completes or no one-shot is active.
+                    outer.userData.animationControl?.play?.('idle');
+                }
             }
             // BodyLight is position-dependent and must follow interpolation, not
             // only equipment rebuilds. PC samples it every Calc_RenderObject.
             const bodyLight = this.scene?.terrainLightAt?.(outer.position.x, outer.position.z, entry.bodyLightColor);
             if (bodyLight) {
-                renderer.setBodyLight(bodyLight);
-                for (const wr of extras) wr?.setBodyLight?.(bodyLight);
+                // Rendering a large server viewport must not rewrite every
+                // material uniform on every 60Hz tick when the authoritative
+                // terrain light RGB is byte-for-byte unchanged. Dynamic
+                // lights still propagate immediately on the next frame.
+                const previous=entry.lastBodyLightRGB;
+                if (!previous || previous.r !== bodyLight.r || previous.g !== bodyLight.g || previous.b !== bodyLight.b) {
+                    renderer.setBodyLight(bodyLight);
+                    for (const wr of extras) wr?.setBodyLight?.(bodyLight);
+                    if (previous) { previous.r=bodyLight.r;previous.g=bodyLight.g;previous.b=bodyLight.b; }
+                    else entry.lastBodyLightRGB={r:bodyLight.r,g:bodyLight.g,b:bodyLight.b};
+                }
             }
 
             // PC BMD authoring is 25 Hz. Keep network/world interpolation on
@@ -732,19 +836,78 @@ export class PlayerViewportManager {
             // 40 ms every ~50 ms (20 Hz effective), which visibly "kicked" remote
             // characters and also made their BMD animation run ~20% slow. Preserve
             // the authored 25 Hz BMD tick while keeping wall-clock animation time.
+            // FIX153: heavy Player.bmd material/skeleton updates were running
+            // on hundreds of actors outside the WebGL camera. The exact same
+            // frustum used by terrain placement culling is already current
+            // when GameScene invokes its object callbacks. A generous 2400u
+            // sphere ensures large authored wings/glows are not frozen near
+            // the edge. Without a trustworthy frustum, fail open (animate).
+            const viewFrustum=this.scene?.worldObjectLayer?._viewFrustum;
+            const poseVisible=!viewFrustum || viewFrustum.intersectsSphere(entry.poseCullSphere);
+            // FIX154: skipping bone updates is not enough when a BMD mesh has
+            // overlarge skinned bounds: Three may still submit hidden remote
+            // players to WebGL. The same generous 2400u frustum controls the
+            // full REMOTE actor root, not any server/gameplay state.
+            if (viewFrustum) outer.visible = poseVisible;
             entry.poseAccumulator += frameDt;
             let poseSteps = 0;
             while (entry.poseAccumulator >= 0.04 - 1e-6 && poseSteps < 3) {
                 const poseDt = 0.04;
                 entry.poseAccumulator = Math.max(0, entry.poseAccumulator - poseDt);
                 entry.t += poseDt;
-                renderer.update(poseDt, entry.t);
-                for (const wr of extras) wr.update(poseDt, entry.t);
+                if (poseVisible) {
+                    // THREE AnimationMixer accepts accumulated delta, so
+                    // re-entry resumes the authored phase without replaying
+                    // hundreds of invisible 40ms GPU/material updates.
+                    const advance=poseDt+entry.deferredPoseSeconds;
+                    entry.deferredPoseSeconds=0;
+                    renderer.update(advance, entry.t);
+                    for (const wr of extras) wr.update(advance, entry.t);
+                    this._poseBmdUpdated=(this._poseBmdUpdated||0)+1;
+                } else {
+                    entry.deferredPoseSeconds+=poseDt;
+                    this._poseBmdSkipped=(this._poseBmdSkipped||0)+1;
+                }
+                // Companion simulation/position remains live and server-owned;
+                // only offscreen rigid/skinned BMD presentation is skipped.
                 customHelperCompanion?.update?.(poseDt);
-                mountCompanion?.update?.(poseDt, renderer);
                 elementCompanions.first?.update?.(poseDt, []);
                 elementCompanions.second?.update?.(poseDt);
+                // FIX154: stock companions (dark raven/fenrir/riders/Dark Horse)
+                // use the exact same MoveBug/Pet BMD renderer as the hero.
+                for (const companion of entry.additionalCompanions || []) {
+                    if (poseVisible) {
+                        if (companion instanceof Pet) companion.update(poseDt, []); // GS owns damage
+                        else companion.update(poseDt, null);
+                        this._companionBmdUpdated=(this._companionBmdUpdated||0)+1;
+                    } else {
+                        // Physical mount remains tied to the server-interpolated
+                        // owner while its off-camera skinning/mixer is paused.
+                        // Do not compute 25Hz bone matrices for unseen riders.
+                        if (companion instanceof MountCompanion && companion.root)
+                            companion.root.position.copy(outer.position);
+                        this._companionBmdSkipped=(this._companionBmdSkipped||0)+1;
+                    }
+                }
                 poseSteps++;
+            }
+            // ITEMS/LUA FIX127: remote capes use the exact same live Main 5.2
+            // WorldTime/GetDoubleRender frame as the hero. Only the published
+            // viewport actor may dispatch, and only after an authored 40 ms
+            // skeletal pose step; this avoids 60 Hz Lua rebuilds for crowds.
+            // The cape BMD (not Player.bmd) owns its dynamic Lua GPU runner.
+            const capeFrame=this.scene?._capeLiveFrame;
+            if (poseSteps && !entry.disposed && this.byKey.get(entry.key)===entry &&
+                Number.isFinite(capeFrame?.worldTime) && typeof capeFrame?.getDoubleRender==='function') {
+                for (const wr of entry.extras || []) {
+                    if (wr?._disposed || typeof wr?.updateDynamicCustomCape!=='function') continue;
+                    try {
+                        void wr.updateDynamicCustomCape(capeFrame).catch(e=>
+                            console.warn(`[CustomCape] remote key=${entry.key} exact-owner update failed closed:`,e?.message||e));
+                    } catch (e) {
+                        console.warn(`[CustomCape] remote key=${entry.key} exact-owner dispatch failed closed:`,e?.message||e);
+                    }
+                }
             }
         };
         if (opts.publish !== false) {
@@ -754,6 +917,7 @@ export class PlayerViewportManager {
             }
             this.scene.addObject(outer); // entra na árvore de update do frame
             this.byKey.set(e.key, entry);
+            this._queueStockCompanions(entry, attach);
             const pending = this._pendingAppearanceChanges.get(e.key);
             const desired = this._desiredAppearance.get(e.key);
             if (pending?.length || desired) {

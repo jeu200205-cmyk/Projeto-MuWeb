@@ -51,6 +51,7 @@ export class RemoteAssetSystem {
         this._manifestIndex = null;
         this._manifestBasenameIndex = null; // R78: only unique basenames; duplicates stay fail-closed
         this._manifestUnavailable = false;
+        this._manifestSource = null;
     }
 
     /** Configura a URL base dos dados do cliente */
@@ -69,6 +70,7 @@ export class RemoteAssetSystem {
             this._manifestIndex = null;
             this._manifestBasenameIndex = null;
             this._manifestUnavailable = false;
+            this._manifestSource = null;
         }
         this.baseUrl = next;
         this._authorityRevision = nextAuthority;
@@ -186,6 +188,7 @@ export class RemoteAssetSystem {
                         else if (basenameIndex.get(base) !== normalized) basenameIndex.set(base, null);
                     }
                     this._manifestIndex = index;
+                    this._manifestSource = manifestSource;
                     this._manifestBasenameIndex = basenameIndex;
                     console.info(`[RemoteAssets] manifest indexado (${manifestSource}): ${index.size} assets reais`);
                     return index;

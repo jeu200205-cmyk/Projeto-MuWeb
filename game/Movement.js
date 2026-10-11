@@ -212,7 +212,17 @@ export const Movement = {
             // (1 tile = 100 unidades) e fazia o herói "não andar".
             let blocked = false;
             if (this.walkableFn) {
-                try { blocked = !this.walkableFn(nx, nz); } catch (_e) { blocked = false; }
+                // FIX152: a broken collision authority must not silently turn
+                // walls into traversable cells. Keep the previous position until
+                // the real path/ATT owner can answer again.
+                try { blocked = !this.walkableFn(nx, nz); }
+                catch (e) {
+                    blocked = true;
+                    if (!this._walkableErrorReported) {
+                        this._walkableErrorReported = true;
+                        console.error('[Movement] walkability authority failed; movement held', e);
+                    }
+                }
             }
 
             // Colliders adicionais (NPC/decoração) continuam depois do ATT.
@@ -263,12 +273,6 @@ export const Movement = {
 
         const control = mesh.userData && mesh.userData.animationControl;
         if (!control || typeof control.play !== 'function') return;
-        // FIX92 Main 5.2 MOVEMENT_OPERATE: Sit/Pose is a persistent local SetAction,
-        // not an idle locomotion clip. Preserve it until the player actually moves.
-        if (Number.isInteger(char._pcOperateAction)) {
-            if (!moving) return;
-            char._pcOperateAction = null;
-        }
         const name = moving ? (animSpeed > 7 ? 'run' : 'walk') : 'idle';
         // Chame todo frame: buildAnimationControl é idempotente no clip, mas
         // precisa reavaliar SafeZone/equipamento mesmo quando o estado lógico

@@ -10,20 +10,28 @@
  * No guessed item family/two-hand table is baked into Web.
  */
 
+import { RemoteAssets } from './RemoteAssets.js';
+
 const MAX_ITEM = 16 * 512; // Main 5.2 category space used by this source.
 const BUX = [0xFC, 0xCF, 0xAB];
+// CNewUIMyInventory resolves the official Portuguese ItemAttribute owner
+// from Local/Por/item_por.bmd. Equipment/3D icon metadata must use the
+// same language/source first; the old Eng-first order could publish English
+// names even while inventory tooltips used Portuguese from the same client.
 const PATHS = [
+  'Local/Por/item_por.bmd',
   'Local/Eng/item_eng.bmd',
   'Local/Eng/Item_Eng.bmd',
   'Local/Eng/2item_eng.bmd',
   'Local/Eng/orgn-item_eng.bmd',
   'Local/Eng/--item_eng.bmd',
-  'Local/Por/item_por.bmd',
 ];
 
 let _cache = null;
+let _cacheAuthority = null;
 let _inflight = null;
-let _warned = false;
+let _inflightAuthority = null;
+let _warnedAuthority = null;
 
 function u32(v) { return v >>> 0; }
 
@@ -83,29 +91,46 @@ export function parseItemAttributeBmd(input) {
 }
 
 export async function loadItemAttributes(fetchBinary) {
-  if (_cache) return _cache;
-  if (_inflight) return _inflight;
+  // FIX137: ItemAttribute metadata is a physical Data owner, not a global
+  // browser-session singleton. RemoteAssets already invalidates raw bytes on
+  // authority switches; retaining the old decoded name/TwoHand table here
+  // would silently mix two clients even when the icon BMD URL is current.
+  const authority = RemoteAssets.authorityKey;
+  if (_cache && _cacheAuthority === authority) return _cache;
+  if (_inflight && _inflightAuthority === authority) return _inflight;
   if (typeof fetchBinary !== 'function') return null;
-  _inflight = (async () => {
+  const request = (async () => {
     let last = null;
     for (const path of PATHS) {
+      if (RemoteAssets.authorityKey !== authority) return null;
       try {
         const buf = await fetchBinary(path);
+        // A request launched under the previous official Data selection may
+        // finish after a new asset authority is active. Never publish its bytes.
+        if (RemoteAssets.authorityKey !== authority) return null;
         if (!buf) continue;
         const parsed = parseItemAttributeBmd(buf instanceof Uint8Array ? buf : new Uint8Array(buf));
         parsed.path = path;
-        console.info(`[ItemAttribute] PC ${path} OK entries=${parsed.count} stride=${parsed.stride}`);
         _cache = parsed;
+        _cacheAuthority = authority;
+        console.info(`[ItemAttribute] PC ${path} OK entries=${parsed.count} stride=${parsed.stride}`);
         return parsed;
-      } catch (e) { last = e; }
+      } catch (e) {
+        if (RemoteAssets.authorityKey !== authority) return null;
+        last = e;
+      }
     }
-    if (!_warned) {
-      _warned = true;
-      console.warn(`[ItemAttribute] Item_Eng.bmd indisponível/inválido — TwoHand fica desconhecido (fail-closed): ${last?.message || 'asset ausente'}`);
+    if (_warnedAuthority !== authority) {
+      _warnedAuthority = authority;
+      console.warn(`[ItemAttribute] ItemAttribute oficial Por/Eng indisponível/inválido — nome/TwoHand desconhecidos (fail-closed): ${last?.message || 'asset ausente'}`);
     }
     return null;
-  })().finally(() => { _inflight = null; });
-  return _inflight;
+  })();
+  _inflight = request;
+  _inflightAuthority = authority;
+  return request.finally(() => {
+    if (_inflight === request) { _inflight = null; _inflightAuthority = null; }
+  });
 }
 
 export async function itemAttributeFor(fetchBinary, itemType) {

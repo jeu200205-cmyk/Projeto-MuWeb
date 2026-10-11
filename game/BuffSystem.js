@@ -122,6 +122,23 @@ export class BuffContainer {
     }
   }
 
+  /** Registra presença imediata de um eBuffState cujo owner é outro packet
+   * autoritativo (ex.: ReceiveMagic Vitality). Não inventa duração/stats; um
+   * 0x2D posterior pode renovar a mesma key com o tempo real do GS e 0x1B a
+   * remove. Idempotente como g_CharacterRegisterBuff no PC. */
+  ensureServerBuffState(buffState, sourceId = 'server-event') {
+    if (!Number.isInteger(buffState) || buffState <= 0 || buffState >= 200) return false;
+    const id = `srv_${buffState}`;
+    if (this.buffs.has(id)) return true;
+    const def = { id, name: `Buff ${buffState}`, icon: null, duration: Infinity, serverBuffState: buffState, serverDriven: true, eventOwned: true };
+    const buff = new ActiveBuff(def, sourceId);
+    buff.remaining = Infinity;
+    buff.onExpire = () => { this.buffs.delete(id); this._emit('expire', buff); };
+    this.buffs.set(id, buff);
+    this._emit('apply', buff);
+    return true;
+  }
+
   /** Remove um eBuffState vindo do servidor (mesma key usada por 0x2D). */
   removeServerBuffState(buffState) {
     if (!Number.isInteger(buffState) || buffState <= 0) return false;

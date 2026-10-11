@@ -15,7 +15,7 @@ import { MUWindow } from './MUWindow.js';
 import { Inventory } from '../data/Inventory.js';
 import { ITEM_TYPES } from '../data/ItemTypes.js';
 import { RemoteAssets } from '../data/RemoteAssets.js';
-import { renderIcon3D } from './ItemIconRenderer.js';
+import { renderIcon3D, shouldRetryItemIconModel } from './ItemIconRenderer.js';
 import { loadItemUiLuaConfig, itemBorderFor, isJewelStackType } from '../data/ItemUiLuaConfig.js';
 import { pcInventoryOverlayMoveAllowed } from '../game/PcInventoryMoveRules.js';
 
@@ -251,10 +251,6 @@ export class InventoryWindow extends MUWindow {
         // is now the persistent PC picked-item lifetime.
         this.dragItem = null;
         this._dragGeneration = 0;
-        // FIX84: the picked-item owner reuses the already-rendered slot canvas.
-        // This avoids a synchronous WebGL->2D readback on every click and keeps
-        // the exact PC preview scale/padding while the item follows the cursor.
-        this._pickedCanvasState = null;
         this.dragGhost = document.createElement('div');
         this.dragGhost.dataset.muPcOwner = 'CNewUIInventoryCtrl::RenderItem3DDrag';
         this.dragGhost.style.cssText = `
@@ -348,45 +344,14 @@ export class InventoryWindow extends MUWindow {
             this.dragGhost.style.width = `${ghostW}px`;
             this.dragGhost.style.height = `${ghostH}px`;
             this.dragGhost.textContent = '';
-            // FIX84: never copy a WebGL icon into a 2D canvas on the pickup click.
-            // drawImage(WebGLCanvas) forces a GPU readback/stall and FIX83 also
-            // squeezed the padded RenderItem3D viewport into the item footprint,
-            // making the picked item visibly tiny.  The PC picked-item owner is a
-            // presentation transfer: move the ready canvas itself to the cursor,
-            // preserving its exact CSS width/height/left/top and restore it when
-            // the picked item is released/cancelled.
-            this._restorePickedCanvas();
-            const sourceCanvas = cell.querySelector?.('canvas');
-            let transferred = false;
-            if (sourceCanvas?.width && sourceCanvas?.height && sourceCanvas.parentNode) {
-                this._pickedCanvasState = {
-                    canvas: sourceCanvas, parent: sourceCanvas.parentNode,
-                    next: sourceCanvas.nextSibling, cssText: sourceCanvas.style.cssText,
-                };
-                this.dragGhost.appendChild(sourceCanvas);
-                transferred = true;
-            }
-            // Cold icons are uncommon after inventory prewarm.  If no ready canvas
-            // exists, render at the same padded viewport law used by the slot; do
-            // NOT resize the returned canvas down to the footprint.
-            if (!transferred) {
-                // FIX87: a genuinely cold icon must never compile/fetch on the pickup
-                // event turn. Let the click publish immediately, then fill the exact
-                // 3D picked item in an idle slice. Cached icons still return instantly.
-                const deferCold = (fn) => {
-                    if (typeof requestIdleCallback === 'function') requestIdleCallback(fn,{timeout:80});
-                    else setTimeout(fn,0);
-                };
-                deferCold(() => this._itemIO()
-                    .then((io) => io && renderIcon3D(io, Number(item.itemType ?? item.type), Number.isInteger(item.rawLevel) ? item.rawLevel : ((item.level || 0) << 3), {w:ghostW,h:ghostH}, {...item, iconPadding:32}))
-                    .then((cv) => {
-                        if (cv && !this._destroyed && dragGeneration === this._dragGeneration && this.dragItem?.item === item) {
-                            const pad=Number(cv.dataset.muIconPadding)||0;
-                            cv.style.cssText = `position:absolute;left:${-pad}px;top:${-pad}px;width:${cv.width}px;height:${cv.height}px;max-width:none;max-height:none;pointer-events:none;image-rendering:auto;`;
-                            this.dragGhost.textContent = ''; this.dragGhost.appendChild(cv);
-                        }
-                    }));
-            }
+            this._itemIO()
+                .then((io) => io && renderIcon3D(io, Number(item.itemType ?? item.type), Number.isInteger(item.rawLevel) ? item.rawLevel : ((item.level || 0) << 3), {w:ghostW,h:ghostH}, item))
+                .then((cv) => {
+                    if (cv && !this._destroyed && dragGeneration === this._dragGeneration && this.dragItem?.item === item) {
+                        cv.style.width = `${ghostW}px`; cv.style.height = `${ghostH}px`;
+                        this.dragGhost.textContent = ''; this.dragGhost.appendChild(cv);
+                    }
+                });
             this._positionDragGhost(e);
             this._updateDragFootprint(e);
             this.dragGhost.style.display = 'block';
@@ -417,12 +382,8 @@ export class InventoryWindow extends MUWindow {
             if (!item || !this.tooltip) { this._hideItemTooltip(); return; }
             this._showItemTooltip(item, ref, cell);
         };
-        // FIX87: tooltip anchor is slot-authored, not pointer-authored. Rebuilding
-        // RenderItemInfo on every mousemove recreated the entire tooltip DOM and
-        // re-ran Ancient/Harmony/Socket/Set evaluation dozens of times per second.
-        // Build once when the pointer enters (or inventory refreshes); movement
-        // inside the same slot cannot change the PC tooltip.
         cell.addEventListener('mouseenter', showTip);
+        cell.addEventListener('mousemove', showTip);
         cell.addEventListener('mouseleave', () => this._hideItemTooltip());
         cell.dataset.ref = ref.kind === 'grid' ? `g${ref.index}` : `e${ref.key}`;
         return cell;
@@ -869,19 +830,6 @@ export class InventoryWindow extends MUWindow {
         }
     }
 
-    _restorePickedCanvas() {
-        const st=this._pickedCanvasState;
-        this._pickedCanvasState=null;
-        if(!st?.canvas)return;
-        try {
-            st.canvas.style.cssText=st.cssText||'';
-            if(st.parent?.isConnected){
-                if(st.next && st.next.parentNode===st.parent) st.parent.insertBefore(st.canvas,st.next);
-                else st.parent.appendChild(st.canvas);
-            } else { st.canvas.remove?.(); }
-        } catch (_) { try { st.canvas.remove?.(); } catch (_) {} }
-    }
-
     _beginPickedVisual(from, cell) {
         this._restoreDragCells();
         this._dragCellStyles=[];
@@ -919,7 +867,6 @@ export class InventoryWindow extends MUWindow {
         this.dragItem = null;
         ++this._dragGeneration;
         this.dragGhost.style.display = 'none';
-        this._restorePickedCanvas();
         this.dragGhost.textContent = '';
         if (!this.visible || this._destroyed) return;
 
@@ -1052,6 +999,19 @@ export class InventoryWindow extends MUWindow {
         this.refresh();
     }
 
+    // FIX153: the server sends full F3:10/F3:14/0x24/0x28 projections, but
+    // NewUI only repaints cells whose physical item/presentation changed.
+    // Stable fingerprints include every wire/view field (including options and
+    // sockets), not merely Type/Level, so durability and custom rules stay live.
+    _itemPaintSignature(item) {
+        if (!item) return '-';
+        try { return JSON.stringify(item); }
+        catch (_) { // non-plain test/extension item: force repaint, never stale data
+            this._paintFallbackSequence = (this._paintFallbackSequence || 0) + 1;
+            return `uncacheable:${this._paintFallbackSequence}`;
+        }
+    }
+
     requestRefresh() {
         if (this._destroyed || this._refreshScheduled) return;
         this._refreshScheduled = true;
@@ -1068,35 +1028,61 @@ export class InventoryWindow extends MUWindow {
     }
 
     refresh() {
-        this._cancelDrag(); // server/catalog updates invalidate captured hit targets
+        // A burst of unrelated F3:14/0x28 updates must not steal the PC
+        // picked item from the cursor. Cancel ONLY when its original source
+        // slot has actually changed under the authoritative inventory owner.
+        if (this.dragItem) {
+            const current = this._itemAt(this.dragItem.from);
+            if (this._itemPaintSignature(current) !== this._itemPaintSignature(this.dragItem.item))
+                this._cancelDrag();
+        }
         const inv = this.inventory;
         // Hidden NewUI inventory is state-only.  R70 rendered every real BMD icon
         // during world construction even though the window was display:none;
         // physical logs then showed the first world frame stalling.  Main 5.2
         // RenderItem3D only runs when INTERFACE_INVENTORY is actually rendered.
         const renderVisuals = this.visible === true;
+        const paintAuthority = RemoteAssets.authorityKey || '';
         const projection = this.authoritativeOwner?.getGridProjection?.();
         const grid = projection?.valid ? projection : null;
+        const paintKeys = (this._gridPaintKeys ??= new Array(64));
+        let repaintedGrid = 0, repaintedEquipment = 0;
         for (let i = 0; i < 64; i++) {
             const item = this.authoritativeOwner ? this._itemAt({ kind: 'grid', index: i }) : inv.grid[i];
             const cell = this.gridSlots[i];
-            cell.innerHTML = '';
             const owner = grid?.cells[i];
             const placement = grid?.placements.get(12+i);
-            cell.style.width = `${(placement?.width || 1)*20}px`;
-            cell.style.height = `${(placement?.height || 1)*20}px`;
+            const width = (placement?.width || 1)*20, height = (placement?.height || 1)*20;
+            const obscured = Boolean(grid && owner >= 0 && owner !== 12+i);
+            const key = `${paintAuthority}|${renderVisuals?'shown':'hidden'}|${width}x${height}|${obscured}|${owner??'?'}|${this._itemPaintSignature(item)}`;
+            if (paintKeys[i] === key) continue;
+            paintKeys[i] = key;
+            repaintedGrid++;
+            cell.style.width = `${width}px`;
+            cell.style.height = `${height}px`;
             cell.style.zIndex = placement ? '5' : '3';
-            cell.style.visibility = grid && owner >= 0 && owner !== 12+i ? 'hidden' : 'visible';
-            if (renderVisuals && item && (!grid || placement)) cell.appendChild(this._iconNode(item, placement ? {w:placement.width*20,h:placement.height*20} : {w:cell.clientWidth||cell._iconRenderSize||20,h:cell.clientHeight||cell._iconRenderSize||20}));
+            cell.style.visibility = obscured ? 'hidden' : 'visible';
+            cell.innerHTML = '';
+            if (renderVisuals && item && (!grid || placement)) cell.appendChild(this._iconNode(item, placement ? {w:width,h:height} : {w:cell.clientWidth||cell._iconRenderSize||20,h:cell.clientHeight||cell._iconRenderSize||20}));
         }
-        this.body?.querySelectorAll?.('[data-mu-item-border]').forEach((n) => n.remove());
+        const eqPaintKeys = (this._equipmentPaintKeys ??= new Map());
+        const bordersBefore = this._equipmentBorderPaintKey;
+        const nextBorders = [];
         for (const def of (this._equipDefs || EQUIP_SLOTS)) {
             const cell = this.equipSlots[def.key];
-            if (!cell || (def.extended && !def.active)) { if (cell?.style) cell.style.display='none'; continue; }
-            if (cell.style) cell.style.display='flex';
-            const item = this.authoritativeOwner ? this._itemAt({ kind: 'equip', key: def.key }) : inv.equipment[def.key];
-            cell.innerHTML = '';
-            if (renderVisuals && item) {
+            if (!cell) continue;
+            const active = !(def.extended && !def.active);
+            const item = active ? (this.authoritativeOwner ? this._itemAt({ kind: 'equip', key: def.key }) : inv.equipment[def.key]) : null;
+            const eqKey = `${paintAuthority}|${active}|${renderVisuals}|${def.x},${def.y},${def.w},${def.h}|${this._itemPaintSignature(item)}`;
+            const changed = eqPaintKeys.get(def.key) !== eqKey;
+            if (changed) {
+                eqPaintKeys.set(def.key, eqKey);
+                repaintedEquipment++;
+                cell.style.display = active ? 'flex' : 'none';
+                cell.innerHTML = '';
+            }
+            if (!active) continue;
+            if (changed && renderVisuals && item) {
                 const rect = pcEquipmentIconRect(def);
                 const icon=this._iconNode(item, {w:rect.w,h:rect.h});
                 icon.style.position = 'absolute';
@@ -1125,16 +1111,36 @@ export class InventoryWindow extends MUWindow {
                     overlay.style.cssText=`position:absolute;inset:0;background:${rgba};pointer-events:none;z-index:8;`;
                     cell.appendChild(overlay);
                 }
-                const border=itemBorderFor(item.itemType ?? item.type);
-                if (border) this._appendPcEquipmentBorder(def, border);
+            }
+            // Border animation is retained by the same node across unrelated
+            // inventory updates; re-creating it at every F3:14 forced layout.
+            if (renderVisuals && item) {
+                const border = itemBorderFor(item.itemType ?? item.type);
+                if (border) nextBorders.push({ def, border });
             }
         }
+        const borderPaintKey = `${paintAuthority}|${renderVisuals}|${nextBorders.map(({def,border})=>`${def.key}:${border.thickness}:${border.r}:${border.g}:${border.b}:${border.alpha}`).join('|')}`;
+        if (bordersBefore !== borderPaintKey) {
+            this.body?.querySelectorAll?.('[data-mu-item-border]').forEach(n=>n.remove());
+            for (const { def, border } of nextBorders) this._appendPcEquipmentBorder(def, border);
+            this._equipmentBorderPaintKey = borderPaintKey;
+        }
+        this._lastPaintCounts = { grid:repaintedGrid, equipment:repaintedEquipment, bordersRebuilt:bordersBefore!==borderPaintKey };
         const zen = this.authoritativeOwner ? (this.authoritativeOwner.zen || 0) : (inv.zen || 0);
         this.zenEl.textContent = Number(zen || 0).toLocaleString();
-        if (!renderVisuals) this._scheduleHiddenIconPrewarm(grid);
+        // FIX154: do not launch the expensive 3D BMD icon queue while NewUI is
+        // hidden. The FIX153 runtime log showed 16+ cold horse/item icons taking
+        // ~0.7-1.8s each immediately after World1 first paint, competing with
+        // viewport model loads (and depressing FPS to ~25). PC RenderItem3D is
+        // invoked only while Inventory is visible. Refresh-on-open already
+        // requests only the cells displayed; existing icon cache persists.
+        // Schedule API retained for compatibility; the worker itself is a
+        // no-op by default and runs only via an explicit diagnostic opt-in.
+        if (!renderVisuals && (repaintedGrid || repaintedEquipment)) this._scheduleHiddenIconPrewarm(grid);
     }
 
     _scheduleHiddenIconPrewarm(grid = null) {
+        if (this.enableHiddenBmdPrewarm !== true) return;
         // R81: keep Main's "do not RenderItem3D while the inventory is hidden"
         // presentation rule, but warm the exact BMD/material thumbnail cache in
         // browser idle slices. Opening I then clones already-rendered canvases
@@ -1161,12 +1167,9 @@ export class InventoryWindow extends MUWindow {
         });
         void this._itemIO().then(async (io) => {
             if (!io) return;
-            // Two idle workers feed the shared ItemIconRenderer queue.  The
-            // queue itself is capped at two cold jobs, so this overlaps BMD /
-            // texture fetch+decode without creating extra WebGL contexts or a
-            // burst that would steal the gameplay frame.  R81 awaited every
-            // item serially here, so a full bag could still be cold when I was
-            // opened immediately after world entry.
+            // FIX153: single idle producer. Never keep two hidden-window
+            // workers generating cold jobs while visible equipment updates
+            // contend for the same main-thread WebGL icon capture queue.
             let cursor = 0;
             const worker = async () => {
                 while (cursor < jobs.length) {
@@ -1180,7 +1183,7 @@ export class InventoryWindow extends MUWindow {
                     } catch (_) { /* fail-closed: visible render will report the same missing owner */ }
                 }
             };
-            await Promise.all([worker(), worker()]);
+            await worker();
         });
     }
 
@@ -1274,6 +1277,9 @@ export class InventoryWindow extends MUWindow {
                     if(this._destroyed||!cvHost.isConnected)return null;
                     const cv=await renderIcon3D(io, Number(item.itemType ?? item.type), Number.isInteger(item.rawLevel) ? item.rawLevel : ((item.level || 0) << 3), {w:iconW,h:iconH}, {...item,iconPadding:32});
                     if(cv)return cv;
+                    // FIX153: no three retries of the same physically missing
+                    // BMD after the renderer has registered its bounded backoff.
+                    if (!shouldRetryItemIconModel(Number(item.itemType ?? item.type), Number.isInteger(item.rawLevel) ? item.rawLevel : ((item.level || 0) << 3))) return null;
                     if(attempt<2)await new Promise(r=>setTimeout(r,150*(attempt+1)));
                 }
                 return null;
@@ -1315,7 +1321,6 @@ export class InventoryWindow extends MUWindow {
         this._clearDragFootprint();
         this.dragItem = null;
         ++this._dragGeneration;
-        this._restorePickedCanvas();
         if (this.dragGhost) {
             this.dragGhost.style.display = 'none';
             this.dragGhost.textContent = '';

@@ -1,0 +1,76 @@
+{
+  "checkpoint": "FIX140",
+  "date": "2026-10-08",
+  "parent": "FIX139 DATA_LOCK_PRE_REGEN",
+  "status": "DEVELOPMENT / PRE-REGEN / NOT PROMOTED",
+  "promotedCentral": "FIX80 (CURRENT_AUTHORITY.txt unchanged)",
+  "sourceZipParentSha256": "ebf1c3605b8a33cd8612affb984bd1c6b6467970b9f379a31cd3c7f39667b34f",
+  "inputsSha256": {
+    "ITEMS_LUA_FIX135": "1d7a115a4644199bcb7cb17cbf6d3c93fd4635612db77a9ecf12b685b383acc7",
+    "MAPS_ENGINE_M139": "73ba213d34274ec0ed1f34dff48876549985163809b44b73786d7fd6fbc08d2d",
+    "SKILLS_PROTOCOL_FIX137": "d79d75adfee6eba13ac8cd0adb795249808ea23c0c31065871a6f0e644aacebe",
+    "SAFE_DATA_HOTFIX": "912755f44ed7cb7bb32ea9cac82afca20abb54e063a5e5645f584d771647ab6b"
+  },
+  "semanticHotfix": "Retain newer FIX139+ official-only root and generator/manifest gates; do not overwrite superior code",
+  "newRuntime": {
+    "ITEMS_LUA_FIX135": [
+      "core/GameApp.js",
+      "graphics/PcCharacterCapeFrame.js",
+      "graphics/PcCustomCapePresentation.js",
+      "graphics/PlayerComposer.js"
+    ],
+    "MAPS_ENGINE_M139": [
+      "world/TerrainObjectWorld.js"
+    ],
+    "SKILLS_PROTOCOL_FIX137": [
+      "game/PlayerViewportManager.js"
+    ],
+    "DATA_CANONICAL_PRE_PROFILE": [
+      "tools/start-r90-safe.cjs"
+    ]
+  },
+  "runtimeSha256": {
+    "core/GameApp.js": "604e6f5ba45c014bde0aef587216de3ca1aed183f1a83ba4b7df8a5c49dc1824",
+    "graphics/PcCharacterCapeFrame.js": "6371fbbe5d788de598a0d5ccd5dd07c162057fb4e4783218db4d83b12891ae70",
+    "graphics/PcCustomCapePresentation.js": "70a203ebf0e4cb15a677ab2f05082ef6af23d90eab8867499538cebc36c07dc4",
+    "graphics/PlayerComposer.js": "1ad38226dd9fb21befdf3a45e6a0230479fdd3387ef73cce6f71253f9fe4c7ba",
+    "world/TerrainObjectWorld.js": "1a80474df5f8e45d0679b4e9528da5d56f08eacfe88688fea07b414037734444",
+    "game/PlayerViewportManager.js": "1dadad5501a66622ede473815ffea85dcbdb8e75c5780ae7066cbc2ac92f0923",
+    "tools/start-r90-safe.cjs": "37d7ec8399f462343d741325465e9daab3e01c390d6b84e1ad027e3aa49af75d",
+    "ANALYZE_M138_WORLD1_WORLD11.mjs": "408f3ddaf0bc4c11e5d06d488b49928a5d90e0cb03789c180358d5b2466cb91c",
+    "ANALYZE_M139_WORLD1_WORLD11.mjs": "73e6800ce4604a74ab3e781c3e696edf03852f643dc43a18bce5be8f37a28400"
+  },
+  "officialDataRoot": "C:\\clientepromax\\Nova pasta\\MuPromax 1.0.1\\Data",
+  "generatedTablesClean": false,
+  "physicalRegeneration": false,
+  "generatedTablesMissing": [
+    "data/generated/RealItems.js",
+    "data/generated/RealMaps.js",
+    "data/generated/RealMonsters.js",
+    "skills/SkillAttributeData.js",
+    "data/OFFICIAL_DATA_AUTHORITY.json"
+  ],
+  "verifyOnlyRc": 2,
+  "regenerateRc": 2,
+  "bootRc": 1,
+  "syntaxPass": 660,
+  "syntaxTotal": 660,
+  "directedPass": 15,
+  "directedTotal": 15,
+  "historicalAB": {
+    "total": 274,
+    "baselinePass": 178,
+    "candidatePass": 178,
+    "newRegressions": 0,
+    "inheritedFailBoth": 96
+  },
+  "physicalBrowserWebGLFps": "NOT TESTED",
+  "batFiles": [
+    "DESLIGAR_WEB_R90.bat",
+    "INSTALAR_DEPENDENCIAS_R90.bat",
+    "LIGAR_WEB_R90_FIX140.bat"
+  ],
+  "githubChanged": false,
+  "mapsParentNote": "M138 final primitive BodyLight correction preserved before M139 packing; FIX139 had preliminary M138 revision",
+  "skillsCherryPickNote": "Only 0x15 action-correction hunk; preserve FIX127 remote cape runner (not present in full lane)"
+}

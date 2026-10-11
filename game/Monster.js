@@ -156,20 +156,46 @@ export class Monster extends Character {
     // para protocolos (attack/move/action) nao dependerem de arredondamento.
     this.serverTileX = Number.isInteger(opts.serverTileX) ? opts.serverTileX : null;
     this.serverTileY = Number.isInteger(opts.serverTileY) ? opts.serverTileY : null;
+    // 0x13 PCREATE_MONSTER also carries TargetX/Y and packed identity flags.
+    // Preserve the router-decoded snapshot verbatim for future PC consumers;
+    // these fields do NOT authorize local pathing, FX, respawn or timing.
+    this.serverTargetTileX = Number.isInteger(opts.serverTargetTileX) ? opts.serverTargetTileX : null;
+    this.serverTargetTileY = Number.isInteger(opts.serverTargetTileY) ? opts.serverTargetTileY : null;
+    this.serverCreateFlag = typeof opts.serverCreateFlag === 'boolean' ? opts.serverCreateFlag : null;
+    this.serverTeleportFlag = typeof opts.serverTeleportFlag === 'boolean' ? opts.serverTeleportFlag : null;
+    this.serverMyMob = typeof opts.serverMyMob === 'boolean' ? opts.serverMyMob : null;
+    this.serverBuildTime = Number.isInteger(opts.serverBuildTime) ? opts.serverBuildTime : null;
     this._visual = null;
     this._visualFailed = false;
+    // 0x18 PRECEIVE_ACTION may arrive after 0x13 publishes the actor but before
+    // its async BMD/NPC visual resolves. Preserve the latest server-owned action
+    // as state; do not synthesize animation/timing locally.
+    this._pendingServerAction = null;
+    // Viewport 0x14 can delete this actor while its BMD/NPC visual is still
+    // loading. Keep an explicit lifetime fence so the late async completion
+    // cannot attach/retain render resources for an identity the GS removed.
+    this._disposed = false;
     this._initRealModel();
   }
 
   /** Carrega o modelo BMD real assíncrono (asset-server). Falha = erro explícito. */
   async _initRealModel() {
+    let visual = null;
     try {
-        const visual = this.semanticKind === VIEWPORT_KIND.NPC
+        visual = this.semanticKind === VIEWPORT_KIND.NPC
           ? await (await import('./NpcModel.js')).createNpcVisual(this.typeId, this.customOwner)
           : await (await import('./MonsterModel.js')).createMonsterVisual(this.typeId, this.customOwner);
+        if (this._disposed) {
+            try { visual?.dispose?.(); } catch (_) {}
+            return;
+        }
         this._visual = visual;
         this.mesh.add(visual.root);
-        visual.setActionFor(this.aiState);
+        if (this.serverDriven && Number.isInteger(this._pendingServerAction)) {
+            visual.setAction(this._pendingServerAction);
+        } else {
+            visual.setActionFor(this.aiState);
+        }
         const glow = customMonsterGlow(this.typeId);
         if (glow) visual.setBodyLight?.(new THREE.Color(glow.r, glow.g, glow.b));
         else if (this._pendingBodyLight) visual.setBodyLight?.(this._pendingBodyLight);
@@ -179,12 +205,31 @@ export class Monster extends Character {
         // the async BMD resolves, otherwise the monster flips 180° after load.
         this.mesh.rotation.set(0, this.serverDriven ? this.rotation.y : this.rotation.y + MODEL_FORWARD_YAW, 0);
     } catch (e) {
+        // A BMD can load successfully and still fail during publication
+        // (setAction, body light or scene attachment). At that point the
+        // viewport 0x14 owner has not yet received a valid visual. Roll back
+        // the exact renderer and root acquired by this attempt immediately,
+        // rather than leaving an attached zombie until a later 0x14/map clear.
+        // Preserve the original failure even if GPU disposal itself throws.
+        if (visual) {
+            if (this._visual === visual) this._visual = null;
+            try { this.mesh?.remove?.(visual.root); } catch (_) {}
+            try { visual.dispose?.(); } catch (_) {}
+        }
         this._visualFailed = true;
         // modelType resolvido DENTRO do createMonsterVisual (rand por spawn);
         // o path real já vem no erro do loader (fail-closed do MUAssets.loadBMD).
         console.error(`[ViewportActor] modelo real falhou p/ classe ${this.typeId}`
             + ` kind=${this.semanticKind} (${this.type.serverName}): ${e.message}`);
     }
+  }
+
+  dispose() {
+    if (this._disposed) return;
+    this._disposed = true;
+    try { this._visual?.dispose?.(); } catch (_) {}
+    this._visual = null;
+    this.mesh?.parent?.remove?.(this.mesh);
   }
 
   setBodyLight(color) {
@@ -195,6 +240,13 @@ export class Monster extends Character {
     const glow = customMonsterGlow(this.typeId);
     if (glow) this._visual?.setBodyLight?.(new THREE.Color(glow.r, glow.g, glow.b));
     else this._visual?.setBodyLight?.(this._pendingBodyLight);
+  }
+
+  setServerAction(action) {
+    if (!this.serverDriven || !Number.isInteger(action) || this._disposed) return false;
+    this._pendingServerAction = action;
+    if (this._visual?.setAction) this._visual.setAction(action);
+    return true;
   }
 
   get renderer() { return this._visual?.renderer || null; }

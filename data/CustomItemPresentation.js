@@ -1,4 +1,6 @@
 import { decodePcLuaText } from './PcLuaCrypt.js';
+import { RemoteAssets } from './RemoteAssets.js';
+import { luaCodeMask,scanLuaGlobalCalls,assertPcLuaScriptCompiles } from './PcLuaStaticLex.js';
 /**
  * Runtime owner for the current client's real Lua item presentation tables.
  *
@@ -27,37 +29,15 @@ const SIZE_PATHS = [
 ];
 
 let _loaded = false;
+let _authority = null;
 let _inflight = null;
+let _inflightAuthority = null;
 let _positions = new Map();
 let _sizes = new Map();
 let _status = Object.freeze({ loaded:false, positionPath:null, sizePath:null, positions:0, sizes:0 });
 
-function stripLuaComments(input='') {
-  const s = String(input || '');
-  let out = '', i = 0, quote = null;
-  while (i < s.length) {
-    const c=s[i], n=s[i+1];
-    if (quote) {
-      out += c;
-      if (c === '\\' && i + 1 < s.length) { out += s[++i]; i++; continue; }
-      if (c === quote) quote = null;
-      i++; continue;
-    }
-    if (c === '"' || c === "'") { quote=c; out+=c; i++; continue; }
-    if (c === '-' && n === '-') {
-      // --[[ block comment ]]
-      if (s[i+2] === '[' && s[i+3] === '[') {
-        const end=s.indexOf(']]', i+4); i=end<0?s.length:end+2; continue;
-      }
-      i += 2; while (i < s.length && s[i] !== '\n') i++; continue;
-    }
-    out += c; i++;
-  }
-  return out;
-}
-
 function itemTypeFromBlock(block) {
-  const m = /GET_ITEM\s*\(\s*(-?\d+)\s*,\s*(-?\d+)\s*\)/i.exec(block);
+  const m = /(?:^|[^\w.:])GET_ITEM\s*\(\s*(-?\d+)\s*,\s*(-?\d+)\s*\)/i.exec(block);
   if (!m) return -1;
   const g=Number(m[1]), idx=Number(m[2]);
   if (!Number.isInteger(g) || !Number.isInteger(idx) || g < 0 || g >= 16 || idx < 0 || idx >= MAX_ITEM_INDEX) return -1;
@@ -65,32 +45,31 @@ function itemTypeFromBlock(block) {
 }
 
 function numField(block, key) {
-  const re = new RegExp(`\\b${key}\\s*=\\s*([-+]?\\d+(?:\\.\\d+)?(?:[eE][-+]?\\d+)?)`, 'i');
+  // A numeric field is one complete Lua literal, not a regex prefix.
+  // PosX=1+2 previously published a fabricated position 1 while Lua
+  // evaluates an expression. Preserve exact literals, fail closed otherwise.
+  const re = new RegExp(`\\b${key}\\s*=\\s*([^,}\\n;]+)`, 'i');
   const m = re.exec(block);
-  if (!m) return null;
-  const v=Number(m[1]); return Number.isFinite(v) ? v : null;
+  return m ? literalNumber(m[1]) : null;
 }
 
 function boolField(block, key) {
-  const re = new RegExp(`\\b${key}\\s*=\\s*(true|false)`, 'i');
-  const m = re.exec(block); return m ? m[1].toLowerCase() === 'true' : null;
+  const re = new RegExp(`\\b${key}\\s*=\\s*([^,}\\n;]+)`, 'i');
+  const m = re.exec(block);
+  const v=m?.[1]?.trim().toLowerCase();
+  return v==='true'?true:v==='false'?false:null;
 }
 
 
-function splitLuaArgs(body) {
-  const out=[]; let start=0,depth=0,quote=null;
-  for(let i=0;i<body.length;i++){const c=body[i];if(quote){if(c==='\\')i++;else if(c===quote)quote=null;continue;}if(c==='"'||c==="'"){quote=c;continue;}if(c==='('||c==='{'||c==='[')depth++;else if(c===')'||c==='}'||c===']')depth--;else if(c===','&&depth===0){out.push(body.slice(start,i).trim());start=i+1;}}
-  out.push(body.slice(start).trim()); return out;
-}
-function scanLuaCalls(text,name){
-  const out=[];let p=0;while((p=text.indexOf(name,p))>=0){let i=p+name.length;while(/\s/.test(text[i]||''))i++;if(text[i]!== '('){p=i;continue;}const open=i;let depth=0,quote=null,end=-1;for(;i<text.length;i++){const c=text[i];if(quote){if(c==='\\')i++;else if(c===quote)quote=null;continue;}if(c==='"'||c==="'"){quote=c;continue;}if(c==='(')depth++;else if(c===')'){depth--;if(depth===0){end=i;break;}}}if(end<0)break;out.push(splitLuaArgs(text.slice(open+1,end)));p=end+1;}return out;
-}
 function literalNumber(expr){const t=String(expr||'').trim();if(!/^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$/.test(t))return null;const v=Number(t);return Number.isFinite(v)?v:null;}
 function literalItem(expr){const type=itemTypeFromBlock(String(expr||''));if(type>=0)return type;const v=literalNumber(expr);return Number.isInteger(v)&&v>=0&&v<MAX_ITEM?v:-1;}
 
 function findTable(text, name) {
-  const p=text.indexOf(name); if (p < 0) return null;
-  const open=text.indexOf('{', p); if (open < 0) return null;
+  // Do not interpret CUSTOM_ITEM_POSITION_BACKUP or quoted/commented names
+  // as the active Lua table. luaCodeMask already removed string/comment text.
+  const match=new RegExp(`\\b${name}\\b\\s*=`, 'g').exec(text);
+  if (!match) return null;
+  const open=text.indexOf('{', match.index+match[0].length); if (open < 0) return null;
   let depth=0, quote=null;
   for (let i=open;i<text.length;i++) {
     const c=text[i];
@@ -122,12 +101,12 @@ function findEntryAroundGetItem(table, getPos) {
 }
 
 export function parseCustomItemPositionLua(source) {
-  const text=stripLuaComments(source);
+  const text=luaCodeMask(source);
   const out=new Map();
   // Exact C++ Lua callback owner: SetItemPosition(ItemIndex, PosX, PosY,
   // AngleX, AngleY, AngleZ).  Literal calls are authoritative even when this
   // client's Lua does not expose the historical CUSTOM_ITEM_POSITION table.
-  for(const a of scanLuaCalls(text,'SetItemPosition')){
+  for(const a of scanLuaGlobalCalls(source,'SetItemPosition')){
     if(a.length<6)continue;const type=literalItem(a[0]);const v=a.slice(1,6).map(literalNumber);
     if(type>=0&&v.every(Number.isFinite))out.set(type,{posX:v[0],posY:v[1],angleX:v[2],angleY:v[3],angleZ:v[4]});
   }
@@ -152,10 +131,10 @@ export function parseCustomItemPositionLua(source) {
 }
 
 export function parseCustomItemSizeLua(source) {
-  const text=stripLuaComments(source);
+  const text=luaCodeMask(source);
   const out=new Map();
   // Exact C++ Lua callback owner: SetItemSize(ItemIndex, SizeInventory).
-  for(const a of scanLuaCalls(text,'SetItemSize')){
+  for(const a of scanLuaGlobalCalls(source,'SetItemSize')){
     if(a.length<2)continue;const type=literalItem(a[0]),size=literalNumber(a[1]);
     if(type>=0&&Number.isFinite(size)&&size>0)out.set(type,size);
   }
@@ -179,6 +158,10 @@ async function readParsed(fetchBinary, paths, parse) {
       const b=await fetchBinary(p); if(!b) continue;
       const u=b instanceof Uint8Array?b:new Uint8Array(b);
       const text=decodePcLuaText(u);
+      // A syntactically invalid Lua file never executes its SetItemPosition /
+      // SetItemSize callbacks on Main 5.2. Do not publish regex-matched rows
+      // from a script that the real Lua 5.2 VM would reject entirely.
+      assertPcLuaScriptCompiles(text,p);
       if(!first)first={path:p,text};
       const value=parse(text);
       if(value?.size)return {path:p,text,value};
@@ -188,23 +171,30 @@ async function readParsed(fetchBinary, paths, parse) {
 }
 
 export async function loadCustomItemPresentation(fetchBinary) {
-  if (_loaded) return _status;
-  if (_inflight) return _inflight;
-  if (typeof fetchBinary !== 'function') return _status;
-  _inflight=(async()=>{
+  const authority=RemoteAssets.authorityKey;
+  if (_loaded && _authority===authority) return _status;
+  if (_inflight && _inflightAuthority===authority) return _inflight;
+  if (typeof fetchBinary !== 'function') return customItemPresentationStatus();
+  const request=(async()=>{
     const [p,s]=await Promise.all([readParsed(fetchBinary,POS_PATHS,parseCustomItemPositionLua),readParsed(fetchBinary,SIZE_PATHS,parseCustomItemSizeLua)]);
+    // The Lua rows are derived from the selected physical Data revision.
+    // A previous client's async fetch cannot publish after a root switch.
+    if(RemoteAssets.authorityKey!==authority)return customItemPresentationStatus();
     _positions=p.value||new Map();
     _sizes=s.value||new Map();
+    _authority=authority;
     _loaded=true;
     _status=Object.freeze({loaded:true,positionPath:p.path,sizePath:s.path,positions:_positions.size,sizes:_sizes.size});
     console.info(`[ItemPresentation] CustomItemPosition=${_positions.size} (${p.path||'missing'}) CustomItemSize=${_sizes.size} (${s.path||'missing'})`);
     return _status;
-  })().finally(()=>{_inflight=null;});
-  return _inflight;
+  })();
+  _inflight=request;
+  _inflightAuthority=authority;
+  return request.finally(()=>{if(_inflight===request){_inflight=null;_inflightAuthority=null;}});
 }
 
-export function customItemPosition(itemType) { return _positions.get(itemType) || null; }
-export function customItemSize(itemType) { return _sizes.get(itemType) ?? null; }
-export function customItemPresentationStatus() { return _status; }
+export function customItemPosition(itemType) { return _loaded && _authority===RemoteAssets.authorityKey ? (_positions.get(itemType)||null) : null; }
+export function customItemSize(itemType) { return _loaded && _authority===RemoteAssets.authorityKey ? (_sizes.get(itemType)??null) : null; }
+export function customItemPresentationStatus() { return _authority===RemoteAssets.authorityKey ? _status : Object.freeze({loaded:false,positionPath:null,sizePath:null,positions:0,sizes:0}); }
 
 export const CUSTOM_ITEM_PRESENTATION_MAX_ITEM = MAX_ITEM;

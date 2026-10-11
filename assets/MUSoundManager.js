@@ -13,9 +13,6 @@
  *  - Missing authored sounds fail closed (no procedural production substitute)
  */
 
-import * as THREE from 'three';
-import { RemoteAssets } from '../data/RemoteAssets.js';
-
 // ============================================================
 // Configuration
 // ============================================================
@@ -661,7 +658,7 @@ export class ReverbEffect {
 export class MUSoundManager {
     constructor(options = {}) {
         this.baseUrl = options.baseUrl || (typeof window !== 'undefined' && window.__MU_ASSET_BASE__) || 'http://localhost:9100/';
-        this.remoteAssets = RemoteAssets;
+        this.remoteAssets = new RemoteAssets();
         this.remoteAssets.configure(this.baseUrl);
         
         // Audio Context

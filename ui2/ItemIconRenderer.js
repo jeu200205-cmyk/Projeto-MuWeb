@@ -844,9 +844,55 @@ const _iconCache = new Map();
 const _warned = new Set();
 const _inventoryRenderDataCache = new Map();
 const _iconInflight = new Map();
+const _slowIconJobs = [];
+const MAX_SLOW_ICON_JOBS = 64;
+
+// A missing physical BMD must not be parsed/uploaded again on every F3:14,
+// inventory refresh or three consecutive UI retries. Only deterministic
+// missing/corrupt-file outcomes are backed off; network/context errors retry.
+const _iconUnavailableUntil = new Map();
+const ICON_MISSING_RETRY_MS = 30000;
+let _iconAuthority = null;
+function syncIconAuthority() {
+    const current = RemoteAssets.authorityKey;
+    if (_iconAuthority !== current) {
+        // Canvas thumbnails and composed body-part render data are derived from
+        // one physical Data revision. Drop old decoded owners on a switch; old
+        // in-flight jobs are fenced by the authority checks in renderIcon3D.
+        _iconCache.clear();
+        _inventoryRenderDataCache.clear();
+        // Keep syncIconAuthority standalone for legacy source-extraction tests.
+        // In normal runtime the cache is always defined above.
+        if (typeof _iconUnavailableUntil !== 'undefined') _iconUnavailableUntil.clear();
+        _warned.clear();
+        _iconAuthority = current;
+    }
+    return current;
+}
+export function shouldRetryItemIconModel(type, level = 0) {
+    syncIconAuthority();
+    const path = itemModelPath(type, level);
+    return Boolean(path) && (_iconUnavailableUntil.get(path) || 0) <= performance.now();
+}
+
+export function iconPipelineDiagnostics() {
+    syncIconAuthority();
+    const now = performance.now();
+    return Object.freeze({
+        cached:_iconCache.size, inflight:_iconInflight.size,
+        queued:_iconQueue.length, active:_iconQueueActive,
+        missingPhysicalModels:[..._iconUnavailableUntil.entries()]
+            .filter(([,expires])=>expires>now).map(([path])=>path),
+        recentSlowJobs:_slowIconJobs.slice(),
+    });
+}
+
 const _iconQueue = [];
 let _iconQueueActive = 0;
-const ICON_COLD_CONCURRENCY = 2;
+// FIX150: WebGL icon capture and BMD composition use the same main thread
+// as world presentation. Never overlap two cold compositions during equipment
+// swaps; the in-flight cache still deduplicates repeated icons.
+const ICON_COLD_CONCURRENCY = 1;
 function nextUiFrame(){return new Promise((resolve)=>{if(typeof requestAnimationFrame==='function')requestAnimationFrame(()=>resolve());else setTimeout(resolve,0);});}
 function scheduleColdIcon(job){
     return new Promise((resolve,reject)=>{
@@ -857,7 +903,9 @@ function scheduleColdIcon(job){
 function pumpColdIconQueue(){
     while(_iconQueueActive<ICON_COLD_CONCURRENCY&&_iconQueue.length){
         const task=_iconQueue.shift();_iconQueueActive++;
-        Promise.resolve().then(task.job).then(task.resolve,task.reject).finally(async()=>{
+        // The first cold icon after an inventory change starts on the next
+        // animation frame, allowing the equipment state/UI to paint first.
+        nextUiFrame().then(task.job).then(task.resolve,task.reject).finally(async()=>{
             _iconQueueActive--;
             // R82 keeps at most two cold BMD/material compositions in flight.  This
             // overlaps asset decode/texture fetch without creating extra WebGL contexts;
@@ -934,12 +982,16 @@ export function pcInventoryHideSkinTextureOverride(type) {
 }
 
 async function loadInventoryRenderData(io, type, path) {
+    const authority = syncIconAuthority();
     const g = CAT(type);
     if (g < ITEM_HELM || g > ITEM_BOOTS) return io.loadBMD(path);
-    const key = `${RemoteAssets.baseUrl}:body:${type}:${path}`;
+    // A single asset-server URL can serve different verified Data revisions.
+    // Cache the physical authority, not just its transport URL.
+    const key = `${RemoteAssets.authorityKey}:body:${type}:${path}`;
     if (_inventoryRenderDataCache.has(key)) return _inventoryRenderDataCache.get(key);
     const job = (async()=>{
         const [player, raw] = await Promise.all([io.loadBMD('Player/Player.bmd'), io.fetchBinary(path)]);
+        if (authority !== RemoteAssets.authorityKey) throw new Error('Data authority changed during inventory BMD load');
         if (!player?.bones?.length || !raw) throw new Error(`body-part owner incompleto: ${path}`);
         const u8 = raw instanceof Uint8Array ? raw : new Uint8Array(raw);
         const part = parseBMD(u8);
@@ -961,7 +1013,9 @@ async function loadInventoryRenderData(io, type, path) {
     })();
     _inventoryRenderDataCache.set(key, job);
     try {
-        const data = await job; _inventoryRenderDataCache.set(key, data); return data;
+        const data = await job;
+        if (authority !== RemoteAssets.authorityKey) throw new Error('Data authority changed before inventory BMD publication');
+        _inventoryRenderDataCache.set(key, data); return data;
     } catch (e) { _inventoryRenderDataCache.delete(key); throw e; }
 }
 
@@ -1041,7 +1095,7 @@ export async function renderIcon3D(io, type, level = 0, size = 40, presentation 
     const iconW = Math.max(8, Math.round(typeof size === 'object' ? Number(size?.w || size?.width || 40) : Number(size || 40)));
     const iconH = Math.max(8, Math.round(typeof size === 'object' ? Number(size?.h || size?.height || iconW) : Number(size || 40)));
     const padding = Math.max(0, Math.min(128, Math.round(Number(presentation.iconPadding) || 0)));
-    const authority = RemoteAssets.baseUrl;
+    const authority = syncIconAuthority();
     const option1 = Number(presentation?.option1) || 0;
     const extOption = Number(presentation?.extOption) || 0;
     if (typeof io?.fetchBinary === 'function') await loadCustomItemPresentation(io.fetchBinary.bind(io));
@@ -1052,7 +1106,7 @@ export async function renderIcon3D(io, type, level = 0, size = 40, presentation 
         const attr = await itemAttributeFor(io.fetchBinary.bind(io), type);
         if (attr) twoHand = attr.twoHand === true;
     }
-    if (authority !== RemoteAssets.baseUrl) return null;
+    if (authority !== RemoteAssets.authorityKey) return null;
     const custom = customItemModelForType(type);
     const customColor = Array.isArray(presentation?.customColor)
         ? presentation.customColor
@@ -1069,6 +1123,7 @@ export async function renderIcon3D(io, type, level = 0, size = 40, presentation 
     }
 
     const path = itemModelPath(type, level);
+    if (path && (_iconUnavailableUntil.get(path) || 0) > performance.now()) return null;
     if (!path) {
         if (!_warned.has(`t:${type}`)) {
             _warned.add(`t:${type}`);
@@ -1078,6 +1133,9 @@ export async function renderIcon3D(io, type, level = 0, size = 40, presentation 
     }
 
     const job=scheduleColdIcon(async()=>{
+        const iconJobStart = performance.now();
+        const perfStages = {bmdFetchAndParseMs:0,rendererInitMs:0,materialPresentationMs:0,captureMs:0};
+        let perfT = iconJobStart;
         let renderer = null;
         try {
             const { MUModelRenderer } = await import('../assets/MUModelRenderer.js');
@@ -1085,6 +1143,8 @@ export async function renderIcon3D(io, type, level = 0, size = 40, presentation 
             // contrato real do renderer é initFromBMD(renderData) (o load(path)
             // é atalho p/ MUAssets.loadBMD + initFromBMD — MUModelRenderer:393).
             const bmd = await loadInventoryRenderData(io, type, path);
+            perfStages.bmdFetchAndParseMs = performance.now() - perfT;
+            perfT = performance.now();
             if (!bmd || !Array.isArray(bmd.meshes) || !bmd.meshes.length) throw new Error('BMD sem meshes');
 
             // Cena offscreen mínima (1 luz + fundo transparente), como o
@@ -1092,6 +1152,8 @@ export async function renderIcon3D(io, type, level = 0, size = 40, presentation 
             const scene = new THREE.Scene();
             renderer = new MUModelRenderer();
             await renderer.initFromBMD(bmd);
+            perfStages.rendererInitMs = performance.now() - perfT;
+            perfT = performance.now();
             applyInventoryBodyPose(renderer, type);
             const hideSkinSet = pcInventoryHideSkinMeshSet(type);
             const inventoryMeshFilter = hideSkinSet
@@ -1110,6 +1172,8 @@ export async function renderIcon3D(io, type, level = 0, size = 40, presentation 
                 dynamic: false,
                 meshFilter: inventoryMeshFilter,
             });
+            perfStages.materialPresentationMs = performance.now() - perfT;
+            perfT = performance.now();
             const issues = inventoryIconLoadIssues(renderer, inventoryMeshFilter);
             if (issues.length) throw new Error('ícone incompleto: ' + issues.join(', '));
             // ZzzInventory::RenderObjectScreen creates OBJECT Armor and sets
@@ -1179,17 +1243,38 @@ export async function renderIcon3D(io, type, level = 0, size = 40, presentation 
 
             cv.dataset.muCustomItemPosition = authoredPosition ? '1' : '0';
             cv.dataset.muCustomItemSize = Number.isFinite(authoredSize) ? String(authoredSize) : '';
-            if (authority !== RemoteAssets.baseUrl) return null;
+            if (authority !== RemoteAssets.authorityKey) return null;
+            _iconUnavailableUntil.delete(path);
             _iconCache.set(cacheKey, cv);
+            perfStages.captureMs = performance.now() - perfT;
             return cv;
         } catch (e) {
+            const message = String(e?.message || e);
+            // These are physical missing/corrupt owner outcomes, not a network
+            // timeout or WebGL context loss. Recheck after 30s or Data revision.
+            if (/body-part owner incompleto|body-part sem meshes|BMD sem meshes|asset ausente/i.test(message)) {
+                _iconUnavailableUntil.set(path, performance.now() + ICON_MISSING_RETRY_MS);
+            }
             if (!_warned.has(`e:${path}`)) {
                 _warned.add(`e:${path}`);
-                console.warn(`[ItemIcon] render falhou p/ ${path} — slot vazio (fail-closed): ${e.message}`);
+                console.warn(`[ItemIcon] render falhou p/ ${path} — slot vazio (fail-closed): ${message}`);
             }
             return null;
         } finally {
             renderer?.dispose?.();
+            const elapsed = performance.now() - iconJobStart;
+            // FIX151: capture physical composition stalls, without dumping
+            // every icon or masking actual BMD errors.
+            if (elapsed >= 50) {
+                const record = {type,level,path,iconSize:`${iconW}x${iconH}`,padding,
+                    durationMs:Math.round(elapsed),
+                    ...Object.fromEntries(Object.entries(perfStages).map(([k,v])=>[k,Math.round(v)]))};
+                _slowIconJobs.push(record);
+                if (_slowIconJobs.length > MAX_SLOW_ICON_JOBS) _slowIconJobs.shift();
+                // A cold asset fetch is wall time (await), not automatically a
+                // render-frame stall. Expose stages instead of conflating them.
+                if (elapsed >= 250) console.warn(`[PERF ITEM_ICON] type=${type} level=${level} model=${path} total=${record.durationMs}ms BMD=${record.bmdFetchAndParseMs} init=${record.rendererInitMs} material=${record.materialPresentationMs} capture=${record.captureMs}`);
+            }
         }
     });
     _iconInflight.set(cacheKey,job);

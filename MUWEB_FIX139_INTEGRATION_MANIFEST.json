@@ -1,0 +1,35 @@
+{
+  "checkpoint": "FIX139",
+  "parent": "FIX138",
+  "status": "DEVELOPMENT / NOT PROMOTED",
+  "promotedCentral": "FIX80",
+  "baseZipSha256": "bf74216424253277ae2fd1b0fef430948f0fd041ec8436f3905c1b3bcc3826a1",
+  "laneZipSha256": {
+    "MUWEB_LANE_ITEMS_LUA_FIX134_FROM_FIX138_2026-10-08_SAFE.zip": "2577db328236eaf3a0e8b31cb23ca64de7092601a234355304249e2fe039d825",
+    "MUWEB_LANE_MAPS_ENGINE_M138_FROM_FIX80_2026-10-08.zip": "5bd4d8a1350a186c8d56b8921b1b15d8fe811478240542c8a9558f591f6f220f",
+    "MUWEB_LANE_SKILLS_PROTOCOL_FIX136_FROM_FIX80_2026-10-08_SAFE.zip": "59ea9abd2e668830f76db72f7b4c6f6d75d9750cfd625305506e5582cff7b03c"
+  },
+  "changedRuntime": {
+    "game/PetSystem.js": "f1dea51eb33f9ec9cb1b950332415d43533ff2d64a0d29437c088057268bd85d",
+    "game/SharedPetSparkTexture.js": "bab2fa8c719587ca04a14533a12b9eea18b9982cad796dd0cd01a0f5e13ad419",
+    "world/TerrainObjectWorld.js": "7ecb74e9f524e784e5ba98cd12eee2fbb584dc4b471e997c4c1b51fd28e8842c",
+    "core/GameApp.js": "1bf0623ef12c9e1f313865348a4a772a9401e6c5a9cbdea9311d0e07b671af60",
+    "game/PlayerViewportManager.js": "e1a99581bea18d4baadfbd7df665220ab26d6d056eb36709c52f30f83cbfae58"
+  },
+  "dataAuthority": "C:\\clientepromax\\Nova pasta\\MuPromax 1.0.1\\Data",
+  "generatedTablesClean": false,
+  "verifyOnlyRc": 2,
+  "regenerateRc": 2,
+  "bootRc": 1,
+  "syntaxPass": 652,
+  "syntaxTotal": 652,
+  "abTests": 108,
+  "abBaselinePass": 87,
+  "abCandidatePass": 87,
+  "abNewRegressions": 0,
+  "batFiles": [
+    "DESLIGAR_WEB_R90.bat",
+    "INSTALAR_DEPENDENCIAS_R90.bat",
+    "LIGAR_WEB_R90_FIX139.bat"
+  ]
+}

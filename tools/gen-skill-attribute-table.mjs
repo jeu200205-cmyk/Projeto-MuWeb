@@ -3,14 +3,17 @@
 // BuxCode por registro (OpenSkillScript ZzzInfomation.cpp:256; SKILL_ATTRIBUTE
 // _struct.h:301-327, stride 80, 600 registros + DWORD checksum).
 import { readFileSync, writeFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
 
-const SRC = 'C:/clientepromax/Nova pasta/MuPromax 1.0.1/Data/Local/Por/skill_por.bmd';
+const require = createRequire(import.meta.url);
+const authority = require('./verify-data-authority-r90.cjs');
+const SRC = authority.validateOfficialSource('Local/Por/skill_por.bmd');
 const OUT = new URL('../skills/SkillAttributeData.js', import.meta.url);
 const BUX = [0xFC, 0xCF, 0xAB];
 const RECORD = 80, COUNT = 600;
 
 const b = readFileSync(SRC);
-if (b.length < RECORD * COUNT) throw new Error(`arquivo curto: ${b.length}`);
+if (b.length !== RECORD * COUNT + 4) throw new Error(`skill_por.bmd layout inesperado: ${b.length}, esperado ${RECORD*COUNT+4}`);
 
 const rows = [];
 for (let r = 0; r < COUNT; r++) {
@@ -77,6 +80,7 @@ export function decodeSkillAttributeRecord(src, offset = 0) {
     energy: dv[48] | (dv[49] << 8) | (dv[50] << 16) | (dv[51] << 24),
     masteryType: dv[54],
     skillUseType: dv[55],
+    magicIcon: dv[68] | (dv[69] << 8),
     typeSkill: dv[70],
   };
 }
@@ -84,8 +88,8 @@ export function decodeSkillAttributeRecord(src, offset = 0) {
 /** Porte de OpenSkillScript: decodifica o buffer inteiro do skill_*.bmd. */
 export function decodeSkillAttributeScript(buffer) {
   const src = buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer);
-  if (src.length < SKILL_ATTRIBUTE_STRIDE * SKILL_ATTRIBUTE_COUNT) {
-    throw new Error(\`skill.bmd curto: \${src.length} (mínimo \${SKILL_ATTRIBUTE_STRIDE * SKILL_ATTRIBUTE_COUNT})\`);
+  if (src.length !== SKILL_ATTRIBUTE_STRIDE * SKILL_ATTRIBUTE_COUNT + 4) {
+    throw new Error(\`skill_por.bmd oficial incompleto: \${src.length} (esperado \${SKILL_ATTRIBUTE_STRIDE * SKILL_ATTRIBUTE_COUNT + 4})\`);
   }
   const out = new Array(SKILL_ATTRIBUTE_COUNT).fill(null);
   for (let r = 0; r < SKILL_ATTRIBUTE_COUNT; r++) {
@@ -95,38 +99,26 @@ export function decodeSkillAttributeScript(buffer) {
   return out;
 }
 
-// Tabela embutida (fallback offline) — mesmos dados do arquivo real, extraída
-// em ${new Date().toISOString().slice(0, 10)}. No runtime o loader prefere o
-// arquivo vivo servido pelo asset-server (Local/Por/skill_por.bmd) e usa esta
-// tabela só se o fetch falhar (mesma origem, zero invenção).
+// Tabela gerada FISICAMENTE do skill_por.bmd oficial. Ela serve ao
+// ServerMagicList após o boot validar o manifesto SHA-256; não é fallback
+// para falhas de fetch do asset-server.
 export const SKILL_ATTRIBUTE_TABLE = ${JSON.stringify(rows, null, 1)};
 
-/** Loader REAL: tenta o skill_*.bmd do asset-server; fallback tabela embutida. */
+/** Loader fail-closed: uma única fonte oficial, sem alias ou tabela substituta. */
 let _loaded = null, _loading = null;
 export function loadSkillAttributes(fetchBinary) {
   if (_loaded) return Promise.resolve(_loaded);
   if (_loading) return _loading;
-  const candidates = ['Local/Por/skill_por.bmd', 'Local/por/skill_por.bmd', 'Local/Por/Skill_Por.bmd'];
   _loading = (async () => {
-    for (const path of candidates) {
-      try {
-        const buf = await fetchBinary(path);
-        if (!buf) continue;
-        const table = decodeSkillAttributeScript(buf);
-        const named = table.filter(Boolean).length;
-        if (named < 10) throw new Error(\`\${path}: só \${named} registros legíveis\`);
-        console.info(\`[SkillAttribute] tabela real carregada de \${path}: \${named} skills\`);
-        _loaded = table;
-        return table;
-      } catch (e) { /* tenta próximo candidato */ }
-    }
-    // Fallback: tabela embutida (mesma origem — arquivo real do cliente).
-    const table = new Array(SKILL_ATTRIBUTE_COUNT).fill(null);
-    for (const row of SKILL_ATTRIBUTE_TABLE) table[row.type] = row;
-    console.info('[SkillAttribute] fetch indisponível — tabela embutida (skill_por.bmd real) em uso');
+    const source = 'Local/Por/skill_por.bmd';
+    const buf = await fetchBinary(source);
+    if (!buf) throw new Error('[DATA AUTHORITY] skill_por.bmd oficial indisponível');
+    const table = decodeSkillAttributeScript(buf);
+    const named = table.filter(Boolean).length;
+    if (named < 10) throw new Error('[DATA AUTHORITY] skill_por.bmd oficial incompleto');
     _loaded = table;
     return table;
-  })();
+  })().catch((error) => { _loading = null; throw error; });
   return _loading;
 }
 `;

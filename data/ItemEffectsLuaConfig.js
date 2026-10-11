@@ -156,19 +156,6 @@ export function itemTypeToModelType(itemType) {
   return Number.isInteger(itemType) && itemType >= 0 ? ITEM_MODEL_BASE + itemType : null;
 }
 
-export function groundItemEffectRuntimeContract(info) {
-  if (!info) return null;
-  const thunder=(Number(info.effectType)|0)===3;
-  return Object.freeze({
-    owner:'EffectManager.cpp/MoveItems',
-    effectType:Number(info.effectType)|0,
-    cadenceTicks:thunder?6:24, cadenceMs:thunder?240:960,
-    logicalParticlesPerBurst:thunder?1000:2,
-    energyPointsPerBurst:thunder?500:0, glowPointsPerBurst:thunder?500:0,
-  });
-}
-
-
 /** PC ZzzCharacter ResolveRuneAuraDecision order: BodyPart[0..5], Weapon[0..1], Wing, Helper. */
 export function resolveRuneAuraForEquipment(attach, config) {
   const runne = config?.runneEffects;

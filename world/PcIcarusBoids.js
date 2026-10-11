@@ -42,51 +42,29 @@ async function loadSpearTexture() {
   })().catch(() => null);
   return spearTexturePromise;
 }
-function makeSpearBatchGeometry(count=SPEAR_COUNT) {
-  const samples=SPEAR_TAILS, vertsPerSample=4, vertsPerSpear=samples*vertsPerSample;
-  const totalVerts=count*vertsPerSpear;
-  const g=new THREE.BufferGeometry();
-  g.setAttribute('position',new THREE.BufferAttribute(new Float32Array(totalVerts*3),3));
-  g.setAttribute('color',new THREE.BufferAttribute(new Float32Array(totalVerts*3),3));
-  const uv=new Float32Array(totalVerts*2),idx=[];
-  for(let s=0;s<count;s++){
-    const vb=s*vertsPerSpear;
-    for(let i=0;i<samples;i++){
-      const v=i/Math.max(1,samples-1),o=(vb+i*4)*2;
-      uv[o]=0;uv[o+1]=v;uv[o+2]=1;uv[o+3]=v;uv[o+4]=0;uv[o+5]=v;uv[o+6]=1;uv[o+7]=v;
-    }
-    for(let i=0;i<samples-1;i++){
-      const a=vb+i*4,b=a+1,c=a+2,d=a+3,n=vb+(i+1)*4;
-      idx.push(a,b,n,b,n+1,n,c,d,n+2,d,n+3,n+2);
-    }
+function makeSpearRibbonGeometry() {
+  const g = new THREE.BufferGeometry();
+  // Two crossed retained faces, matching the 4 points authored by CreateTail.
+  const samples = SPEAR_TAILS;
+  const vertsPerSample = 4;
+  g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(samples * vertsPerSample * 3), 3));
+  const uv = new Float32Array(samples * vertsPerSample * 2);
+  for (let i = 0; i < samples; i++) {
+    const v = i / Math.max(1, SPEAR_TAILS - 1);
+    const o = i * 8;
+    uv[o] = 0; uv[o+1] = v; uv[o+2] = 1; uv[o+3] = v;
+    uv[o+4] = 0; uv[o+5] = v; uv[o+6] = 1; uv[o+7] = v;
   }
-  g.setAttribute('uv',new THREE.BufferAttribute(uv,2));g.setIndex(idx);
+  g.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
+  const idx = [];
+  for (let i = 0; i < samples - 1; i++) {
+    const a=i*4,b=a+1,c=a+2,d=a+3,n=(i+1)*4;
+    idx.push(a,b,n, b,n+1,n);       // horizontal face
+    idx.push(c,d,n+2, d,n+3,n+2);   // vertical face
+  }
+  g.setIndex(idx);
   return g;
 }
-function updateSpearBatch(spears,mesh){
-  if(!mesh)return;
-  const pa=mesh.geometry.attributes.position.array,ca=mesh.geometry.attributes.color.array;
-  const half=SPEAR_SCALE*.5,vertsPerSpear=SPEAR_TAILS*4;
-  let any=false;
-  for(let si=0;si<spears.length;si++){
-    const owner=spears[si],enabled=owner.live&&owner.budget&&owner.tails.length>0;
-    any ||= enabled;
-    const l=owner.point?.light||[.2,.2,.4];
-    for(let i=0;i<SPEAR_TAILS;i++){
-      const p=enabled?(owner.tails[i]||owner.tails[owner.tails.length-1]||owner.point):null;
-      const x=p?.x||0,y=p?.z||0,z=-(p?.y||0),vbase=si*vertsPerSpear+i*4,o=vbase*3;
-      const h=enabled?half:0;
-      pa[o]=x-h;pa[o+1]=y;pa[o+2]=z;pa[o+3]=x+h;pa[o+4]=y;pa[o+5]=z;
-      pa[o+6]=x;pa[o+7]=y-h;pa[o+8]=z;pa[o+9]=x;pa[o+10]=y+h;pa[o+11]=z;
-      for(let v=0;v<4;v++){const c=o+v*3;ca[c]=l[0];ca[c+1]=l[1];ca[c+2]=l[2];}
-    }
-  }
-  mesh.geometry.attributes.position.needsUpdate=true;mesh.geometry.attributes.color.needsUpdate=true;
-  mesh.visible=any;
-  // World-space ribbons span the whole Icarus sky. Do not force a per-tick O(N) bounds recompute.
-  mesh.frustumCulled=false;
-}
-
 function spearOrbitMu(target, worldTick, jointIndex) {
   // ZzzEffectJoint.cpp MODEL_SPEARSKILL subtype 1.
   let iFrame = worldTick;
@@ -105,6 +83,26 @@ function spearOrbitMu(target, worldTick, jointIndex) {
     z: target.z + 10 + vz * 140,
     light: [0.2, 0.2, 0.4 + 0.2 * sa],
   };
+}
+function updateSpearRibbon(owner) {
+  const attr = owner.mesh.geometry.attributes.position;
+  const a = attr.array;
+  const half = SPEAR_SCALE * 0.5;
+  // PC CreateTail stores four world-space corners per retained sample. The
+  // joint angle is zero in CreateDragon, so its local X/Z cross is retained.
+  for (let i = 0; i < SPEAR_TAILS; i++) {
+    const p = owner.tails[i] || owner.tails[owner.tails.length-1] || owner.point;
+    const x=p?.x||0, y=p?.z||0, z=-(p?.y||0); // MU -> Web
+    const o=i*12;
+    a[o]=x-half; a[o+1]=y; a[o+2]=z;
+    a[o+3]=x+half; a[o+4]=y; a[o+5]=z;
+    a[o+6]=x; a[o+7]=y-half; a[o+8]=z;
+    a[o+9]=x; a[o+10]=y+half; a[o+11]=z;
+  }
+  attr.needsUpdate = true;
+  owner.mesh.geometry.computeBoundingSphere();
+  const l=owner.point.light;
+  owner.mesh.material.color.setRGB(l[0],l[1],l[2]);
 }
 
 function heroMu(gameScene) {
@@ -140,13 +138,13 @@ export function createPcIcarusBoidsOwner(gameScene) {
   const spears = Array.from({ length: SPEAR_COUNT }, (_, j) => ({
     i: j + DRAGON_COUNT, jointIndex: -1, jointSlot: null, live: false,
     x: 0, y: 0, z: 0, angle: 0, velocity: 2.2, lifeTime: 240*40,
-    tails: [], point: {x:0,y:0,z:0,light:[.2,.2,.4]}, budget: false,
+    mesh: null, tails: [], point: {x:0,y:0,z:0,light:[.2,.2,.4]}, budget: false,
   }));
   // Desktop ZzzEffectJoint indexes the actual global JOINT slot in subtype-1 orbit.
   // Acquire all ten retained Icarus joints in creation order instead of using 0..9.
   for (const b of spears) { b.jointSlot=acquirePcJointSlot('MODEL_SPEARSKILL:1'); b.jointIndex=b.jointSlot.index; }
   group.userData.muPcSpearJointIndices=spears.map(b=>b.jointIndex);
-  let worldTick = 0, spearBatchMesh=null;
+  let worldTick = 0;
   let disposed = false, ready = false, acc = 0, elapsed = 0;
 
   function spawn(d, hero) {
@@ -216,12 +214,13 @@ export function createPcIcarusBoidsOwner(gameScene) {
                     * Math.sin((17732 + iFrame + b.i * 5161) * 0.0003);
     b.lifeTime -= 1;
     if (Math.hypot(b.x-hero.x,b.y-hero.y) >= 1500 || ri(5120) === 0) {
-      b.live = false; b.tails.length = 0; return;
+      b.live = false; b.tails.length = 0; if (b.mesh) b.mesh.visible = false; return;
     }
     const q = spearOrbitMu(b, worldTick, b.jointIndex);
     b.point = q;
     b.tails.unshift({x:q.x,y:q.y,z:q.z});
     if (b.tails.length > SPEAR_TAILS) b.tails.length = SPEAR_TAILS;
+    if (b.mesh) { b.mesh.visible = true; updateSpearRibbon(b); }
   }
 
   function tick() {
@@ -247,7 +246,6 @@ export function createPcIcarusBoidsOwner(gameScene) {
       d.outer.visible = true;
     }
     for (const b of spears) tickSpear(b, hero);
-    updateSpearBatch(spears,spearBatchMesh);
   }
 
   void MUAssets.loadBMD(DRAGON_BMD).then(async (bmd) => {
@@ -280,15 +278,21 @@ export function createPcIcarusBoidsOwner(gameScene) {
     if (!hero) return;
     for (const b of spears) {
       if (!tryAcquirePcParticle()) { group.userData.muPcSpearBudgetDrops = (group.userData.muPcSpearBudgetDrops || 0) + 1; continue; }
-      b.budget = true; spawnSpear(b,hero);
+      b.budget = true;
+      const geometry = makeSpearRibbonGeometry();
+      const material = new THREE.MeshBasicMaterial({
+        map:texture, color:new THREE.Color(.2,.2,.4), transparent:true, opacity:1,
+        depthTest:true, depthWrite:false, side:THREE.DoubleSide,
+        blending:THREE.AdditiveBlending, toneMapped:false,
+      });
+      const mesh = new THREE.Mesh(geometry,material);
+      mesh.frustumCulled = false; mesh.renderOrder = 6; mesh.visible = false;
+      mesh.name = `Icarus_SpearJoint_${b.i}`;
+      mesh.userData.muPcOwner = 'CreateJoint(MODEL_SPEARSKILL, subtype1, scale25)';
+      mesh.userData.muPcTexType = 'BITMAP_JOINT_SPIRIT';
+      mesh.userData.muPcMaxTails = SPEAR_TAILS;
+      b.mesh = mesh; group.add(mesh); spawnSpear(b,hero);
     }
-    const geometry=makeSpearBatchGeometry(SPEAR_COUNT);
-    const material=new THREE.MeshBasicMaterial({map:texture,vertexColors:true,transparent:true,opacity:1,depthTest:true,depthWrite:false,side:THREE.DoubleSide,blending:THREE.AdditiveBlending,toneMapped:false});
-    spearBatchMesh=new THREE.Mesh(geometry,material);spearBatchMesh.frustumCulled=false;spearBatchMesh.renderOrder=6;spearBatchMesh.visible=false;
-    spearBatchMesh.name='Icarus_SpearJoint_Batch10';
-    spearBatchMesh.userData.muPcOwner='10x CreateJoint(MODEL_SPEARSKILL, subtype1, scale25) batched transport';
-    spearBatchMesh.userData.muPcLogicalJointCount=SPEAR_COUNT;spearBatchMesh.userData.muPcMaxTails=SPEAR_TAILS;
-    group.add(spearBatchMesh);updateSpearBatch(spears,spearBatchMesh);
   }).catch((e)=>{ group.userData.muPcSpearTextureMissing = `${SPEAR_TEXTURE}: ${e?.message || e}`; });
 
   group.userData.update = (dt) => {
@@ -313,9 +317,10 @@ export function createPcIcarusBoidsOwner(gameScene) {
       for (const d of dragons) { try { d.renderer?.dispose?.(); } catch {} d.renderer = null; d.outer = null; }
       for (const b of spears) {
         b.live=false; b.tails.length=0; releasePcJointSlot(b.jointSlot); b.jointSlot=null;
-        if (b.budget) releasePcParticle(); b.budget=false;
+        if (b.mesh) { try { b.mesh.geometry?.dispose?.(); b.mesh.material?.dispose?.(); } catch {} }
+        if (b.budget) releasePcParticle();
+        b.mesh=null; b.budget=false;
       }
-      if(spearBatchMesh){try{spearBatchMesh.geometry?.dispose?.();spearBatchMesh.material?.dispose?.();}catch{}spearBatchMesh=null;}
       group.clear();
     },
   };

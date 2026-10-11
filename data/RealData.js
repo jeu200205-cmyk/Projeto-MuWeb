@@ -1,12 +1,15 @@
 /**
- * RealData.js — Ponte para dados REAIS do cliente MuPromax 1.0.2 e do servidor
- * (web-port/data/generated/*.js, gerados por tools/generateRealData.mjs e
- * tools/generateMonsterData.mjs). Monstros: nome PT do Npcname + stats REAIS
- * do Monster.txt do GameServer (C:\ms). Sem fallback inventado.
+ * RealData.js — bridge for tables physically generated from the ONLY permitted
+ * client asset authority: C:\clientepromax\Nova pasta\MuPromax 1.0.1\Data.
+ *
+ * No guessed, remembered, or alternate-client Data is accepted. The startup
+ * verify-only manifest gate owns provenance and hashes; this bridge refuses
+ * missing/empty generated tables instead of falling back to unrelated content.
+ * Monster combat statistics are a separate GameServer authority, never an
+ * alternate source for client BMD names, map entries, or item indices.
  */
 
-import { ITEM_DB, ITEM_TYPES } from './ItemTypes.js';
-import { MAPS } from '../world/MapData.js';
+import { ITEM_TYPES } from './ItemTypes.js';
 import { REAL_ITEMS } from './generated/RealItems.js';
 import { REAL_MONSTERS } from './generated/RealMonsters.js';
 import { REAL_MAPS } from './generated/RealMaps.js';
@@ -31,49 +34,38 @@ const KIND_TO_ITEM_TYPE = {
   jewel_scroll: ITEM_TYPES.OTHER,
 };
 
-let INVENTED_MONSTERS = [];
-
-/**
- * Carrega a lista de monstros reais (stats do Monster.txt do servidor) sem
- * importar three estaticamente. Mantido p/ compatibilidade de call sites.
- */
-export async function preloadRealData() {
-  try {
-    const mod = await import('../game/Monster.js');
-    INVENTED_MONSTERS = Object.values(mod.MonsterTypes || {});
-  } catch {
-    INVENTED_MONSTERS = [];
+function requireOfficialRows(rows, table) {
+  if (!Array.isArray(rows) || rows.length === 0) {
+    throw new Error(`[DATA AUTHORITY] ${table} absent or empty; physical regeneration from official 1.0.1 required`);
   }
+  return rows;
+}
+
+/** Compatibility entrypoint. Never imports local MonsterTypes as a fallback. */
+export async function preloadRealData() {
   return getRealMonsterList().length;
 }
 
-/** Itens reais (nomes/índices de item_por.bmd) + stats inventados se o nome bate. */
+/** Names, slots and item indices are exclusively from the generated BMD. */
 export function getRealItemList() {
-  if (!Array.isArray(REAL_ITEMS) || REAL_ITEMS.length === 0) return ITEM_DB;
-  const byName = new Map(ITEM_DB.map((d) => [d.name, d]));
-  return REAL_ITEMS.map((it) => {
-    const invented = byName.get(it.name) || {};
-    return {
-      ...invented,
-      realIndex: it.index,
-      category: it.category,
-      typeId: invented.typeId,
-      name: it.name,
-      type: KIND_TO_ITEM_TYPE[it.kind] || ITEM_TYPES.OTHER,
-      isRealData: true,
-    };
-  });
+  return requireOfficialRows(REAL_ITEMS, 'RealItems').map((it) => ({
+    realIndex: it.index,
+    typeId: it.index,
+    category: it.category,
+    slot: it.slot,
+    kind: it.kind,
+    name: it.name,
+    type: KIND_TO_ITEM_TYPE[it.kind] || ITEM_TYPES.OTHER,
+    isRealData: true,
+  }));
 }
 
-/** Monstros/NPCs reais: nome PT (Npcname) + stats REAIS do Monster.txt (GS). */
+/** Client NPC names/classes; GameServer stats may augment, never replace them. */
 export function getRealMonsterList() {
-  if (!Array.isArray(REAL_MONSTERS) || REAL_MONSTERS.length === 0) {
-    return INVENTED_MONSTERS.length ? INVENTED_MONSTERS : [];
-  }
-  return REAL_MONSTERS.map((m) => {
-    const stats = STATS_BY_CLASS.get(m.monsterClass) || {};
+  return requireOfficialRows(REAL_MONSTERS, 'RealMonsters').map((m) => {
+    const stats = STATS_BY_CLASS.get(m.monsterClass);
     return {
-      ...stats,
+      ...(stats || {}),
       id: m.monsterClass,
       name: m.name,
       isRealData: true,
@@ -81,16 +73,9 @@ export function getRealMonsterList() {
   });
 }
 
-/** Mapas reais (movereq_por.bmd) + campos de mundo inventados por nome. */
+/** Exact move-request table; no invented MAPS fallback on missing official BMD. */
 export function getRealMapList() {
-  if (!Array.isArray(REAL_MAPS) || REAL_MAPS.length === 0) {
-    return Object.values(MAPS);
-  }
-  const byName = new Map(
-    Object.values(MAPS).map((m) => [String(m.name).toLowerCase(), m])
-  );
-  return REAL_MAPS.map((m) => ({
-    ...(byName.get(m.name.toLowerCase()) || {}),
+  return requireOfficialRows(REAL_MAPS, 'RealMaps').map((m) => ({
     mapNumber: m.mapNumber,
     name: m.name,
     nameAlt: m.nameAlt,
