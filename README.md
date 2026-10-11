@@ -1,32 +1,30 @@
-# Projeto MuWeb — MU Online Main 5.2 → Web
+# Projeto MuWeb
 
-**Versão publicada:** R90 FIX154 (**candidata de desenvolvimento**, não homologada como portabilidade completa).
-
-Este repositório contém a **source Web** da portabilidade parcial. A Data do cliente e os serviços de jogo externos não estão incluídos. Código, efeitos, mapas, itens, pets e jogabilidade continuam em evolução; testes de código não equivalem à validação visual no cliente real.
+Portabilidade em desenvolvimento do **MU Online Main 5.2 para Web**. Este repositório disponibiliza a source Web ativa, preservando os módulos do jogo e a documentação técnica. A portabilidade ainda é parcial; o código publicado não implica homologação completa de mapas, modelos, efeitos ou jogabilidade.
 
 ## Executar no Windows
 
-1. Instale **Node.js com npm** e extraia a source preservando suas pastas.
-2. Execute `INSTALAR_DEPENDENCIAS.bat` na raiz, caso as dependências ainda não estejam instaladas.
-3. Execute `INICIAR_MUWEB.bat` para verificar a source e iniciar o runtime.
-4. Para encerrar o runtime iniciado pela source, use `PARAR_MUWEB.bat`.
+1. Instale o Node.js com npm.
+2. Extraia a source completa e configure os dados compatíveis do cliente e os servidores externos.
+3. Execute `INSTALAR_DEPENDENCIAS.bat` caso as dependências ainda não estejam instaladas.
+4. Inicie com `INICIAR_MUWEB.bat` e encerre com `PARAR_MUWEB.bat`.
 
-O inicializador atual exige a Data compatível em `C:\clientepromax\Nova pasta\MuPromax 1.0.1\Data` no PC Windows. Esse caminho é uma configuração atual da source: não é criado pelo GitHub. O GameServer e os demais serviços externos devem ser configurados separadamente.
+O cliente usa a Data configurada pelo inicializador da source atual. Data, GameServer e outros serviços externos **não** estão incluídos neste repositório.
 
 ## Organização
 
 | Caminho | Conteúdo |
 | --- | --- |
-| `core/`, `game/`, `world/`, `graphics/`, `assets/` | Engine, gameplay, mapas e renderização |
-| `ui/`, `ui2/`, `data/`, `skills/` | Interface, dados, Lua e skills |
-| `network/`, `protocol/`, `database/` | Rede e protocolos |
-| `tools/` | Inicialização, verificação e ferramentas necessárias |
-| `docs/` | Documentação técnica e pendências |
-| `CHANGELOG.md` | Histórico acumulativo da publicação |
-| `RELEASE_CURRENT.txt` | Versão/estado atual |
+| `core/`, `world/`, `assets/`, `graphics/` | Engine, terreno, modelos e renderização |
+| `game/`, `data/`, `skills/` | Gameplay, entidades, itens e habilidades |
+| `ui/`, `ui2/`, `social/` | Interface e controles |
+| `network/`, `protocol/`, `database/` | Comunicação e protocolos |
+| `tools/` | Ferramentas de preparação, execução e verificação |
+| `docs/` | Documentação e itens pendentes |
+| `CHANGELOG.md` | Histórico **acumulativo** de alterações |
 
-A raiz contém apenas os pontos de entrada, metadados e arquivos indispensáveis. Capturas de depuração, manifestos históricos e cópias versionadas não devem ser publicados como source ativa.
+## Atualizações
 
-## Estado e validação
+O código é publicado com nomes de entrada estáveis e commits descritivos, sem usar a numeração interna de desenvolvimento como título da publicação. Consulte o [changelog](CHANGELOG.md) para acompanhar as alterações, incluindo o histórico anterior, e `docs/ENGINE/12_REMAINING_PORTS.md` para ver pendências registradas.
 
-A versão FIX154 contém verificadores como `tools/verify-fix154-runtime.mjs` e o runtime `tools/serve.mjs`. A validação física com WebGL, dados completos e GameServer permanece necessária. Consulte [pendências de portabilidade](docs/ENGINE/12_REMAINING_PORTS.md) antes de considerar um subsistema concluído.
+Para atestar correção visual, FPS, modelos, movimentação e conexão, ainda é necessário testar a source com dados reais no ambiente de execução.

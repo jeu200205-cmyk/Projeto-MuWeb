@@ -4,6 +4,18 @@ Base do projeto: **MU Online Main 5.2 do Dinho**.
 
 ---
 
+
+## 11/10/2026 — Apresentação pública simplificada
+
+**Resumo:** a página inicial agora apresenta apenas o Projeto MuWeb, sem destacar números internos de correção. O resumo da source usa nomes estáveis e o changelog anterior permanece preservado.
+
+### Documentação
+- `README.md`: reorganizado para acesso simples às instruções, diretórios e histórico.
+- `RELEASE_CURRENT.txt`: estado genérico, sem numeração interna.
+- `CHANGELOG.md`: novo registro acumulado; histórico anterior mantido.
+
+---
+
 ## 11/10/2026 — Limpeza da publicação e organização (R90 FIX154)
 
 ### Resumo

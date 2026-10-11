@@ -1,11 +1,12 @@
-MUWEB R90 FIX154 — candidato de desenvolvimento
+MUWEB — SOURCE WEB ATUAL
 
-Publicação pública: source Web parcial do MU Online Main 5.2.
-Entrada: INICIAR_MUWEB.bat
-Dependências: INSTALAR_DEPENDENCIAS.bat
+Projeto: MU Online Main 5.2 para Web
+Estado: portabilidade parcial em desenvolvimento
+Inicializador: INICIAR_MUWEB.bat
+Instalador: INSTALAR_DEPENDENCIAS.bat
 Encerramento: PARAR_MUWEB.bat
-Verificação: tools/verify-fix154-runtime.mjs
-Runtime: tools/serve.mjs
-Data requerida no estado atual: C:\clientepromax\Nova pasta\MuPromax 1.0.1\Data
-GameServer e Data não estão incluídos neste repositório.
-Validação física WebGL/GameServer e portabilidade completa ainda pendentes.
+Documentação: README.md e docs/
+Histórico acumulativo: CHANGELOG.md
+
+Data do cliente e GameServer externos não incluídos.
+Renderização, gameplay e desempenho requerem validação física.
